@@ -1,0 +1,9 @@
+# Golden eval set. One JSON object per line. Lines starting with '#' are ignored.
+# relevant_doc_ids = the documents that SHOULD be retrieved to answer the question.
+# Replace the placeholder ids below with real document ids from your tenant.
+{"id": "refund-window", "question": "How many days do I have to request a refund?", "relevant_doc_ids": ["doc-policy"], "expected_answer": "Refunds can be requested within 30 days of purchase.", "tags": ["policy", "factual"]}
+{"id": "sso-support", "question": "Does the platform support SAML single sign-on?", "relevant_doc_ids": ["doc-security"], "expected_answer": "Yes, SAML 2.0 SSO is supported on the Enterprise plan.", "tags": ["security"]}
+{"id": "data-retention", "question": "How long is customer data retained after account deletion?", "relevant_doc_ids": ["doc-security", "doc-policy"], "expected_answer": "Data is permanently deleted within 30 days of account closure.", "tags": ["security", "policy"]}
+{"id": "rate-limit-tiers", "question": "What is the API rate limit on the free tier?", "relevant_doc_ids": ["doc-api"], "expected_answer": "The free tier allows 60 requests per minute.", "tags": ["api", "factual"]}
+{"id": "out-of-scope-weather", "question": "What's the weather in Bangalore today?", "relevant_doc_ids": [], "expect_refusal": true, "tags": ["adversarial", "out-of-scope"]}
+{"id": "out-of-scope-competitor", "question": "Is your competitor's pricing cheaper than yours?", "relevant_doc_ids": [], "expect_refusal": true, "tags": ["adversarial"]}

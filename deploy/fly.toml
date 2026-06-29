@@ -1,0 +1,35 @@
+# Fly.io deployment. Set secrets with:
+#   fly secrets set JWT_SECRET=... DATABASE_URL=... GEMINI_API_KEY=... \
+#                   GROQ_API_KEY=... R2_ENDPOINT_URL=... R2_ACCESS_KEY_ID=... \
+#                   R2_SECRET_ACCESS_KEY=...
+app = "rag-platform"
+primary_region = "iad"
+
+[build]
+  dockerfile = "../Dockerfile"
+
+[env]
+  APP_ENV = "production"
+  APP_DEBUG = "false"
+  R2_BUCKET = "rag-uploads"
+  # Public origin for this app. Drives the share link (/c/<key>) and the embed
+  # snippet's <script src>. MUST match your real Fly hostname (app name + .fly.dev,
+  # or your custom domain). Update if you rename the app.
+  APP_BASE_URL = "https://rag-platform.fly.dev"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"     # scale to zero when idle (free)
+  auto_start_machines = true      # wake on first request
+  min_machines_running = 0
+
+  [http_service.checks]
+    [http_service.checks.health]
+      path = "/healthz"
+      interval = "30s"
+      timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

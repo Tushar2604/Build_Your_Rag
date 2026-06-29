@@ -1,0 +1,35 @@
+# Render free-tier blueprint. Create the service from this file, then set the
+# secret env vars (JWT_SECRET, GEMINI_API_KEY, GROQ_API_KEY, R2_*) in the
+# dashboard. Point DATABASE_URL at a Neon free database.
+services:
+  - type: web
+    name: rag-platform
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      # Public origin for this app — drives the share link (/c/<key>) and the
+      # embed snippet's <script src>. Set this to your actual Render URL
+      # (https://<service-name>.onrender.com) or your custom domain.
+      - key: APP_BASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: R2_ENDPOINT_URL
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        value: rag-uploads

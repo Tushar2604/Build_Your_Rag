@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: "Inter", system-ui, sans-serif;
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+  * { @apply box-border; }
+}
+
+@layer components {
+  /* ── Buttons ── */
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+           transition-colors focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-brand-500 focus-visible:ring-offset-2
+           disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary   { @apply btn bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800; }
+  .btn-secondary { @apply btn border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 active:bg-gray-100; }
+  .btn-danger    { @apply btn bg-red-600 text-white hover:bg-red-700 active:bg-red-800; }
+  .btn-ghost     { @apply btn text-gray-600 hover:bg-gray-100 hover:text-gray-900; }
+
+  /* ── Form controls ── */
+  .input {
+    @apply block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm
+           placeholder:text-gray-400 focus:border-brand-500 focus:outline-none
+           focus:ring-2 focus:ring-brand-500/20 disabled:bg-gray-50 disabled:text-gray-500;
+  }
+  .label { @apply block text-sm font-medium text-gray-700 mb-1; }
+
+  /* ── Surface ── */
+  .card { @apply rounded-xl border border-gray-200 bg-white shadow-sm; }
+
+  /* ── Badges / Pills ── */
+  .badge { @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium; }
+  .badge-live    { @apply badge bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200; }
+  .badge-draft   { @apply badge bg-gray-100 text-gray-600; }
+  .badge-paused  { @apply badge bg-amber-50 text-amber-700 ring-1 ring-amber-200; }
+  .badge-error   { @apply badge bg-red-50 text-red-700 ring-1 ring-red-200; }
+
+  /* ── Status dot ── */
+  .dot-live   { @apply inline-block w-1.5 h-1.5 rounded-full bg-emerald-500; }
+  .dot-draft  { @apply inline-block w-1.5 h-1.5 rounded-full bg-gray-400; }
+  .dot-paused { @apply inline-block w-1.5 h-1.5 rounded-full bg-amber-500; }
+  .dot-error  { @apply inline-block w-1.5 h-1.5 rounded-full bg-red-500; }
+
+  /* ── Page layout ── */
+  .page       { @apply max-w-6xl mx-auto px-6 py-8; }
+  .page-sm    { @apply max-w-3xl mx-auto px-6 py-8; }
+  .page-title { @apply text-xl font-semibold text-gray-900 tracking-tight; }
+  .section-title { @apply text-sm font-semibold text-gray-900; }
+
+  /* ── Tab bar ── */
+  .tab-bar  { @apply flex border-b border-gray-200 gap-1; }
+  .tab-item {
+    @apply px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700
+           border-b-2 border-transparent -mb-px cursor-pointer transition-colors
+           focus-visible:outline-none;
+  }
+  .tab-item-active { @apply tab-item border-brand-600 text-brand-700; }
+
+  /* ── Skeleton shimmer ── */
+  .skeleton {
+    @apply rounded bg-gray-100 animate-shimmer;
+    background-image: linear-gradient(90deg, #f3f4f6 25%, #e9eaec 50%, #f3f4f6 75%);
+    background-size: 200% 100%;
+  }
+
+  /* ── Code / mono ── */
+  .code-block {
+    @apply rounded-lg bg-gray-950 text-gray-100 text-xs font-mono p-4 overflow-x-auto
+           whitespace-pre-wrap break-all leading-relaxed;
+  }
+
+  /* ── Table ── */
+  .data-table       { @apply w-full text-sm; }
+  .data-table thead { @apply border-b border-gray-100 bg-gray-50/60; }
+  .data-table th    { @apply text-left text-xs font-medium text-gray-500 px-4 py-3; }
+  .data-table td    { @apply px-4 py-3 text-gray-700; }
+  .data-table tbody tr { @apply border-b border-gray-50 hover:bg-gray-50/60 transition-colors; }
+  .data-table tbody tr:last-child { @apply border-b-0; }
+
+  /* ── Metric card ── */
+  .metric-card       { @apply card p-5; }
+  .metric-card-value { @apply text-2xl font-semibold text-gray-900 mt-1 tabular-nums; }
+  .metric-card-label { @apply text-xs font-medium text-gray-500 uppercase tracking-wide; }
+  .metric-card-hint  { @apply text-xs text-gray-400 mt-0.5; }
+
+  /* ── Empty state ── */
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-20 text-center;
+  }
+  .empty-state-title { @apply text-sm font-medium text-gray-700 mt-4; }
+  .empty-state-desc  { @apply text-sm text-gray-400 mt-1 max-w-xs; }
+}

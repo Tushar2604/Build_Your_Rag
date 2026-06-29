@@ -1,0 +1,175 @@
+import { useEffect, useRef, useState, FormEvent } from "react";
+import { useParams } from "react-router-dom";
+import {
+  getPublicConfig,
+  createPublicSession,
+  streamPublic,
+  PublicConfig,
+  PublicCitation,
+} from "../api/public";
+
+interface ChatMessage {
+  role: "user" | "bot";
+  content: string;
+  citations?: PublicCitation[];
+}
+
+export default function WidgetChatPage() {
+  const { publicKey = "" } = useParams();
+  const [config, setConfig] = useState<PublicConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const sessionRef = useRef<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    getPublicConfig(publicKey)
+      .then((c) => {
+        setConfig(c);
+        setMessages([{ role: "bot", content: c.widget.welcome_message }]);
+      })
+      .catch((e) => setError(e.message));
+  }, [publicKey]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages]);
+
+  async function send(e: FormEvent) {
+    e.preventDefault();
+    const text = input.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setInput("");
+    setMessages((m) => [...m, { role: "user", content: text }, { role: "bot", content: "" }]);
+
+    try {
+      if (!sessionRef.current) sessionRef.current = await createPublicSession(publicKey);
+      let pendingCitations: PublicCitation[] = [];
+      streamPublic(publicKey, sessionRef.current, text, {
+        onCitations: (c) => {
+          pendingCitations = c;
+        },
+        onToken: (tok) =>
+          setMessages((m) => {
+            const copy = [...m];
+            copy[copy.length - 1] = {
+              ...copy[copy.length - 1],
+              content: copy[copy.length - 1].content + tok,
+            };
+            return copy;
+          }),
+        onError: (msg) => {
+          setMessages((m) => {
+            const copy = [...m];
+            copy[copy.length - 1] = { role: "bot", content: msg || "Something went wrong." };
+            return copy;
+          });
+          setBusy(false);
+        },
+        onDone: () => {
+          setMessages((m) => {
+            const copy = [...m];
+            copy[copy.length - 1] = { ...copy[copy.length - 1], citations: pendingCitations };
+            return copy;
+          });
+          setBusy(false);
+        },
+      });
+    } catch (err) {
+      setMessages((m) => {
+        const copy = [...m];
+        copy[copy.length - 1] = { role: "bot", content: (err as Error).message };
+        return copy;
+      });
+      setBusy(false);
+    }
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-gray-900">Chatbot unavailable</p>
+          <p className="text-sm text-gray-500 mt-1">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!config) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-sm text-gray-400">
+        Loading…
+      </div>
+    );
+  }
+
+  const theme = config.widget.theme_color;
+
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-100">
+      <header
+        className="px-5 py-4 text-white shadow-sm"
+        style={{ backgroundColor: theme }}
+      >
+        <h1 className="text-base font-semibold">{config.widget.display_name || config.name}</h1>
+      </header>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="mx-auto max-w-2xl flex flex-col gap-3">
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={m.role === "user" ? "self-end max-w-[80%]" : "self-start max-w-[80%]"}
+            >
+              <div
+                className={
+                  m.role === "user"
+                    ? "rounded-2xl rounded-br-sm px-4 py-2.5 text-white text-sm whitespace-pre-wrap"
+                    : "rounded-2xl rounded-bl-sm px-4 py-2.5 bg-white border border-gray-200 text-gray-800 text-sm whitespace-pre-wrap"
+                }
+                style={m.role === "user" ? { backgroundColor: theme } : undefined}
+              >
+                {m.content || (busy && i === messages.length - 1 ? "…" : "")}
+              </div>
+              {m.citations && m.citations.length > 0 && (
+                <details className="mt-1 text-xs text-gray-400">
+                  <summary className="cursor-pointer">{m.citations.length} source(s)</summary>
+                  {m.citations.map((c, j) => (
+                    <p key={j} className="mt-1 rounded bg-gray-50 border border-gray-200 px-2 py-1 text-gray-500">
+                      {c.snippet}
+                    </p>
+                  ))}
+                </details>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <form onSubmit={send} className="border-t border-gray-200 bg-white px-4 py-3">
+        <div className="mx-auto max-w-2xl flex gap-2">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Type a message…"
+            className="flex-1 rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+            style={{ ["--tw-ring-color" as string]: theme }}
+          />
+          <button
+            type="submit"
+            disabled={busy || !input.trim()}
+            className="rounded-xl px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: theme }}
+          >
+            Send
+          </button>
+        </div>
+        <p className="text-center text-[10px] text-gray-300 mt-2">Powered by RAG Platform</p>
+      </form>
+    </div>
+  );
+}
