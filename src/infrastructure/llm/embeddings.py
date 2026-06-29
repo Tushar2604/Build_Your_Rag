@@ -19,41 +19,41 @@ class GeminiEmbedder:
         self._model = settings.embedding_model
         self._dim = settings.embedding_dim
         self._api_key = settings.gemini_api_key
-        self._configured = False
+        self._client = None
 
     @property
     def dim(self) -> int:
         return self._dim
 
     def _ensure(self) -> None:
-        if self._configured:
+        if self._client is not None:
             return
         if not self._api_key:
             raise RuntimeError(
                 "GEMINI_API_KEY is not set — add it to .env to enable embeddings."
             )
-        import google.generativeai as genai
+        from google import genai
 
-        genai.configure(api_key=self._api_key)
-        self._genai = genai
-        self._configured = True
+        self._client = genai.Client(api_key=self._api_key)
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [await self._embed_one(t, "retrieval_document") for t in texts]
+        return [await self._embed_one(t, "RETRIEVAL_DOCUMENT") for t in texts]
 
     async def embed_query(self, text: str) -> list[float]:
-        return await self._embed_one(text, "retrieval_query")
+        return await self._embed_one(text, "RETRIEVAL_QUERY")
 
     @retry(stop=stop_after_attempt(4), wait=wait_exponential(min=1, max=20))
     async def _embed_one(self, text: str, task_type: str) -> list[float]:
         self._ensure()
 
         def _call() -> list[float]:
-            resp = self._genai.embed_content(
-                model=f"models/{self._model}",
-                content=text,
-                task_type=task_type,
+            from google.genai import types
+
+            result = self._client.models.embed_content(
+                model=self._model,
+                contents=text,
+                config=types.EmbedContentConfig(task_type=task_type),
             )
-            return list(resp["embedding"])
+            return list(result.embeddings[0].values)
 
         return await asyncio.to_thread(_call)

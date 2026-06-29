@@ -84,20 +84,25 @@ class GeminiProvider:
 
     def _ensure(self):  # type: ignore[no-untyped-def]
         if not self._configured:
-            import google.generativeai as genai
+            from google import genai
 
-            genai.configure(api_key=self._api_key)
-            self._genai = genai
+            self._client = genai.Client(api_key=self._api_key)
             self._configured = True
-        return self._genai
+        return self._client
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def generate(self, system: str, user: str) -> LLMResult:
-        genai = self._ensure()
+        client = self._ensure()
 
         def _call() -> str:
-            model = genai.GenerativeModel(self._model, system_instruction=system)
-            return model.generate_content(user).text
+            from google.genai import types
+
+            response = client.models.generate_content(
+                model=self._model,
+                contents=user,
+                config=types.GenerateContentConfig(system_instruction=system),
+            )
+            return response.text
 
         text = await asyncio.to_thread(_call)
         tokens = _estimate_tokens(system, user, text)
@@ -106,14 +111,18 @@ class GeminiProvider:
     async def stream(
         self, system: str, user: str, on_provider: Callable[[str], None] | None = None
     ) -> AsyncIterator[str]:
-        # Gemini's Python SDK streams synchronously; bridge it to async.
-        genai = self._ensure()
+        client = self._ensure()
         if on_provider:
             on_provider(self.name)
 
+        from google.genai import types
+
         def _start():  # type: ignore[no-untyped-def]
-            model = genai.GenerativeModel(self._model, system_instruction=system)
-            return model.generate_content(user, stream=True)
+            return client.models.generate_content_stream(
+                model=self._model,
+                contents=user,
+                config=types.GenerateContentConfig(system_instruction=system),
+            )
 
         stream = await asyncio.to_thread(_start)
         for chunk in stream:
