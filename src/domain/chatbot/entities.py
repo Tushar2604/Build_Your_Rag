@@ -10,7 +10,7 @@ from src.domain.shared.identifiers import ChatbotId, DocumentId, TenantId, new_i
 
 DEFAULT_SYSTEM_PROMPT = (
     "You are a document question-answering assistant. "
-    "Answer ONLY using the context provided below. "
+    "Answer using ONLY the provided context below. "
     "Do NOT use any knowledge from outside the provided context. "
     "If the context does not contain information relevant to the question, "
     "respond with: 'I can only answer questions about the provided documents. "
@@ -33,7 +33,7 @@ def generate_public_key() -> str:
 @dataclass
 class RetrievalConfig:
     top_k: int = 5
-    min_score: float = 0.65  # cosine similarity floor; 0 = no filter
+    min_score: float = 0.0  # cosine similarity floor; 0 = no filter
     rerank: bool = False     # phase-2 toggle
 
 
