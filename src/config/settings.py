@@ -57,14 +57,14 @@ class Settings(BaseSettings):
     # --- LLM providers ---
     gemini_api_key: str = ""
     groq_api_key: str = ""
-    embedding_model: str = "text-embedding-004"
+    embedding_model: str = "gemini-embedding-001"
     embedding_dim: int = 768
     # Generation backends. `primary` serves first; on failure the router fails
     # over to `secondary`. Set both to "ollama" for a fully local, key-free setup.
     generation_primary: Literal["groq", "gemini", "ollama"] = "groq"
     generation_secondary: Literal["groq", "gemini", "ollama"] = "gemini"
     groq_model: str = "llama-3.3-70b-versatile"
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-2.5-flash"
     # Local Ollama (https://ollama.com). Run `ollama pull qwen2.5` first.
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5"

@@ -45,6 +45,7 @@ class GeminiEmbedder:
             "model": f"models/{self._model}",
             "content": {"parts": [{"text": text}]},
             "taskType": task_type,
+            "outputDimensionality": self._dim,
         }
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(url, json=payload, params={"key": self._api_key})
