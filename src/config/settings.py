@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
     r2_bucket: str = "rag-uploads"
-    local_storage_dir: str = ".uploads"
+    local_storage_dir: str = "/tmp/uploads"
 
     # --- CORS ---
     cors_origins: list[str] = ["*"]
