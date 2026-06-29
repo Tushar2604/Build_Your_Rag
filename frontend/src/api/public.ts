@@ -66,19 +66,24 @@ export function streamPublic(
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        let evt = "";
-        for (const line of lines) {
-          if (line.startsWith("event:")) evt = line.slice(6).trim();
-          else if (line.startsWith("data:")) {
-            const data = line.slice(5).trim();
-            if (evt === "citations") handlers.onCitations?.(JSON.parse(data));
-            else if (evt === "token") handlers.onToken?.(data);
-            else if (evt === "error") handlers.onError?.("Generation failed.");
-            evt = "";
+        // Parse whole SSE events; never trim token data (spaces and newlines
+        // from the model are significant). Strip only one leading space after
+        // "data:" and rejoin multi-line data with "\n", per the SSE spec.
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        let sep: number;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const rawEvent = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          let evt = "message";
+          const dataLines: string[] = [];
+          for (const line of rawEvent.split("\n")) {
+            if (line.startsWith("event:")) evt = line.slice(6).replace(/^ /, "");
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
           }
+          const data = dataLines.join("\n");
+          if (evt === "citations") handlers.onCitations?.(JSON.parse(data));
+          else if (evt === "token") handlers.onToken?.(data);
+          else if (evt === "error") handlers.onError?.("Generation failed.");
         }
       }
       handlers.onDone?.();

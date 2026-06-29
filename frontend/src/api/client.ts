@@ -85,26 +85,42 @@ export function streamSSE(
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        // Parse complete SSE events (separated by a blank line). We must NOT
+        // trim token data: the model's whitespace (spaces between words, and
+        // newlines as their own tokens) is significant. Per the SSE spec we
+        // strip only a single leading space after "data:" and rejoin the
+        // event's multiple data lines with "\n".
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        let sep: number;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const rawEvent = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
 
-        let eventType = "";
-        for (const line of lines) {
-          if (line.startsWith("event:")) {
-            eventType = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
-            const data = line.slice(5).trim();
-            if (eventType === "citations") {
-              handlers.onCitations?.(JSON.parse(data) as CitationPayload[]);
-            } else if (eventType === "token") {
-              handlers.onToken?.(data);
-            } else if (eventType === "done") {
-              const parsed = JSON.parse(data) as { tokens_used: number };
-              handlers.onDone?.(parsed.tokens_used);
+          let eventType = "message";
+          const dataLines: string[] = [];
+          for (const line of rawEvent.split("\n")) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).replace(/^ /, "");
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).replace(/^ /, ""));
             }
-            eventType = "";
+          }
+          const data = dataLines.join("\n");
+
+          if (eventType === "citations") {
+            handlers.onCitations?.(JSON.parse(data) as CitationPayload[]);
+          } else if (eventType === "token") {
+            handlers.onToken?.(data);
+          } else if (eventType === "done") {
+            const parsed = JSON.parse(data) as { tokens_used: number };
+            handlers.onDone?.(parsed.tokens_used);
+          } else if (eventType === "error") {
+            try {
+              handlers.onError?.((JSON.parse(data) as { detail?: string }).detail ?? "Generation failed.");
+            } catch {
+              handlers.onError?.("Generation failed.");
+            }
           }
         }
       }

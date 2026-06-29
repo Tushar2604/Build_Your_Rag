@@ -74,7 +74,12 @@ class RagGraph:
 
     async def _assemble(self, state: RAGState) -> RAGState:
         bot = state["chatbot"]
-        floor = max(bot.retrieval.min_score, 0.65)
+        # Respect the chatbot's configured floor only. The previous hard-coded
+        # max(..., 0.65) silently overrode lower configs and emptied the context
+        # for most queries (gemini-embedding-001 cosine scores rarely clear
+        # 0.65), which made the model fall back to general knowledge. It also
+        # diverged from the streaming path, which filters solely in `search`.
+        floor = bot.retrieval.min_score
         relevant = [c for c in state.get("citations", []) if c.score >= floor]
         state["citations"] = relevant
         state["context"] = build_context(relevant)
