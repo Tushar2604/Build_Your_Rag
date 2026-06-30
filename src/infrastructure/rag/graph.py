@@ -20,6 +20,7 @@ from src.application.ports.repositories import ChunkRepository
 from src.application.ports.services import Embedder, LLMProvider
 from src.domain.chat.entities import Citation
 from src.domain.chatbot.entities import Chatbot
+from src.domain.safety.guardrails import build_grounded_prompt
 
 
 class RAGState(TypedDict, total=False):
@@ -87,7 +88,9 @@ class RagGraph:
 
     async def _generate(self, state: RAGState) -> RAGState:
         bot = state["chatbot"]
-        prompt = f"Context:\n{state['context']}\n\nQuestion: {state['question']}"
+        # Isolate untrusted context + question in labelled blocks (injection
+        # defence); pairs with the hardened grounding system prompt.
+        prompt = build_grounded_prompt(state["context"], state["question"])
         result = await self._llm.generate(bot.system_prompt, prompt)
         state["answer"] = result.text
         state["tokens_used"] = result.tokens_used

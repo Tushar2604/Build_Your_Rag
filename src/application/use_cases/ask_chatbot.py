@@ -17,10 +17,16 @@ import structlog
 
 from src.application.dtos import AnswerOutput, AskInput, CitationOut
 from src.application.ports.repositories import RequestLog, UnitOfWork
-from src.application.ports.services import Embedder, LLMProvider
+from src.application.ports.services import Embedder, LLMProvider, LLMResult
 from src.domain.chat.entities import Citation, Message, MessageRole
 from src.domain.chat.events import MessageAnswered
 from src.domain.chatbot.entities import Chatbot
+from src.domain.safety.guardrails import (
+    GUARD_REFUSAL,
+    build_grounded_prompt,
+    scan_input,
+    scan_output,
+)
 from src.domain.shared.errors import NotFoundError, QuotaExceededError
 from src.domain.shared.identifiers import SessionId, TenantId
 
@@ -105,22 +111,51 @@ class AskChatbot:
         citations = await self._retrieve(tenant_id, chatbot, data.message)
 
         # --- 3. Generate (NO transaction open — the slow call runs pool-free) ---
+        # Guardrails wrap the generation: screen the user message for injection,
+        # isolate untrusted text in labelled blocks, and screen the answer for
+        # system-prompt leakage. A high-risk verdict short-circuits to a refusal.
         context = _build_context(citations)
-        user_prompt = f"Context:\n{context}\n\nQuestion: {data.message}"
-        try:
-            result = await self._llm.generate(chatbot.system_prompt, user_prompt)
-        except Exception as exc:  # noqa: BLE001 - record the failed request, then surface it
-            await self._log_request(
-                tenant_id,
-                chatbot,
-                session_id,
-                data.message,
-                citations,
-                started,
-                status="error",
-                error=f"{type(exc).__name__}: {exc}",
+        user_prompt = build_grounded_prompt(context, data.message)
+
+        input_verdict = scan_input(data.message)
+        if not input_verdict.allowed:
+            log.warning(
+                "guardrail.input_blocked",
+                tenant_id=str(tenant_id),
+                categories=input_verdict.categories,
             )
-            raise
+            result = LLMResult(
+                text=GUARD_REFUSAL, tokens_used=0, provider="guardrail", model="guardrail"
+            )
+        else:
+            try:
+                result = await self._llm.generate(chatbot.system_prompt, user_prompt)
+            except Exception as exc:  # noqa: BLE001 - record the failed request, then surface it
+                await self._log_request(
+                    tenant_id,
+                    chatbot,
+                    session_id,
+                    data.message,
+                    citations,
+                    started,
+                    status="error",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
+
+            output_verdict = scan_output(result.text, system_prompt=chatbot.system_prompt)
+            if not output_verdict.allowed:
+                log.warning(
+                    "guardrail.output_blocked",
+                    tenant_id=str(tenant_id),
+                    categories=output_verdict.categories,
+                )
+                result = LLMResult(
+                    text=GUARD_REFUSAL,
+                    tokens_used=result.tokens_used,
+                    provider=result.provider,
+                    model=result.model,
+                )
 
         refused = result.text.strip().startswith(_REFUSAL_PREFIX)
 

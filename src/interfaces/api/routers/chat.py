@@ -6,6 +6,7 @@ import json
 import time
 import uuid
 
+import structlog
 from fastapi import APIRouter, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
@@ -13,9 +14,17 @@ from src.application.dtos import AskInput
 from src.application.ports.repositories import RequestLog
 from src.application.use_cases.ask_chatbot import AskChatbot
 from src.domain.chat.entities import ChatSession, Message, MessageRole
+from src.domain.safety.guardrails import (
+    GUARD_REFUSAL,
+    build_grounded_prompt,
+    scan_input,
+    scan_output,
+)
 from src.domain.shared.errors import QuotaExceededError
 from src.domain.shared.identifiers import ChatbotId, SessionId
 from src.infrastructure.rag.graph import RagGraph, build_context
+
+log = structlog.get_logger(__name__)
 from src.interfaces.api.deps import ContainerDep, PrincipalDep
 from src.interfaces.api.schemas import (
     AnswerResponse,
@@ -107,11 +116,21 @@ async def ask_stream(
         )
         await uow.commit()
 
+    # Input guardrail: screen for prompt injection BEFORE retrieval/generation.
+    # A high-risk message skips retrieval entirely (no embed call, no leaking
+    # which documents matched) and streams a single refusal.
+    input_verdict = scan_input(body.message)
+
     # Retrieval is read-only, so it runs through a proxy that opens its own
     # short transaction rather than holding one open for the whole stream.
-    graph = RagGraph(_ChunkRepoProxy(container), container.embedder, container.llm)
-    citations = await graph.retrieve_only(bot, body.message)
-    context = build_context(citations)
+    if input_verdict.allowed:
+        graph = RagGraph(_ChunkRepoProxy(container), container.embedder, container.llm)
+        citations = await graph.retrieve_only(bot, body.message)
+        context = build_context(citations)
+    else:
+        log.warning("guardrail.input_blocked", categories=input_verdict.categories)
+        citations = []
+        context = ""
 
     # Retrieval trace, fixed for this request — reused by the request log below.
     retrieved_payload = [
@@ -166,27 +185,43 @@ async def ask_stream(
         }
         # 2. stream tokens. Capture which backend actually served (failover-aware)
         # so the persisted answer carries an accurate provider for analytics.
-        prompt = f"Context:\n{context}\n\nQuestion: {body.message}"
+        # Untrusted text is isolated in labelled blocks (build_grounded_prompt).
+        prompt = "" if not input_verdict.allowed else build_grounded_prompt(context, body.message)
         full: list[str] = []
         served_by: dict[str, str] = {}
-        try:
-            async for token in container.llm.stream(
-                bot.system_prompt, prompt, on_provider=lambda name: served_by.__setitem__("provider", name)
-            ):
-                full.append(token)
-                yield {"event": "token", "data": token}
-        except Exception as exc:  # noqa: BLE001 - log the failed request, then end the stream
-            await _log(
-                status="error",
-                error=f"{type(exc).__name__}: {exc}",
-                provider=served_by.get("provider"),
-            )
-            yield {"event": "error", "data": json.dumps({"detail": "Generation failed."})}
-            return
+        if not input_verdict.allowed:
+            # Blocked input: stream the refusal instead of calling the model.
+            served_by["provider"] = "guardrail"
+            full.append(GUARD_REFUSAL)
+            yield {"event": "token", "data": GUARD_REFUSAL}
+        else:
+            try:
+                async for token in container.llm.stream(
+                    bot.system_prompt, prompt, on_provider=lambda name: served_by.__setitem__("provider", name)
+                ):
+                    full.append(token)
+                    yield {"event": "token", "data": token}
+            except Exception as exc:  # noqa: BLE001 - log the failed request, then end the stream
+                await _log(
+                    status="error",
+                    error=f"{type(exc).__name__}: {exc}",
+                    provider=served_by.get("provider"),
+                )
+                yield {"event": "error", "data": json.dumps({"detail": "Generation failed."})}
+                return
 
         answer_text = "".join(full)
         tokens_used = max(1, (len(bot.system_prompt) + len(prompt) + len(answer_text)) // 4)
-        refused = answer_text.strip().startswith("I can only answer questions about")
+        refused = not input_verdict.allowed or answer_text.strip().startswith(
+            "I can only answer questions about"
+        )
+        # Output guardrail. Tokens are already streamed, so on a leak we can't
+        # un-send — we flag it on the request log for triage and mark it refused.
+        if input_verdict.allowed:
+            output_verdict = scan_output(answer_text, system_prompt=bot.system_prompt)
+            if not output_verdict.allowed:
+                log.warning("guardrail.output_flagged", categories=output_verdict.categories)
+                refused = True
 
         # 3. persist assistant message + usage + request log
         assistant = Message(
