@@ -29,6 +29,8 @@ services:
       # --- Secrets you paste in the dashboard (Render won't store them in git) ---
       - key: DATABASE_URL          # Neon: postgresql://user:pass@host/db?sslmode=require
         sync: false
+      - key: OPENAI_API_KEY        # https://platform.openai.com/api-keys (primary)
+        sync: false
       - key: GEMINI_API_KEY        # https://aistudio.google.com/app/apikey
         sync: false
       - key: GROQ_API_KEY          # https://console.groq.com/keys
