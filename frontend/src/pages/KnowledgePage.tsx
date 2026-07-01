@@ -201,7 +201,7 @@ export default function KnowledgePage() {
         </svg>
         <p className="text-sm text-gray-600 font-medium">Drop files here to upload</p>
         <p className="text-xs text-gray-400 mt-1">
-          PDF, DOCX, TXT, MD, HTML · Max 50 MB per file ·{" "}
+          PDF, DOCX, TXT, MD, HTML · Max 100 MB per file ·{" "}
           <label className="text-brand-600 hover:text-brand-700 cursor-pointer font-medium">
             browse
             <input type="file" multiple accept=".pdf,.docx,.txt,.md,.html" className="sr-only"
