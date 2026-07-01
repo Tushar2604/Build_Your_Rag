@@ -32,7 +32,7 @@ class LLMResult:
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    """A single generation backend (Groq or Gemini)."""
+    """A single generation backend (OpenAI, Groq, Gemini, or Ollama)."""
 
     name: str
 

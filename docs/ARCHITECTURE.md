@@ -324,12 +324,14 @@ through the failover router. Covered in detail in [§14](#14-the-agent-system).
 - **embeddings.py** — `GeminiEmbedder`: calls the Gemini `embedContent` REST API
   directly (httpx, retry/backoff), with `RETRIEVAL_DOCUMENT` vs `RETRIEVAL_QUERY`
   task types and `outputDimensionality = embedding_dim` (768).
-- **providers.py** — `GroqProvider`, `GeminiProvider`, `OllamaProvider` (each
-  with `generate()` + token-streaming `stream()`), and the **`FailoverLLM`**
-  router that tries primary then secondary on any exception. Each leaf reports
-  its name through an `on_provider` callback so the persisted answer records the
-  backend that *actually* served (failover-aware analytics). `build_llm()` reads
-  `generation_primary` / `generation_secondary` from settings.
+- **providers.py** — `OpenAIProvider`, `GroqProvider`, `GeminiProvider`,
+  `OllamaProvider` (each with `generate()` + token-streaming `stream()`), and the
+  **`FailoverLLM`** router that walks an ordered chain, degrading to the next
+  backend on any exception. Each leaf reports its name through an `on_provider`
+  callback so the persisted answer records the backend that *actually* served
+  (failover-aware analytics). `build_llm()` reads `generation_primary` /
+  `generation_secondary` / `generation_tertiary` from settings (default chain
+  OpenAI → Groq → Gemini) and skips any stage whose API key is unset.
 
 ### 7.3 Parsing (`infrastructure/parsing/`)
 
@@ -871,10 +873,11 @@ a known foot-gun lives. Worth tracking.
 6. **`rerank` is a placeholder** (`RetrievalConfig.rerank`) — no reranker is
    wired yet; the LangGraph design leaves a clean node seam for it.
 
-7. **Model defaults vs `.env`.** Settings default `generation_primary="groq"`,
-   but a local `.env` may set `ollama` (`qwen3:8b`) as primary — a small model
-   that follows grounding instructions less reliably. Prefer Groq
-   (`llama-3.3-70b`) as primary for production-quality grounding.
+7. **Model defaults vs `.env`.** Settings default the chain to
+   `openai → groq → gemini`, but a local `.env` may override the stages (e.g.
+   `ollama`/`qwen3:8b`, a small model that follows grounding instructions less
+   reliably). Prefer OpenAI (`gpt-4o-mini`) or Groq (`llama-3.3-70b`) as primary
+   for production-quality grounding.
 
 ---
 

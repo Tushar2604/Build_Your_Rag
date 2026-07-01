@@ -1,9 +1,10 @@
-"""Generation providers (Groq, Gemini, local Ollama) + a failover router.
+"""Generation providers (OpenAI, Groq, Gemini, local Ollama) + a failover router.
 
-The router is the key free-tier resilience feature: when the primary provider
-rate-limits or errors, it transparently fails over to the secondary, so a user
-question still gets answered. Ollama runs models locally (no API key, no quota),
-which makes it a good primary for offline/private deployments or a free fallback.
+The router is the key resilience feature: when a provider rate-limits or errors,
+it transparently fails over to the next backend in an ordered chain (by default
+OpenAI -> Groq -> Gemini), so a user question still gets answered. Ollama runs
+models locally (no API key, no quota), which makes it a good primary for
+offline/private deployments or a free fallback.
 """
 
 from __future__ import annotations
@@ -22,6 +23,57 @@ log = structlog.get_logger(__name__)
 
 def _estimate_tokens(*parts: str) -> int:
     return max(1, sum(len(p) for p in parts) // 4)
+
+
+class OpenAIProvider:
+    name = "openai"
+
+    def __init__(self, settings: Settings) -> None:
+        self._model = settings.openai_model
+        self._api_key = settings.openai_api_key
+        self._base_url = settings.openai_base_url or None
+        self._client = None
+
+    def _ensure(self):  # type: ignore[no-untyped-def]
+        if self._client is None:
+            from openai import AsyncOpenAI
+
+            self._client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+        return self._client
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    async def generate(self, system: str, user: str) -> LLMResult:
+        client = self._ensure()
+        resp = await client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        text = resp.choices[0].message.content or ""
+        usage = getattr(resp, "usage", None)
+        tokens = getattr(usage, "total_tokens", None) or _estimate_tokens(system, user, text)
+        return LLMResult(text=text, tokens_used=tokens, provider=self.name, model=self._model)
+
+    async def stream(
+        self, system: str, user: str, on_provider: Callable[[str], None] | None = None
+    ) -> AsyncIterator[str]:
+        client = self._ensure()
+        if on_provider:
+            on_provider(self.name)
+        stream = await client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            stream=True,
+        )
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
 
 
 class GroqProvider:
@@ -209,40 +261,61 @@ class OllamaProvider:
 
 
 class FailoverLLM:
-    """Tries the primary provider, falls back to the secondary on failure."""
+    """Tries each provider in order, degrading to the next one on failure."""
 
     name = "failover"
 
-    def __init__(self, primary, secondary) -> None:  # type: ignore[no-untyped-def]
-        self._primary = primary
-        self._secondary = secondary
+    def __init__(self, providers) -> None:  # type: ignore[no-untyped-def]
+        providers = list(providers)
+        if not providers:
+            raise ValueError("FailoverLLM requires at least one provider")
+        self._providers = providers
 
     async def generate(self, system: str, user: str) -> LLMResult:
-        try:
-            return await self._primary.generate(system, user)
-        except Exception:  # noqa: BLE001 - degrade to secondary free pool
-            log.warning("llm.failover", primary=self._primary.name, to=self._secondary.name)
-            return await self._secondary.generate(system, user)
+        last_exc: Exception | None = None
+        for i, provider in enumerate(self._providers):
+            try:
+                return await provider.generate(system, user)
+            except Exception as exc:  # noqa: BLE001 - degrade to the next backend
+                last_exc = exc
+                nxt = self._providers[i + 1].name if i + 1 < len(self._providers) else None
+                log.warning("llm.failover", provider=provider.name, to=nxt)
+        assert last_exc is not None  # non-empty chain guaranteed by __init__
+        raise last_exc
 
     async def stream(
         self, system: str, user: str, on_provider: Callable[[str], None] | None = None
     ) -> AsyncIterator[str]:
         # Each leaf provider reports its own name via on_provider, so a fallback
-        # overwrites the primary's report and the caller ends with the backend
+        # overwrites the previous report and the caller ends with the backend
         # that actually served the stream.
-        try:
-            async for tok in self._primary.stream(system, user, on_provider):
-                yield tok
-        except Exception:  # noqa: BLE001
-            log.warning("llm.failover_stream", primary=self._primary.name)
-            async for tok in self._secondary.stream(system, user, on_provider):
-                yield tok
+        last_exc: Exception | None = None
+        for provider in self._providers:
+            try:
+                async for tok in provider.stream(system, user, on_provider):
+                    yield tok
+                return
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                log.warning("llm.failover_stream", provider=provider.name)
+        assert last_exc is not None  # non-empty chain guaranteed by __init__
+        raise last_exc
 
 
 _PROVIDERS = {
+    "openai": OpenAIProvider,
     "groq": GroqProvider,
     "gemini": GeminiProvider,
     "ollama": OllamaProvider,
+}
+
+# Ollama is local (no key); every other backend needs its credential configured
+# or it is silently dropped from the failover chain.
+_PROVIDER_KEY = {
+    "openai": lambda s: bool(s.openai_api_key),
+    "groq": lambda s: bool(s.groq_api_key),
+    "gemini": lambda s: bool(s.gemini_api_key),
+    "ollama": lambda s: True,
 }
 
 
@@ -254,6 +327,19 @@ def _build_provider(name: str, settings: Settings):  # type: ignore[no-untyped-d
 
 
 def build_llm(settings: Settings) -> FailoverLLM:
-    primary = _build_provider(settings.generation_primary, settings)
-    secondary = _build_provider(settings.generation_secondary, settings)
-    return FailoverLLM(primary=primary, secondary=secondary)
+    # Ordered, de-duplicated failover chain. A stage without configured
+    # credentials is skipped so the chain starts at the first usable backend.
+    ordered = [
+        settings.generation_primary,
+        settings.generation_secondary,
+        settings.generation_tertiary,
+    ]
+    chain: list[str] = []
+    for name in ordered:
+        if name and name not in chain and _PROVIDER_KEY.get(name, lambda _s: True)(settings):
+            chain.append(name)
+    # If nothing is configured, keep the primary so the failure is explicit at
+    # call time rather than hidden behind an empty chain.
+    if not chain:
+        chain = [settings.generation_primary]
+    return FailoverLLM([_build_provider(name, settings) for name in chain])

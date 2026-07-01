@@ -55,14 +55,22 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
 
     # --- LLM providers ---
+    openai_api_key: str = ""
     gemini_api_key: str = ""
     groq_api_key: str = ""
     embedding_model: str = "gemini-embedding-001"
     embedding_dim: int = 768
-    # Generation backends. `primary` serves first; on failure the router fails
-    # over to `secondary`. Set both to "ollama" for a fully local, key-free setup.
-    generation_primary: Literal["groq", "gemini", "ollama"] = "groq"
-    generation_secondary: Literal["groq", "gemini", "ollama"] = "gemini"
+    # Generation backends form an ordered failover chain: `primary` serves first,
+    # then `secondary`, then `tertiary`. On each failure the router drops to the
+    # next backend. Any stage whose API key is unset is skipped automatically, so
+    # a missing OPENAI_API_KEY simply starts the chain at Groq. Set every stage to
+    # "ollama" for a fully local, key-free setup.
+    generation_primary: Literal["openai", "groq", "gemini", "ollama"] = "openai"
+    generation_secondary: Literal["openai", "groq", "gemini", "ollama"] = "groq"
+    generation_tertiary: Literal["openai", "groq", "gemini", "ollama"] = "gemini"
+    openai_model: str = "gpt-4o-mini"
+    # Optional override for an OpenAI-compatible gateway (Azure, OpenRouter, etc.).
+    openai_base_url: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
     gemini_model: str = "gemini-2.5-flash"
     # Local Ollama (https://ollama.com). Run `ollama pull qwen2.5` first.

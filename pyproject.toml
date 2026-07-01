@@ -24,7 +24,8 @@ dependencies = [
     # --- Auth / security ---
     "pyjwt>=2.9",
     "argon2-cffi>=23.1",
-    # --- Providers (free tiers) ---
+    # --- Providers ---
+    "openai>=1.40",                # OpenAI: primary LLM generation
     "google-genai>=1.0",          # Gemini: embeddings + Flash generation
     "groq>=0.11",                  # Groq: fast LLM generation
     "boto3>=1.35",                 # Cloudflare R2 (S3-compatible)

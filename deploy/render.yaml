@@ -1,5 +1,5 @@
 # Render free-tier blueprint. Create the service from this file, then set the
-# secret env vars (JWT_SECRET, GEMINI_API_KEY, GROQ_API_KEY, R2_*) in the
+# secret env vars (JWT_SECRET, OPENAI_API_KEY, GEMINI_API_KEY, GROQ_API_KEY, R2_*) in the
 # dashboard. Point DATABASE_URL at a Neon free database.
 services:
   - type: web
@@ -20,6 +20,8 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
         sync: false
       - key: GEMINI_API_KEY
         sync: false
