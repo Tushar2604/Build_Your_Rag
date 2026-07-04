@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     tenant_max_documents: int = 200
     retrieval_top_k: int = 5
 
+    # --- Hiring Agent ---
+    # Set HIRING_AGENT_ENABLED=true to mount the /api/v1/hiring/* routes.
+    # Off by default so the module is invisible to existing chatbot traffic.
+    hiring_agent_enabled: bool = False
+
     # --- Agent ---
     # Hard ceiling on agent reasoning steps per request (defence against a loop
     # that never converges). Per-request `max_steps` is clamped to this.

@@ -7,8 +7,8 @@ import { ApiError } from "../api/client";
 
 const STATUS_META: Record<string, { label: string; cls: string; dot: string }> = {
   pending:   { label: "Pending",   cls: "badge-draft",   dot: "dot-draft"   },
-  uploading: { label: "Uploading", cls: "badge bg-blue-50 text-blue-700",    dot: "dot-draft"  },
-  uploaded:  { label: "Uploaded",  cls: "badge bg-blue-50 text-blue-700",    dot: "dot-draft"  },
+  uploading: { label: "Uploading", cls: "badge bg-brand-50 text-brand-700",    dot: "dot-draft"  },
+  uploaded:  { label: "Uploaded",  cls: "badge bg-brand-50 text-brand-700",    dot: "dot-draft"  },
   parsing:   { label: "Parsing",   cls: "badge-paused",  dot: "dot-paused"  },
   chunking:  { label: "Chunking",  cls: "badge-paused",  dot: "dot-paused"  },
   embedding: { label: "Embedding", cls: "badge-paused",  dot: "dot-paused"  },
@@ -37,8 +37,8 @@ function StatusBadge({ status }: { status: string }) {
 function ConfirmModal({ filename, onConfirm, onCancel }: { filename: string; onConfirm: () => void; onCancel: () => void }) {
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="confirm-del"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="card w-full max-w-sm p-6">
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 backdrop-blur-sm px-4 animate-fade-in">
+      <div className="card shadow-modal w-full max-w-sm p-6 animate-scale-in">
         <h2 id="confirm-del" className="text-sm font-semibold text-gray-900">Delete document?</h2>
         <p className="mt-2 text-sm text-gray-600">
           <span className="font-medium">{filename}</span> and all its indexed chunks will be permanently removed.

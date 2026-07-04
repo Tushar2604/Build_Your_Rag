@@ -32,9 +32,9 @@ from src.domain.shared.identifiers import SessionId, TenantId
 
 log = structlog.get_logger(__name__)
 
-# The canonical refusal opener from DEFAULT_SYSTEM_PROMPT; heuristic for custom
+# The canonical redirect opener from DEFAULT_SYSTEM_PROMPT; heuristic for custom
 # prompts, but no_context (citation-based) is the prompt-independent signal.
-_REFUSAL_PREFIX = "I can only answer questions about"
+_REFUSAL_PREFIX = "I'm here to help with our open roles and your application"
 
 
 def _build_context(citations: list[Citation]) -> str:

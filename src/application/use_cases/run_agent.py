@@ -32,7 +32,7 @@ from src.domain.shared.identifiers import SessionId, TenantId
 
 log = structlog.get_logger(__name__)
 
-_REFUSAL_PREFIX = "I can only answer questions about"
+_REFUSAL_PREFIX = "I'm here to help with our open roles and your application"
 
 
 class RunAgent:

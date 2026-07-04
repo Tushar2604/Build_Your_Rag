@@ -18,11 +18,12 @@ from src.infrastructure.agent.document_search_tool import DocumentSearchTool
 if TYPE_CHECKING:
     from src.config.container import Container
 
-# The exact out-of-scope refusal the agent emits — kept identical to the RAG
-# path's refusal so the eval harness's `refusal_correct` recognises both.
+# The exact off-topic redirect the agent emits — kept in sync with the RAG path's
+# opener so the eval harness's `refusal_correct` recognises both.
 AGENT_REFUSAL = (
-    "I can only answer questions about the provided documents. "
-    "This topic is not covered in the available content."
+    "I'm here to help with our open roles and your application. "
+    "I can't help with that request, but I'm happy to tell you about our roles or "
+    "help with your candidacy."
 )
 
 

@@ -96,9 +96,9 @@ def ndcg_at_k(retrieved: Sequence[str], relevant: Sequence[str], k: int) -> floa
 
 # --- Deterministic generation / grounding checks ---------------------------------
 
-# Mirrors AskChatbot._REFUSAL_PREFIX: the canonical refusal opener. Kept in sync
+# Mirrors AskChatbot._REFUSAL_PREFIX: the canonical redirect opener. Kept in sync
 # with the default system prompt so the harness recognises an in-policy refusal.
-REFUSAL_PREFIX = "I can only answer questions about"
+REFUSAL_PREFIX = "I'm here to help with our open roles and your application"
 
 
 def is_refusal(answer: str) -> bool:

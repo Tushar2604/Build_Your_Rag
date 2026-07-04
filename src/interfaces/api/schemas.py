@@ -59,7 +59,8 @@ class WidgetConfigSchema(BaseModel):
     theme_color: str = Field(default="#4f46e5", max_length=32)
     display_name: str = Field(default="Assistant", min_length=1, max_length=60)
     welcome_message: str = Field(
-        default="Hi! Ask me anything about our docs.", max_length=300
+        default="Hi! 👋 I'm here to help with our open roles — ask me about the positions or start your application.",
+        max_length=300,
     )
     launcher_position: Literal["bottom-right", "bottom-left"] = "bottom-right"
 

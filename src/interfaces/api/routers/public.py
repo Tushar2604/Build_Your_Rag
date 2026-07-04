@@ -27,6 +27,7 @@ from src.application.ports.repositories import RequestLog
 from src.application.use_cases.ask_chatbot import AskChatbot
 from src.domain.chat.entities import ChatSession, Message, MessageRole
 from src.domain.chatbot.entities import Chatbot, origin_allowed
+from src.domain.safety.guardrails import build_grounded_prompt
 from src.domain.shared.identifiers import SessionId
 from src.infrastructure.rag.graph import RagGraph, build_context
 from src.interfaces.api.deps import ContainerDep
@@ -253,7 +254,9 @@ async def ask_public_stream(
                 ]
             ),
         }
-        prompt = f"Context:\n{context}\n\nQuestion: {message}"
+        # Isolate untrusted reference material + candidate message in labelled
+        # blocks (injection defence); mirrors the authenticated stream path.
+        prompt = build_grounded_prompt(context, message)
         full: list[str] = []
         served_by: dict[str, str] = {}
         try:
@@ -275,7 +278,9 @@ async def ask_public_stream(
 
         answer_text = "".join(full)
         tokens_used = max(1, (len(bot.system_prompt) + len(prompt) + len(answer_text)) // 4)
-        refused = answer_text.strip().startswith("I can only answer questions about")
+        refused = answer_text.strip().startswith(
+            "I'm here to help with our open roles and your application"
+        )
 
         assistant = Message(
             session_id=sid,

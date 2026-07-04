@@ -67,12 +67,12 @@ function StatCard({
   tone?: "neutral" | "good" | "warn";
 }) {
   const toneClass =
-    tone === "good" ? "text-green-700" : tone === "warn" ? "text-amber-700" : "text-gray-900";
+    tone === "good" ? "text-emerald-700" : tone === "warn" ? "text-amber-700" : "text-gray-900";
   return (
-    <div className="card p-4">
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className={`text-2xl font-semibold mt-1 ${toneClass}`}>{value}</p>
-      {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+    <div className="metric-card">
+      <p className="metric-card-label">{label}</p>
+      <p className={`metric-card-value ${toneClass}`}>{value}</p>
+      {hint && <p className="metric-card-hint">{hint}</p>}
     </div>
   );
 }
@@ -133,11 +133,11 @@ export default function AnalyticsPage() {
       : 0;
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6">
+    <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6 animate-fade-in">
       <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Analytics</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h1 className="page-title">Analytics</h1>
+          <p className="page-subtitle">
             Answer quality per chatbot over time — spot a bad day, then see if it's retrieval or generation
           </p>
         </div>
@@ -146,7 +146,7 @@ export default function AnalyticsPage() {
             aria-label="Chatbot"
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
-            className="input py-1.5"
+            className="input py-1.5 w-auto"
           >
             {chatbots.map((b) => (
               <option key={b.id} value={b.id}>
@@ -154,16 +154,14 @@ export default function AnalyticsPage() {
               </option>
             ))}
           </select>
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+          <div className="segmented">
             {RANGES.map((r) => (
               <button
                 key={r}
                 onClick={() => setDays(r)}
-                className={`px-3 py-1.5 text-sm font-medium ${
-                  days === r ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-50"
-                }`}
+                className={days === r ? "segmented-item-active" : "segmented-item"}
               >
-                {r}d
+                {r} days
               </button>
             ))}
           </div>
@@ -311,7 +309,7 @@ export default function AnalyticsPage() {
                           {new Date(r.created_at).toLocaleString()}
                         </td>
                         <td className="px-3 py-2.5">
-                          <span className={`badge ${r.status === "ok" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                          <span className={r.status === "ok" ? "badge-live" : "badge-error"}>
                             {r.status}
                           </span>
                         </td>
@@ -324,13 +322,13 @@ export default function AnalyticsPage() {
                         <td className="px-3 py-2.5 text-right text-gray-700">{score(r.max_score)}</td>
                         <td className="px-3 py-2.5">
                           {r.status === "error" ? (
-                            <span className="badge bg-red-100 text-red-700">error</span>
+                            <span className="badge-error">error</span>
                           ) : r.no_context ? (
-                            <span className="badge bg-amber-100 text-amber-700">no context</span>
+                            <span className="badge-paused">no context</span>
                           ) : r.refused ? (
-                            <span className="badge bg-amber-100 text-amber-700">refused</span>
+                            <span className="badge-paused">refused</span>
                           ) : (
-                            <span className="badge bg-green-100 text-green-700">answered</span>
+                            <span className="badge-live">answered</span>
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-gray-600">{r.provider ?? "—"}</td>

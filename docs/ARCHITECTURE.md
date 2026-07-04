@@ -231,9 +231,12 @@ PENDING ──► UPLOADED ──► PARSING ──► CHUNKING ──► EMBEDD
   `allowed_origins`, `widget`).
 - `RetrievalConfig(top_k=5, min_score=0.0, rerank=False)` — `min_score` is the
   cosine floor (0 = no filter). **`rerank` is a phase-2 placeholder.**
-- `DEFAULT_SYSTEM_PROMPT` — instructs *"Answer using ONLY the provided context
-  below … Never answer from general knowledge"* and gives an exact refusal
-  string used as the grounding signal downstream.
+- `DEFAULT_SYSTEM_PROMPT` — a warm recruiting-assistant persona that runs a
+  one-question-at-a-time candidate screening chat, grounds every concrete fact
+  (roles, salary ranges, benefits, visa, how to apply) in the retrieved
+  reference material rather than inventing them, and redirects off-topic
+  requests with an exact opener (*"I'm here to help with our open roles and your
+  application"*) used as the refusal/grounding signal downstream.
 - `generate_public_key()` → `pk_<token>` (Stripe-style publishable key, safe to
   embed). `origin_allowed()` implements the embed allowlist policy (exact match
   or `*.example.com` wildcard; empty list = any origin).

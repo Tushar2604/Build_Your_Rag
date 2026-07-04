@@ -436,11 +436,11 @@ function PlaygroundTab({ bot }: { bot: Chatbot }) {
 
           {messages.map((msg) => (
             <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-              <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${msg.role === "user" ? "bg-brand-600 text-white" : "bg-gray-100 text-gray-600"}`}>
+              <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${msg.role === "user" ? "bg-ink-900 text-white" : "bg-brand-50 text-brand-600 ring-1 ring-brand-100"}`}>
                 {msg.role === "user" ? "U" : "AI"}
               </div>
               <div className={`max-w-[78%] flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
-                <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === "user" ? "bg-brand-600 text-white rounded-tr-sm" : "bg-white border border-gray-200 text-gray-800 rounded-tl-sm"}`}>
+                <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-xs ${msg.role === "user" ? "bg-ink-900 text-white rounded-tr-sm" : "bg-white border border-gray-200 text-gray-800 rounded-tl-sm"}`}>
                   {msg.content || (msg.streaming && (
                     <span className="inline-flex gap-1 items-center">
                       <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.3s]" />
@@ -927,11 +927,11 @@ function AnalyticsTab({ bot }: { bot: Chatbot }) {
     <div className="space-y-6">
       {/* Controls */}
       <div className="flex items-center gap-2">
-        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+        <div className="segmented">
           {[7, 30, 90].map((d) => (
             <button key={d} onClick={() => setDays(d)}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors ${days === d ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-50"}`}>
-              {d}d
+              className={days === d ? "segmented-item-active" : "segmented-item"}>
+              {d} days
             </button>
           ))}
         </div>

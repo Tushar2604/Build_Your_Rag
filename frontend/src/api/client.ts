@@ -13,6 +13,22 @@ export class ApiError extends Error {
   }
 }
 
+const AUTH_KEYS = ["access_token", "refresh_token", "tenant_id", "user_id"];
+
+/**
+ * Called when an authenticated request is rejected with 401 — i.e. we sent a
+ * token but the server no longer accepts it (expired, revoked, or the backend's
+ * signing secret / DB was reset). Clear the dead session and bounce to login so
+ * the user re-authenticates instead of staring at a silently-failing page.
+ * A hard navigation guarantees all in-memory auth state resets.
+ */
+function handleExpiredSession(): void {
+  AUTH_KEYS.forEach((k) => localStorage.removeItem(k));
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.assign("/login");
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -26,6 +42,10 @@ async function request<T>(
 
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
   if (!res.ok) {
+    // A 401 on a request we *sent a token for* means the session is dead —
+    // clear it and redirect to login. (Login/register send no token, so a 401
+    // there is a real "bad credentials" error and is left for the caller.)
+    if (res.status === 401 && token) handleExpiredSession();
     let detail = res.statusText;
     try {
       const body = await res.json();
@@ -74,6 +94,7 @@ export function streamSSE(
       });
 
       if (!res.ok || !res.body) {
+        if (res.status === 401 && token) handleExpiredSession();
         handlers.onError?.(`HTTP ${res.status}`);
         return;
       }
