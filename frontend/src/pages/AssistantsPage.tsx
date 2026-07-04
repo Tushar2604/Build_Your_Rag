@@ -80,10 +80,10 @@ function CreateModal({ documents, onCreate, onClose }: CreateModalProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 backdrop-blur-sm px-4 animate-fade-in"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="card shadow-modal w-full max-w-lg max-h-[90vh] overflow-y-auto animate-scale-in">
         {/* Modal header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
@@ -100,7 +100,7 @@ function CreateModal({ documents, onCreate, onClose }: CreateModalProps) {
         {/* Step indicator */}
         <div className="flex px-6 pt-4 gap-1.5">
           {[1, 2, 3].map((n) => (
-            <div key={n} className={`flex-1 h-1 rounded-full transition-colors ${n <= step ? "bg-brand-600" : "bg-gray-100"}`} />
+            <div key={n} className={`flex-1 h-1 rounded-full transition-colors ${n <= step ? "bg-ink-900" : "bg-gray-100"}`} />
           ))}
         </div>
 

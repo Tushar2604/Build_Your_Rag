@@ -456,10 +456,10 @@ class UsageRepositoryImpl:
         await self._s.execute(stmt)
 
 
-# The canonical refusal emitted by DEFAULT_SYSTEM_PROMPT when context is empty.
+# The canonical off-topic redirect emitted by DEFAULT_SYSTEM_PROMPT.
 # Heuristic (custom prompts may refuse differently); no_context_rate is the
 # prompt-independent retrieval-miss signal, refusal_rate is the secondary one.
-_REFUSAL_LIKE = "I can only answer questions about%"
+_REFUSAL_LIKE = "I'm here to help with our open roles and your application%"
 
 
 class AnalyticsRepositoryImpl:

@@ -34,6 +34,7 @@ from src.interfaces.api.routers import (
     public,
     uploads,
 )
+from src.hiring_agent.routes import router as hiring_router
 
 _WIDGET_JS = Path(__file__).parent / "static" / "widget.js"
 # Built single-page app (admin UI + the public /c/<key> share page). Present in
@@ -163,6 +164,9 @@ def create_app() -> FastAPI:
     app.include_router(agent.router, prefix=api_prefix)
     app.include_router(public.router, prefix=api_prefix)
     app.include_router(uploads.router, prefix=api_prefix)
+
+    if settings.hiring_agent_enabled:
+        app.include_router(hiring_router, prefix=api_prefix)
 
     # SPA catch-all is mounted LAST so it never shadows the API/ops/widget routes.
     _mount_spa(app)

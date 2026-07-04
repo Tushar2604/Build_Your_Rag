@@ -39,9 +39,10 @@ def test_chatbot_defaults() -> None:
 
 
 def test_default_system_prompt_enforces_grounding() -> None:
-    # The default prompt instructs context-only answering + citation.
-    assert "ONLY the provided context" in DEFAULT_SYSTEM_PROMPT
-    assert "Cite sources" in DEFAULT_SYSTEM_PROMPT
+    # The default (recruiting) prompt grounds facts in the reference material and
+    # forbids inventing company/role details.
+    assert "reference material" in DEFAULT_SYSTEM_PROMPT
+    assert "Do NOT invent" in DEFAULT_SYSTEM_PROMPT
 
 
 def test_document_filter_empty_returns_none() -> None:

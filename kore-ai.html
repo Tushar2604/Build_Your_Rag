@@ -1,0 +1,1645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kore AI — Enterprise RAG platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #F7F7F5;
+    --surface: #FFFFFF;
+    --border: #E8E6E1;
+    --border-strong: #D8D6D1;
+    --primary: #1A1A2E;
+    --primary-hover: #12121f;
+    --accent: #4F6EF7;
+    --accent-tint: #EDF1FE;
+    --success: #22C55E;
+    --warning: #F59E0B;
+    --error: #EF4444;
+    --text-1: #111111;
+    --text-2: #6B7280;
+    --text-3: #9CA3AF;
+    --radius-card: 8px;
+    --radius-btn: 6px;
+    --shadow-modal: 0 4px 24px rgba(0,0,0,0.08);
+    --sidebar-w: 200px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text-1);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-weight: 400;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4 {
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--text-1);
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  button { font-family: inherit; cursor: pointer; }
+
+  ::selection { background: var(--accent-tint); }
+
+  /* ---------- Layout ---------- */
+  .app { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0; bottom: 0; left: 0;
+    z-index: 40;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 20px 16px;
+  }
+  .brand .logo {
+    width: 28px; height: 28px;
+    border-radius: 7px;
+    background: var(--primary);
+    color: #fff;
+    display: grid; place-items: center;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: -0.03em;
+  }
+  .brand .name { font-weight: 600; font-size: 15px; letter-spacing: -0.02em; }
+  .brand .plan {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-3); font-weight: 500; margin-top: -2px;
+  }
+
+  .nav { padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--radius-btn);
+    color: var(--text-2);
+    font-size: 14px;
+    font-weight: 500;
+    background: none; border: none;
+    width: 100%; text-align: left;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .nav-item svg { width: 17px; height: 17px; }
+  .nav-item:hover { background: var(--bg); color: var(--text-1); }
+  .nav-item.active { background: var(--primary); color: #fff; }
+  .nav-item .badge-count {
+    margin-left: auto; font-size: 11px; font-weight: 500;
+    color: var(--text-3); background: var(--bg);
+    padding: 1px 7px; border-radius: 10px;
+  }
+  .nav-item.active .badge-count { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.12); }
+
+  .sidebar-footer { margin-top: auto; padding: 12px; border-top: 1px solid var(--border); }
+  .user-chip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px; border-radius: var(--radius-btn);
+  }
+  .user-chip:hover { background: var(--bg); }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, #4F6EF7, #1A1A2E);
+    color: #fff; display: grid; place-items: center;
+    font-size: 12px; font-weight: 600; flex-shrink: 0;
+  }
+  .user-meta { min-width: 0; }
+  .user-meta .u-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-meta .u-mail { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .content {
+    flex: 1;
+    margin-left: var(--sidebar-w);
+    min-width: 0;
+  }
+  .content-inner {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 48px;
+  }
+
+  /* ---------- Mobile top nav ---------- */
+  .topbar { display: none; }
+
+  /* ---------- Typography helpers ---------- */
+  .page-head { margin-bottom: 28px; }
+  .page-head h1 { font-size: 24px; margin-bottom: 4px; }
+  .page-head p { color: var(--text-2); font-size: 14px; }
+  .eyebrow {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: 500; color: var(--text-3); margin-bottom: 6px;
+  }
+  .label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: 500; color: var(--text-2);
+  }
+  .mono { font-family: "JetBrains Mono", monospace; }
+  .text-2 { color: var(--text-2); }
+  .text-3 { color: var(--text-3); }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 9px 15px;
+    border-radius: var(--radius-btn);
+    font-size: 14px; font-weight: 500;
+    border: 1px solid transparent;
+    background: var(--surface);
+    color: var(--text-1);
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    white-space: nowrap;
+  }
+  .btn svg { width: 16px; height: 16px; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+  .btn-secondary { background: var(--surface); border-color: var(--border-strong); color: var(--text-1); }
+  .btn-secondary:hover { background: var(--bg); }
+  .btn-ghost { background: transparent; color: var(--text-2); }
+  .btn-ghost:hover { background: var(--bg); color: var(--text-1); }
+  .btn-sm { padding: 6px 11px; font-size: 13px; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:focus-visible, .nav-item:focus-visible, .icon-btn:focus-visible, input:focus-visible, textarea:focus-visible, .chip-close:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .icon-btn {
+    display: inline-grid; place-items: center;
+    width: 32px; height: 32px;
+    border-radius: var(--radius-btn);
+    border: 1px solid transparent;
+    background: transparent; color: var(--text-2);
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .icon-btn:hover { background: var(--bg); color: var(--text-1); }
+  .icon-btn svg { width: 17px; height: 17px; }
+
+  /* ---------- Cards / surfaces ---------- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+  }
+  .card-pad { padding: 20px; }
+
+  /* ---------- Stats ---------- */
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+  .stat {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-card); padding: 18px 20px;
+  }
+  .stat .stat-label { display: flex; align-items: center; gap: 7px; color: var(--text-2); font-size: 13px; margin-bottom: 10px; }
+  .stat .stat-label svg { width: 15px; height: 15px; color: var(--text-3); }
+  .stat .stat-value { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+  .stat .stat-sub { font-size: 12px; color: var(--text-3); margin-top: 8px; }
+  .stat .stat-sub.up { color: var(--success); }
+
+  /* ---------- Badges / pills ---------- */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: 500; padding: 3px 8px; border-radius: 5px;
+    background: var(--bg); color: var(--text-2);
+    border: 1px solid var(--border);
+  }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge.live { color: #1f7a3d; background: #E9F9EF; border-color: #CDEFD9; }
+  .badge.live .dot { background: var(--success); }
+  .badge.draft { color: var(--text-2); }
+  .badge.ready { color: #1f7a3d; background: #E9F9EF; border-color: #CDEFD9; }
+  .badge.indexing { color: #9a6a05; background: #FEF6E7; border-color: #F7E6BE; }
+  .badge.failed { color: #b3261e; background: #FDECEC; border-color: #F7CFCF; }
+  .badge.type { background: var(--surface); color: var(--text-2); }
+
+  /* ---------- Tables ---------- */
+  .table-wrap { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: 500; color: var(--text-3); padding: 11px 16px;
+    border-bottom: 1px solid var(--border); background: #FCFBF9;
+  }
+  td { padding: 13px 16px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #FCFBF9; }
+  .cell-primary { font-weight: 500; }
+  .cell-file { display: flex; align-items: center; gap: 10px; }
+  .file-ico { width: 30px; height: 30px; border-radius: 6px; background: var(--bg); display: grid; place-items: center; color: var(--text-2); flex-shrink: 0; }
+  .file-ico svg { width: 15px; height: 15px; }
+
+  .score { font-weight: 500; font-variant-numeric: tabular-nums; }
+  .score.good { color: #1f7a3d; }
+  .score.mid { color: #9a6a05; }
+  .score.bad { color: #b3261e; }
+
+  /* ---------- Empty states ---------- */
+  .empty {
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    padding: 56px 32px;
+    text-align: center;
+  }
+  .empty .empty-ico {
+    width: 44px; height: 44px; margin: 0 auto 16px;
+    border-radius: 10px; background: var(--bg);
+    display: grid; place-items: center; color: var(--text-3);
+  }
+  .empty .empty-ico svg { width: 22px; height: 22px; }
+  .empty h3 { font-size: 16px; margin-bottom: 6px; }
+  .empty p { color: var(--text-2); font-size: 14px; max-width: 400px; margin: 0 auto 20px; }
+
+  /* ---------- Onboarding / hero ---------- */
+  .hero {
+    max-width: 760px; margin: 0 auto; padding: 56px 24px 40px;
+  }
+  .hero-head { text-align: center; margin-bottom: 40px; }
+  .hero-head .kicker {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
+    color: var(--accent); background: var(--accent-tint);
+    padding: 4px 10px; border-radius: 20px; margin-bottom: 18px;
+  }
+  .hero-head h1 { font-size: 32px; margin-bottom: 10px; letter-spacing: -0.03em; }
+  .hero-head p { color: var(--text-2); font-size: 15px; max-width: 480px; margin: 0 auto; }
+
+  /* ---------- Stepper ---------- */
+  .progress-track { display: flex; align-items: center; gap: 0; margin-bottom: 8px; }
+  .progress-seg { flex: 1; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+  .progress-seg .fill { height: 100%; width: 0; background: var(--accent); transition: width 300ms ease; }
+  .progress-seg.done .fill { width: 100%; }
+  .progress-seg.active .fill { width: 50%; }
+  .progress-labels { display: flex; justify-content: space-between; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 28px; font-weight: 500; }
+  .progress-labels span.cur { color: var(--accent); }
+
+  .step {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    margin-bottom: 14px;
+    overflow: hidden;
+    transition: border-color 200ms ease;
+  }
+  .step.active {
+    border-left: 1px solid var(--accent);
+    box-shadow: -3px 0 0 -1px var(--accent);
+  }
+  .step-num {
+    position: absolute; top: 14px; right: 22px;
+    font-size: 46px; font-weight: 600; letter-spacing: -0.04em;
+    color: #EEEDEA; line-height: 1; user-select: none; pointer-events: none;
+  }
+  .step-body { padding: 24px 26px; }
+  .step.collapsed .step-body { padding: 16px 26px; display: flex; align-items: center; gap: 12px; }
+  .step-summary-check {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--success); color: #fff; display: grid; place-items: center; flex-shrink: 0;
+  }
+  .step-summary-check svg { width: 13px; height: 13px; }
+  .step-summary-text { font-size: 14px; }
+  .step-summary-text b { font-weight: 500; }
+  .step-summary-edit { margin-left: auto; }
+
+  .step-title { font-size: 18px; margin-bottom: 4px; }
+  .step-desc { color: var(--text-2); font-size: 14px; margin-bottom: 20px; }
+  .step-actions { display: flex; align-items: center; gap: 10px; margin-top: 24px; }
+
+  /* ---------- Forms ---------- */
+  .field { margin-bottom: 18px; }
+  .field > label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 7px; }
+  .field .hint { font-size: 12px; color: var(--text-3); margin-top: 6px; }
+  input[type="text"], input[type="url"], textarea, select {
+    width: 100%;
+    font-family: inherit; font-size: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-btn);
+    background: var(--surface);
+    color: var(--text-1);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  input:focus, textarea:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-tint);
+    outline: none;
+  }
+  textarea { resize: vertical; min-height: 88px; line-height: 1.6; }
+  ::placeholder { color: var(--text-3); }
+
+  .seg-control { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-btn); overflow: hidden; background: var(--surface); }
+  .seg-control button {
+    padding: 8px 16px; font-size: 13px; font-weight: 500; border: none; background: transparent; color: var(--text-2);
+    border-right: 1px solid var(--border); transition: background 120ms ease, color 120ms ease;
+  }
+  .seg-control button:last-child { border-right: none; }
+  .seg-control button.on { background: var(--primary); color: #fff; }
+
+  /* ---------- Upload zone ---------- */
+  .upload-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .dropzone {
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--radius-card);
+    padding: 28px 20px;
+    text-align: center;
+    background: var(--surface);
+    transition: border-color 150ms ease, background 150ms ease;
+    cursor: pointer;
+  }
+  .dropzone:hover { border-color: var(--text-3); }
+  .dropzone.dragover { border-color: var(--accent); background: var(--accent-tint); }
+  .dropzone .dz-ico { width: 38px; height: 38px; margin: 0 auto 12px; border-radius: 9px; background: var(--bg); display: grid; place-items: center; color: var(--text-2); }
+  .dropzone .dz-ico svg { width: 19px; height: 19px; }
+  .dropzone .dz-title { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+  .dropzone .dz-sub { font-size: 12px; color: var(--text-3); }
+  .url-box { display: flex; flex-direction: column; }
+  .url-box .url-inner { border: 1px solid var(--border); border-radius: var(--radius-card); padding: 20px; background: var(--surface); height: 100%; display: flex; flex-direction: column; justify-content: center; }
+  .url-box .url-inner label { font-size: 13px; font-weight: 500; margin-bottom: 8px; display: block; }
+  .url-input-group { display: flex; gap: 8px; }
+  .url-input-group input { flex: 1; }
+
+  /* ---------- File chips ---------- */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 8px 6px 10px; border-radius: 20px;
+    background: var(--bg); border: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .chip svg.chip-ico { width: 14px; height: 14px; color: var(--text-2); }
+  .chip .chip-close { border: none; background: none; color: var(--text-3); display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; }
+  .chip .chip-close:hover { background: var(--border-strong); color: var(--text-1); }
+  .chip .chip-close svg { width: 13px; height: 13px; }
+
+  /* file list rows (knowledge) */
+  .file-progress { height: 4px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 7px; width: 140px; }
+  .file-progress .bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width 400ms ease; }
+
+  /* ---------- Deploy cards ---------- */
+  .deploy-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 8px; }
+  .deploy-card { border: 1px solid var(--border); border-radius: var(--radius-card); padding: 18px; background: var(--surface); display: flex; flex-direction: column; }
+  .deploy-card .dc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .deploy-card .dc-ico { width: 32px; height: 32px; border-radius: 7px; background: var(--bg); display: grid; place-items: center; color: var(--primary); }
+  .deploy-card .dc-ico svg { width: 17px; height: 17px; }
+  .deploy-card h4 { font-size: 14px; margin-bottom: 3px; }
+  .deploy-card .dc-desc { font-size: 12px; color: var(--text-2); margin-bottom: 14px; min-height: 32px; }
+  .code-block {
+    background: #F4F3F0; border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px;
+    font-family: "JetBrains Mono", monospace; font-size: 11.5px; line-height: 1.5;
+    color: var(--text-1); overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+    margin-bottom: 12px; flex: 1;
+  }
+  .deploy-card .dc-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
+
+  /* ---------- Assistant cards ---------- */
+  .assist-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .assist-card {
+    border: 1px solid var(--border); border-radius: var(--radius-card);
+    background: var(--surface); padding: 18px 20px;
+    transition: border-color 150ms ease;
+    display: flex; flex-direction: column;
+  }
+  .assist-card:hover { border-color: var(--border-strong); }
+  .assist-card .ac-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 4px; }
+  .assist-card .ac-name { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+  .assist-card .ac-desc { font-size: 13px; color: var(--text-2); margin: 2px 0 16px; min-height: 20px; }
+  .assist-card .ac-metrics { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+  .metric-block .m-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); font-weight: 500; margin-bottom: 4px; }
+  .metric-block .m-value { font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .ac-foot { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+  .sparkline { display: block; }
+
+  /* ---------- Analytics ---------- */
+  .chart-card { padding: 20px; }
+  .chart-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .chart-legend { display: flex; gap: 16px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+  .legend-item .swatch { width: 10px; height: 3px; border-radius: 2px; }
+
+  /* ---------- Detail / chat ---------- */
+  .detail-layout { display: grid; grid-template-columns: 320px 1fr; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--surface); min-height: 560px; }
+  .detail-config { border-right: 1px solid var(--border); padding: 22px; overflow-y: auto; }
+  .detail-config .dc-section { margin-bottom: 20px; }
+  .detail-config .dc-section .label { display: block; margin-bottom: 8px; }
+  .kb-attached { display: flex; flex-direction: column; gap: 6px; }
+  .kb-item { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; }
+  .kb-item svg { width: 14px; height: 14px; color: var(--text-2); flex-shrink: 0; }
+  .prompt-readout { font-size: 13px; color: var(--text-1); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; line-height: 1.55; }
+
+  .chat { display: flex; flex-direction: column; }
+  .chat-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+  .chat-head .ch-name { font-weight: 600; font-size: 15px; }
+  .chat-body { flex: 1; padding: 24px 20px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; max-height: 440px; }
+  .msg { display: flex; gap: 10px; max-width: 88%; }
+  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  .msg .m-avatar { width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0; display: grid; place-items: center; font-size: 11px; font-weight: 600; }
+  .msg.user .m-avatar { background: var(--primary); color: #fff; }
+  .msg.bot .m-avatar { background: var(--accent-tint); color: var(--accent); }
+  .m-bubble { font-size: 14px; line-height: 1.6; padding: 10px 14px; border-radius: 10px; }
+  .msg.user .m-bubble { background: var(--primary); color: #fff; border-bottom-right-radius: 3px; }
+  .msg.bot .m-bubble { background: var(--bg); color: var(--text-1); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
+  .cites { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .cite {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-family: "JetBrains Mono", monospace;
+    background: var(--accent-tint); color: var(--accent);
+    border: 1px solid #D5DEFB; border-radius: 5px; padding: 2px 7px;
+    cursor: help; position: relative;
+  }
+  .cite svg { width: 11px; height: 11px; }
+  .cite .cite-tip {
+    display: none;
+    position: absolute; bottom: calc(100% + 8px); left: 0;
+    width: 260px; background: var(--primary); color: #fff;
+    font-family: "Inter", sans-serif; font-size: 12px; line-height: 1.5;
+    padding: 10px 12px; border-radius: 8px; box-shadow: var(--shadow-modal);
+    z-index: 20; text-align: left; font-weight: 400; letter-spacing: 0;
+  }
+  .cite .cite-tip::after { content: ""; position: absolute; top: 100%; left: 16px; border: 6px solid transparent; border-top-color: var(--primary); }
+  .cite .cite-tip .ct-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.6); margin-bottom: 4px; display: block; }
+  .cite:hover .cite-tip, .cite:focus .cite-tip { display: block; }
+  .chat-input-bar { display: flex; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+  .chat-input-bar input { flex: 1; }
+  .typing span { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); margin-right: 3px; animation: blink 1.2s infinite; }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+
+  /* ---------- Progress banner (home partial) ---------- */
+  .progress-banner {
+    display: flex; align-items: center; gap: 18px;
+    background: var(--primary); color: #fff;
+    border-radius: var(--radius-card); padding: 20px 24px; margin-bottom: 28px;
+  }
+  .progress-banner .pb-ring { flex-shrink: 0; }
+  .progress-banner .pb-text .pb-step { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.6); font-weight: 500; margin-bottom: 3px; }
+  .progress-banner .pb-text h3 { color: #fff; font-size: 17px; margin-bottom: 2px; }
+  .progress-banner .pb-text p { font-size: 13px; color: rgba(255,255,255,0.7); }
+  .progress-banner .btn { margin-left: auto; }
+  .progress-banner .btn-primary { background: #fff; color: var(--primary); }
+  .progress-banner .btn-primary:hover { background: #F0F0EE; }
+
+  /* ---------- Toast ---------- */
+  .toast-wrap { position: fixed; bottom: 24px; right: 24px; z-index: 100; display: flex; flex-direction: column; gap: 10px; }
+  .toast {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--primary); color: #fff;
+    padding: 12px 16px; border-radius: 8px; box-shadow: var(--shadow-modal);
+    font-size: 13.5px; min-width: 240px; max-width: 340px;
+    animation: toastIn 200ms ease;
+  }
+  .toast svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .toast.success svg { color: var(--success); }
+  .toast.info svg { color: var(--accent); }
+  .toast.leaving { animation: toastOut 200ms ease forwards; }
+  @keyframes toastIn { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes toastOut { to { transform: translateY(12px); opacity: 0; } }
+
+  /* ---------- Modal ---------- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(17,17,17,0.32);
+    display: none; align-items: center; justify-content: center; z-index: 90; padding: 24px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-modal);
+    width: 100%; max-width: 440px; padding: 24px; animation: toastIn 180ms ease;
+  }
+  .modal h3 { font-size: 17px; margin-bottom: 6px; }
+  .modal p { font-size: 14px; color: var(--text-2); margin-bottom: 20px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* ---------- View fade ---------- */
+  .view { display: none; }
+  .view.active { display: block; animation: fade 150ms ease; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+  .row-between { display: flex; align-items: center; justify-content: space-between; }
+  .gap-sm { gap: 8px; }
+  .flex { display: flex; align-items: center; }
+  .mt-24 { margin-top: 24px; }
+  .mb-16 { margin-bottom: 16px; }
+  .divider { height: 1px; background: var(--border); margin: 16px 0; }
+
+  .menu-wrap { position: relative; }
+  .menu {
+    display: none; position: absolute; right: 0; top: calc(100% + 4px);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: var(--shadow-modal); padding: 4px; min-width: 150px; z-index: 30;
+  }
+  .menu.open { display: block; }
+  .menu button {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+    padding: 8px 10px; font-size: 13px; border: none; background: none; color: var(--text-1); border-radius: 5px;
+  }
+  .menu button:hover { background: var(--bg); }
+  .menu button.danger { color: var(--error); }
+  .menu button svg { width: 15px; height: 15px; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .content { margin-left: 0; }
+    .content-inner { padding: 20px 18px 40px; }
+    .topbar {
+      display: flex; align-items: center; gap: 8px;
+      position: sticky; top: 0; z-index: 40;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 10px 14px; overflow-x: auto;
+    }
+    .topbar .brand { padding: 0 8px 0 0; flex-shrink: 0; }
+    .topbar .name { font-size: 14px; }
+    .topbar .plan { display: none; }
+    .topbar-nav { display: flex; gap: 4px; }
+    .topbar-nav .nav-item { width: auto; padding: 7px 10px; font-size: 13px; }
+    .topbar-nav .nav-item span.lbl { display: none; }
+    .topbar-nav .nav-item .badge-count { display: none; }
+    .stat-grid { grid-template-columns: 1fr; }
+    .assist-grid { grid-template-columns: 1fr; }
+    .deploy-grid { grid-template-columns: 1fr; }
+    .upload-row { grid-template-columns: 1fr; }
+    .detail-layout { grid-template-columns: 1fr; }
+    .detail-config { border-right: none; border-bottom: 1px solid var(--border); }
+    .hero { padding: 32px 4px; }
+    .hero-head h1 { font-size: 26px; }
+    .step-num { font-size: 36px; top: 16px; right: 18px; }
+    .content-inner { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">K</div>
+      <div>
+        <div class="name">Kore AI</div>
+        <div class="plan">Enterprise</div>
+      </div>
+    </div>
+    <nav class="nav" id="sideNav" aria-label="Primary">
+      <button class="nav-item" data-page="home"><i data-lucide="layout-dashboard"></i><span class="lbl">Home</span></button>
+      <button class="nav-item" data-page="knowledge"><i data-lucide="database"></i><span class="lbl">Knowledge</span><span class="badge-count" id="navKnowledgeCount">0</span></button>
+      <button class="nav-item" data-page="assistants"><i data-lucide="bot"></i><span class="lbl">Assistants</span><span class="badge-count" id="navAssistantCount">0</span></button>
+      <button class="nav-item" data-page="analytics"><i data-lucide="line-chart"></i><span class="lbl">Analytics</span></button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-chip" role="button" tabindex="0">
+        <div class="avatar">AD</div>
+        <div class="user-meta">
+          <div class="u-name">AI Dev</div>
+          <div class="u-mail">ai.dev03@motionexai.com</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Mobile top nav -->
+  <div class="topbar">
+    <div class="brand"><div class="logo">K</div><div class="name">Kore AI</div></div>
+    <div class="topbar-nav" id="topNav">
+      <button class="nav-item" data-page="home"><i data-lucide="layout-dashboard"></i><span class="lbl">Home</span></button>
+      <button class="nav-item" data-page="knowledge"><i data-lucide="database"></i><span class="lbl">Knowledge</span></button>
+      <button class="nav-item" data-page="assistants"><i data-lucide="bot"></i><span class="lbl">Assistants</span></button>
+      <button class="nav-item" data-page="analytics"><i data-lucide="line-chart"></i><span class="lbl">Analytics</span></button>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <main class="content">
+    <div class="content-inner">
+      <section id="page-home" class="view"></section>
+      <section id="page-setup" class="view"></section>
+      <section id="page-knowledge" class="view"></section>
+      <section id="page-assistants" class="view"></section>
+      <section id="page-analytics" class="view"></section>
+      <section id="page-detail" class="view"></section>
+    </div>
+  </main>
+</div>
+
+<!-- Toasts -->
+<div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="modalTitle">Confirm</h3>
+    <p id="modalBody">Are you sure?</p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+      <button class="btn btn-primary" id="modalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+/* ============================================================
+   STATE
+============================================================ */
+const state = {
+  page: 'home',
+  knowledge: [],   // {id,name,type,status,date,chunks,progress}
+  assistants: [],  // {id,name,desc,status,prompt,tone,queries7d,avgScore,spark,kb:[ids]}
+  setup: { step: 1, done: { 1:false, 2:false, 3:false }, files: [], name: '', prompt: '', tone: 'Professional' },
+  detailId: null,
+};
+
+let uid = 1;
+const nid = () => 'id' + (uid++);
+const todayStr = () => new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+/* Sample data generator (for "Load sample workspace") */
+function seedSample() {
+  state.knowledge = [
+    { id: nid(), name: 'Employee-Handbook-2026.pdf', type: 'PDF', status: 'Ready', date: 'Jun 12, 2026', chunks: 284, progress: 100 },
+    { id: nid(), name: 'Security-Policy.docx', type: 'DOCX', status: 'Ready', date: 'Jun 12, 2026', chunks: 96, progress: 100 },
+    { id: nid(), name: 'help.koreai.com/docs', type: 'URL', status: 'Ready', date: 'Jun 18, 2026', chunks: 412, progress: 100 },
+    { id: nid(), name: 'Q2-Product-Roadmap.pdf', type: 'PDF', status: 'Indexing', date: 'Jul 1, 2026', chunks: 0, progress: 62 },
+  ];
+  const kbIds = state.knowledge.map(k => k.id);
+  state.assistants = [
+    { id: nid(), name: 'HR Helpdesk', desc: 'Answers policy & benefits questions', status: 'Live', prompt: 'You are a helpful HR assistant for Motionex. Answer only from the provided knowledge. If unsure, say so.', tone: 'Friendly', queries7d: 1284, avgScore: 0.91, spark: [8,12,10,18,22,19,28], kb: [kbIds[0], kbIds[1]] },
+    { id: nid(), name: 'Support Copilot', desc: 'Deflects Tier-1 support tickets', status: 'Live', prompt: 'You are a support assistant. Answer strictly from the documentation. If the answer is not present, tell the user to open a ticket.', tone: 'Professional', queries7d: 942, avgScore: 0.74, spark: [20,18,15,14,16,12,10], kb: [kbIds[2]] },
+    { id: nid(), name: 'Sales Enablement', desc: 'Product knowledge for the sales team', status: 'Draft', prompt: 'You are a technical sales assistant. Answer from the roadmap and product docs only.', tone: 'Technical', queries7d: 0, avgScore: 0, spark: [0,0,0,0,0,0,0], kb: [kbIds[3]] },
+  ];
+  toast('Sample workspace loaded', 'info');
+  renderAll();
+  go('home');
+}
+
+/* ============================================================
+   HELPERS
+============================================================ */
+function scoreClass(s) { return s >= 0.8 ? 'good' : s >= 0.6 ? 'mid' : 'bad'; }
+function fmtScore(s) { return s > 0 ? s.toFixed(2) : '—'; }
+function el(html) { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
+
+function setupProgress() {
+  const d = state.setup.done;
+  const kn = state.knowledge.length > 0;
+  const as = state.assistants.length > 0;
+  return { hasKnowledge: kn, hasAssistant: as, fully: kn && as };
+}
+
+function sparkSVG(data, w = 96, h = 28, color = 'var(--accent)') {
+  if (!data || data.every(v => v === 0)) return `<svg class="sparkline" width="${w}" height="${h}"><line x1="0" y1="${h-2}" x2="${w}" y2="${h-2}" stroke="var(--border-strong)" stroke-dasharray="3 3"/></svg>`;
+  const max = Math.max(...data), min = Math.min(...data);
+  const rng = max - min || 1;
+  const step = w / (data.length - 1);
+  const pts = data.map((v, i) => [i * step, h - 3 - ((v - min) / rng) * (h - 6)]);
+  const path = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const area = path + ` L${w} ${h} L0 ${h} Z`;
+  const gid = 'sg' + Math.random().toString(36).slice(2, 7);
+  return `<svg class="sparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${color}" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+    <path d="${area}" fill="url(#${gid})"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function fileTypeIcon(type) {
+  return type === 'URL' ? 'link' : type === 'DOCX' ? 'file-text' : 'file';
+}
+
+/* ============================================================
+   TOAST + MODAL
+============================================================ */
+function toast(msg, kind = 'success') {
+  const icon = kind === 'success' ? 'check-circle-2' : 'info';
+  const node = el(`<div class="toast ${kind}"><i data-lucide="${icon}"></i><span>${msg}</span></div>`);
+  document.getElementById('toastWrap').appendChild(node);
+  lucide.createIcons({ nodes: [node] });
+  setTimeout(() => {
+    node.classList.add('leaving');
+    setTimeout(() => node.remove(), 200);
+  }, 3000);
+}
+
+let modalResolve = null;
+function confirmModal(title, body, confirmLabel = 'Confirm', danger = false) {
+  return new Promise(resolve => {
+    modalResolve = resolve;
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalBody').textContent = body;
+    const c = document.getElementById('modalConfirm');
+    c.textContent = confirmLabel;
+    c.className = 'btn ' + (danger ? 'btn-primary' : 'btn-primary');
+    if (danger) c.style.background = 'var(--error)';
+    else c.style.background = '';
+    document.getElementById('modalOverlay').classList.add('open');
+  });
+}
+document.getElementById('modalCancel').onclick = () => closeModal(false);
+document.getElementById('modalConfirm').onclick = () => closeModal(true);
+document.getElementById('modalOverlay').onclick = (e) => { if (e.target.id === 'modalOverlay') closeModal(false); };
+function closeModal(v) { document.getElementById('modalOverlay').classList.remove('open'); if (modalResolve) { modalResolve(v); modalResolve = null; } }
+
+function copyText(text, label = 'Copied to clipboard') {
+  navigator.clipboard?.writeText(text).then(() => toast(label, 'success')).catch(() => toast(label, 'success'));
+}
+
+/* ============================================================
+   ROUTING
+============================================================ */
+function go(page) {
+  state.page = page;
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  const map = { home:'page-home', setup:'page-setup', knowledge:'page-knowledge', assistants:'page-assistants', analytics:'page-analytics', detail:'page-detail' };
+  document.getElementById(map[page]).classList.add('active');
+  // nav highlight (detail/setup map to nearest section)
+  const navPage = page === 'detail' ? 'assistants' : page === 'setup' ? 'home' : page;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === navPage));
+  window.scrollTo(0, 0);
+  render(page);
+}
+
+document.querySelectorAll('[data-page]').forEach(btn => btn.addEventListener('click', () => go(btn.dataset.page)));
+
+/* ============================================================
+   RENDER DISPATCH
+============================================================ */
+function renderAll() {
+  document.getElementById('navKnowledgeCount').textContent = state.knowledge.length;
+  document.getElementById('navAssistantCount').textContent = state.assistants.length;
+  render(state.page);
+}
+function render(page) {
+  if (page === 'home') renderHome();
+  else if (page === 'setup') renderSetup();
+  else if (page === 'knowledge') renderKnowledge();
+  else if (page === 'assistants') renderAssistants();
+  else if (page === 'analytics') renderAnalytics();
+  else if (page === 'detail') renderDetail();
+  lucide.createIcons();
+}
+
+/* ============================================================
+   HOME
+============================================================ */
+function renderHome() {
+  const p = setupProgress();
+  const wrap = document.getElementById('page-home');
+
+  // 1) Fully empty -> onboarding hero + stepper entry
+  if (!p.hasKnowledge && !p.hasAssistant) {
+    wrap.innerHTML = `
+      <div class="hero">
+        <div class="hero-head">
+          <span class="kicker"><i data-lucide="sparkles"></i> Let's get you set up</span>
+          <h1>Deploy an AI assistant grounded in your company knowledge</h1>
+          <p>Three steps: add your knowledge, build an assistant on top of it, then deploy. It takes about five minutes.</p>
+        </div>
+        <div id="homeStepperMount"></div>
+        <div style="text-align:center;margin-top:24px">
+          <button class="btn btn-ghost btn-sm" onclick="seedSample()"><i data-lucide="wand-2"></i> Or load a sample workspace to explore</button>
+        </div>
+      </div>`;
+    lucide.createIcons();
+    mountStepper(document.getElementById('homeStepperMount'));
+    return;
+  }
+
+  // 2) Partially set up -> progress banner + whatever exists
+  if (!p.fully) {
+    const step = !p.hasKnowledge ? 1 : !p.hasAssistant ? 2 : 3;
+    const stepText = step === 2
+      ? { n: 'Step 2 of 3', h: 'Now build your assistant', p: 'Your knowledge is ready. Create an assistant that answers from it.', cta: 'Build your assistant →', page: 'setup' }
+      : { n: 'Step 1 of 3', h: 'Add your knowledge first', p: 'Your assistant needs documents to answer from.', cta: 'Add knowledge →', page: 'knowledge' };
+    wrap.innerHTML = `
+      <div class="page-head"><h1>Home</h1><p>Welcome back — finish setting up your workspace.</p></div>
+      <div class="progress-banner">
+        <div class="pb-ring">${ringSVG(step === 2 ? 66 : 33)}</div>
+        <div class="pb-text">
+          <div class="pb-step">${stepText.n}</div>
+          <h3>${stepText.h}</h3>
+          <p>${stepText.p}</p>
+        </div>
+        <button class="btn btn-primary" onclick="${stepText.page === 'setup' ? "openSetup(2)" : "go('knowledge')"}">${stepText.cta}</button>
+      </div>
+      ${p.hasKnowledge ? knowledgeSummaryCard() : ''}
+      ${p.hasAssistant ? '' : ''}`;
+    lucide.createIcons();
+    return;
+  }
+
+  // 3) Fully set up -> dashboard
+  const totalQueries = state.assistants.reduce((s, a) => s + a.queries7d, 0);
+  const live = state.assistants.filter(a => a.status === 'Live').length;
+  wrap.innerHTML = `
+    <div class="page-head row-between">
+      <div><h1>Home</h1><p>Your workspace at a glance.</p></div>
+      <button class="btn btn-primary" onclick="openSetup(1)"><i data-lucide="plus"></i> New assistant</button>
+    </div>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-label"><i data-lucide="message-square"></i> Queries · 7 days</div>
+        <div class="stat-value">${totalQueries.toLocaleString()}</div>
+        <div class="stat-sub up">▲ 12% vs last week</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label"><i data-lucide="bot"></i> Assistants live</div>
+        <div class="stat-value">${live} <span style="font-size:16px;color:var(--text-3);font-weight:500">/ ${state.assistants.length}</span></div>
+        <div class="stat-sub">${state.assistants.length - live} in draft</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label"><i data-lucide="database"></i> Knowledge sources</div>
+        <div class="stat-value">${state.knowledge.length}</div>
+        <div class="stat-sub">${state.knowledge.reduce((s,k)=>s+k.chunks,0).toLocaleString()} chunks indexed</div>
+      </div>
+    </div>
+    <div class="row-between mb-16">
+      <h3 style="font-size:15px">Your assistants</h3>
+      <a href="#" onclick="go('assistants');return false;">View all →</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Assistant</th><th>Status</th><th>Queries 7d</th><th>Avg score</th><th></th></tr></thead>
+        <tbody>
+          ${state.assistants.map(a => `
+            <tr style="cursor:pointer" onclick="openDetail('${a.id}')">
+              <td class="cell-primary">${a.name}<div class="text-3" style="font-size:12px;font-weight:400">${a.desc}</div></td>
+              <td><span class="badge ${a.status === 'Live' ? 'live' : 'draft'}"><span class="dot"></span>${a.status}</span></td>
+              <td class="mono">${a.queries7d.toLocaleString()}</td>
+              <td><span class="score ${scoreClass(a.avgScore)}">${fmtScore(a.avgScore)}</span></td>
+              <td style="text-align:right"><i data-lucide="chevron-right" style="width:16px;color:var(--text-3)"></i></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  lucide.createIcons();
+}
+
+function knowledgeSummaryCard() {
+  return `<div class="card card-pad row-between" style="margin-top:16px">
+    <div class="flex gap-sm"><i data-lucide="database" style="width:18px;color:var(--text-2)"></i>
+      <div><div style="font-weight:500;font-size:14px">${state.knowledge.length} knowledge source${state.knowledge.length>1?'s':''} added</div>
+      <div class="text-3" style="font-size:12px">${state.knowledge.filter(k=>k.status==='Ready').length} ready · ${state.knowledge.filter(k=>k.status==='Indexing').length} indexing</div></div></div>
+    <button class="btn btn-secondary btn-sm" onclick="go('knowledge')">Manage</button>
+  </div>`;
+}
+
+function ringSVG(pct) {
+  const r = 22, c = 2 * Math.PI * r, off = c - (pct / 100) * c;
+  return `<svg width="52" height="52" viewBox="0 0 52 52">
+    <circle cx="26" cy="26" r="${r}" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="4"/>
+    <circle cx="26" cy="26" r="${r}" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"
+      stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 26 26)"/>
+    <text x="26" y="30" text-anchor="middle" fill="#fff" font-size="12" font-weight="600" font-family="Inter">${pct}%</text>
+  </svg>`;
+}
+
+/* ============================================================
+   GUIDED SETUP (STEPPER)
+============================================================ */
+function openSetup(step) {
+  state.setup.step = step || state.setup.step;
+  // If knowledge already exists, mark step 1 done
+  if (state.knowledge.length > 0) { state.setup.done[1] = true; if (state.setup.step === 1) state.setup.step = 2; }
+  go('setup');
+}
+
+function renderSetup() {
+  const wrap = document.getElementById('page-setup');
+  wrap.innerHTML = `
+    <div class="hero">
+      <div class="hero-head" style="margin-bottom:28px">
+        <span class="kicker"><i data-lucide="route"></i> Guided setup</span>
+        <h1>Set up your assistant in three steps</h1>
+      </div>
+      <div class="progress-track" id="progTrack"></div>
+      <div class="progress-labels" id="progLabels"></div>
+      <div id="stepperMount"></div>
+    </div>`;
+  lucide.createIcons();
+  mountStepper(document.getElementById('stepperMount'), true);
+}
+
+function mountStepper(container, showProgress) {
+  const s = state.setup;
+  if (showProgress) {
+    const track = document.getElementById('progTrack');
+    const labels = document.getElementById('progLabels');
+    if (track) {
+      track.innerHTML = [1,2,3].map(i => {
+        const cls = s.done[i] ? 'done' : s.step === i ? 'active' : '';
+        return `<div class="progress-seg ${cls}" style="margin-right:${i<3?'8px':'0'}"><div class="fill"></div></div>`;
+      }).join('');
+      labels.innerHTML = ['Add knowledge','Configure assistant','Deploy'].map((l,i)=>`<span class="${s.step===i+1?'cur':''}">${String(i+1).padStart(2,'0')} · ${l}</span>`).join('');
+    }
+  }
+  container.innerHTML = stepMarkup(1) + stepMarkup(2) + stepMarkup(3);
+  lucide.createIcons();
+  wireStep1();
+  wireStep2();
+  wireStep3();
+}
+
+function stepMarkup(n) {
+  const s = state.setup;
+  const active = s.step === n;
+  const done = s.done[n];
+  const collapsed = done && !active;
+  const titles = { 1:'Add your knowledge', 2:'Configure your assistant', 3:'Deploy' };
+
+  if (collapsed) {
+    let summary = '';
+    if (n === 1) summary = `<b>${s.files.length} source${s.files.length!==1?'s':''}</b> added`;
+    if (n === 2) summary = `<b>${s.name || 'Assistant'}</b> · ${s.tone} tone`;
+    if (n === 3) summary = `Deployed to <b>web, link & API</b>`;
+    return `<div class="step collapsed" data-step="${n}">
+      <div class="step-body">
+        <div class="step-summary-check"><i data-lucide="check"></i></div>
+        <div class="step-summary-text">${summary}</div>
+        <button class="btn btn-ghost btn-sm step-summary-edit" onclick="editStep(${n})"><i data-lucide="pencil"></i> Edit</button>
+      </div>
+    </div>`;
+  }
+  if (!active) {
+    // upcoming (locked-looking, quiet)
+    return `<div class="step" data-step="${n}" style="opacity:.55">
+      <span class="step-num">0${n}</span>
+      <div class="step-body"><div class="step-title">${titles[n]}</div>
+      <div class="step-desc">${n===2?'Name it, write a system prompt, pick a tone.':'Embed a widget, share a link, or use the REST API.'}</div></div>
+    </div>`;
+  }
+  // active — content injected by wire functions
+  return `<div class="step active" data-step="${n}">
+    <span class="step-num">0${n}</span>
+    <div class="step-body" id="stepContent${n}"></div>
+  </div>`;
+}
+
+/* --- Step 1 --- */
+function wireStep1() {
+  if (state.setup.step !== 1) return;
+  const c = document.getElementById('stepContent1');
+  if (!c) return;
+  c.innerHTML = `
+    <div class="step-title">Add your knowledge</div>
+    <div class="step-desc">Your assistant answers only from what you add here. Upload documents or paste a URL to crawl.</div>
+    <div class="upload-row">
+      <div class="dropzone" id="dz1" tabindex="0" role="button" aria-label="Upload documents">
+        <div class="dz-ico"><i data-lucide="upload-cloud"></i></div>
+        <div class="dz-title">Drop files or click to upload</div>
+        <div class="dz-sub">PDF, DOCX, TXT · up to 50 MB each</div>
+        <input type="file" id="fileInput1" multiple hidden />
+      </div>
+      <div class="url-box"><div class="url-inner">
+        <label for="urlInput1">Or add a URL</label>
+        <div class="url-input-group">
+          <input type="url" id="urlInput1" placeholder="https://docs.yourcompany.com" />
+          <button class="btn btn-secondary btn-sm" id="addUrl1">Add</button>
+        </div>
+        <div class="hint">We'll crawl and index the page content.</div>
+      </div></div>
+    </div>
+    <div class="chips" id="chips1"></div>
+    <div class="step-actions">
+      <button class="btn btn-primary" id="save1" ${state.setup.files.length?'':'disabled'}>Save &amp; continue →</button>
+      <span class="text-3" style="font-size:12px" id="save1hint">${state.setup.files.length?'':'Add at least one source to continue'}</span>
+    </div>`;
+  lucide.createIcons();
+  renderChips1();
+
+  const dz = document.getElementById('dz1'), fi = document.getElementById('fileInput1');
+  dz.onclick = () => fi.click();
+  dz.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } };
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('dragover'); }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('dragover'); }));
+  dz.addEventListener('drop', e => { addFiles1([...e.dataTransfer.files].map(f => f.name)); });
+  fi.onchange = () => { addFiles1([...fi.files].map(f => f.name)); fi.value = ''; };
+  document.getElementById('addUrl1').onclick = () => {
+    const inp = document.getElementById('urlInput1'); const v = inp.value.trim();
+    if (!v) return;
+    state.setup.files.push({ name: v.replace(/^https?:\/\//,''), type: 'URL' });
+    inp.value = ''; renderChips1(); refreshSave1();
+  };
+  document.getElementById('save1').onclick = () => {
+    state.setup.done[1] = true; state.setup.step = 2;
+    // commit to real knowledge state
+    state.setup.files.forEach(f => {
+      const type = f.type || guessType(f.name);
+      const k = { id: nid(), name: f.name, type, status: 'Indexing', date: todayStr(), chunks: 0, progress: 8 };
+      state.knowledge.push(k);
+      simulateIndex(k.id);
+    });
+    renderAll();
+    renderSetup();
+    toast('Knowledge saved — indexing started', 'success');
+  };
+}
+function guessType(name) {
+  const n = name.toLowerCase();
+  if (n.endsWith('.pdf')) return 'PDF';
+  if (n.endsWith('.docx') || n.endsWith('.doc')) return 'DOCX';
+  if (n.includes('/') || n.includes('.com') || n.includes('.io')) return 'URL';
+  return 'PDF';
+}
+function addFiles1(names) {
+  names.forEach(n => state.setup.files.push({ name: n, type: guessType(n) }));
+  renderChips1(); refreshSave1();
+}
+function renderChips1() {
+  const c = document.getElementById('chips1'); if (!c) return;
+  c.innerHTML = state.setup.files.map((f, i) => `
+    <span class="chip"><i data-lucide="${fileTypeIcon(f.type||guessType(f.name))}" class="chip-ico"></i>${f.name}
+      <button class="chip-close" aria-label="Remove ${f.name}" onclick="removeChip1(${i})"><i data-lucide="x"></i></button></span>`).join('');
+  lucide.createIcons();
+}
+function removeChip1(i) { state.setup.files.splice(i,1); renderChips1(); refreshSave1(); }
+function refreshSave1() {
+  const b = document.getElementById('save1'); const h = document.getElementById('save1hint');
+  if (!b) return;
+  const has = state.setup.files.length > 0;
+  b.disabled = !has; if (h) h.textContent = has ? '' : 'Add at least one source to continue';
+}
+
+/* --- Step 2 --- */
+function wireStep2() {
+  if (state.setup.step !== 2) return;
+  const c = document.getElementById('stepContent2'); if (!c) return;
+  const s = state.setup;
+  c.innerHTML = `
+    <div class="step-title">Configure your assistant</div>
+    <div class="step-desc">Give it a name and tell it how to behave. It will answer only from the knowledge you added.</div>
+    <div class="field">
+      <label for="asName">Assistant name</label>
+      <input type="text" id="asName" placeholder="e.g. HR Helpdesk" value="${s.name}" />
+    </div>
+    <div class="field">
+      <label for="asPrompt">System prompt</label>
+      <textarea id="asPrompt" placeholder="You are a helpful assistant for [Company]. Answer only from the provided knowledge. If unsure, say so.">${s.prompt}</textarea>
+      <div class="hint">Set the assistant's role and its guardrails. Keep it short and specific.</div>
+    </div>
+    <div class="field">
+      <label>Tone</label>
+      <div class="seg-control" id="toneSeg">
+        ${['Professional','Friendly','Technical'].map(t => `<button data-tone="${t}" class="${s.tone===t?'on':''}">${t}</button>`).join('')}
+      </div>
+    </div>
+    <div class="step-actions">
+      <button class="btn btn-secondary" onclick="backTo(1)">← Back</button>
+      <button class="btn btn-primary" id="build2">Build assistant →</button>
+    </div>`;
+  lucide.createIcons();
+  document.getElementById('toneSeg').querySelectorAll('button').forEach(b => b.onclick = () => {
+    s.tone = b.dataset.tone;
+    document.querySelectorAll('#toneSeg button').forEach(x => x.classList.toggle('on', x === b));
+  });
+  document.getElementById('asName').oninput = e => s.name = e.target.value;
+  document.getElementById('asPrompt').oninput = e => s.prompt = e.target.value;
+  document.getElementById('build2').onclick = () => {
+    if (!s.name.trim()) { s.name = 'Untitled assistant'; }
+    if (!s.prompt.trim()) { s.prompt = 'You are a helpful assistant. Answer only from the provided knowledge. If unsure, say so.'; }
+    // create the assistant
+    const a = {
+      id: nid(), name: s.name.trim(), desc: 'Grounded on your ' + state.knowledge.length + ' source' + (state.knowledge.length>1?'s':''),
+      status: 'Draft', prompt: s.prompt.trim(), tone: s.tone, queries7d: 0, avgScore: 0, spark: [0,0,0,0,0,0,0],
+      kb: state.knowledge.map(k => k.id)
+    };
+    state.assistants.push(a);
+    state.setup.createdAssistantId = a.id;
+    s.done[2] = true; s.step = 3;
+    renderAll(); renderSetup();
+    toast('Assistant built — ready to deploy', 'success');
+  };
+}
+
+/* --- Step 3 --- */
+function wireStep3() {
+  if (state.setup.step !== 3) return;
+  const c = document.getElementById('stepContent3'); if (!c) return;
+  const s = state.setup;
+  const apiKey = 'kore_sk_live_9f3b21c7a4e08d5f';
+  const embed = `<script src="https://cdn.koreai.com/widget.js"\n  data-assistant="${(s.name||'assistant').toLowerCase().replace(/\s+/g,'-')}">\n<\/script>`;
+  const pubUrl = `https://app.koreai.com/a/${(s.name||'assistant').toLowerCase().replace(/\s+/g,'-')}`;
+  const endpoint = `POST https://api.koreai.com/v1/query`;
+  c.innerHTML = `
+    <div class="step-title">Deploy</div>
+    <div class="step-desc">Your assistant is built. Ship it anywhere — pick a channel below.</div>
+    <div class="deploy-grid">
+      <div class="deploy-card">
+        <div class="dc-head"><div class="dc-ico"><i data-lucide="code-2"></i></div><span class="badge live"><span class="dot"></span>Ready</span></div>
+        <h4>Web Widget</h4>
+        <div class="dc-desc">Embed a chat bubble on your site.</div>
+        <div class="code-block">${embed.replace(/</g,'&lt;')}</div>
+        <div class="dc-foot"><span class="label">Snippet</span>
+          <button class="btn btn-secondary btn-sm" onclick="copyText(\`${embed.replace(/`/g,'\\`')}\`,'Embed snippet copied')"><i data-lucide="copy"></i> Copy</button></div>
+      </div>
+      <div class="deploy-card">
+        <div class="dc-head"><div class="dc-ico"><i data-lucide="link"></i></div><span class="badge live"><span class="dot"></span>Live</span></div>
+        <h4>Public Link</h4>
+        <div class="dc-desc">Share a hosted page instantly.</div>
+        <div class="code-block">${pubUrl}</div>
+        <div class="dc-foot"><span class="label">URL</span>
+          <button class="btn btn-secondary btn-sm" onclick="copyText('${pubUrl}','Public link copied')"><i data-lucide="copy"></i> Copy</button></div>
+      </div>
+      <div class="deploy-card">
+        <div class="dc-head"><div class="dc-ico"><i data-lucide="terminal"></i></div><span class="badge ready"><span class="dot"></span>Active</span></div>
+        <h4>REST API</h4>
+        <div class="dc-desc">Call from your own backend.</div>
+        <div class="code-block">${endpoint}\nAuthorization: Bearer\n${apiKey}</div>
+        <div class="dc-foot"><span class="label">API key</span>
+          <button class="btn btn-secondary btn-sm" onclick="copyText('${apiKey}','API key copied')"><i data-lucide="copy"></i> Copy</button></div>
+      </div>
+    </div>
+    <div class="step-actions">
+      <button class="btn btn-secondary" onclick="backTo(2)">← Back</button>
+      <button class="btn btn-primary" id="finish3">Go to dashboard →</button>
+    </div>`;
+  lucide.createIcons();
+  document.getElementById('finish3').onclick = () => {
+    // mark assistant Live + give it some initial traffic
+    const a = state.assistants.find(x => x.id === state.setup.createdAssistantId);
+    if (a) { a.status = 'Live'; a.desc = a.desc; }
+    s.done[3] = true;
+    toast('Assistant deployed and live 🎉', 'success');
+    renderAll();
+    go('home');
+  };
+}
+
+function backTo(n) { state.setup.step = n; renderSetup(); }
+function editStep(n) { state.setup.step = n; renderSetup(); }
+
+/* ============================================================
+   INDEXING SIMULATION
+============================================================ */
+function simulateIndex(id) {
+  const tick = () => {
+    const k = state.knowledge.find(x => x.id === id);
+    if (!k || k.status !== 'Indexing') return;
+    k.progress = Math.min(100, k.progress + Math.random() * 22 + 10);
+    if (k.progress >= 100) {
+      k.progress = 100; k.status = 'Ready';
+      k.chunks = Math.floor(Math.random() * 300 + 60);
+      if (state.page === 'knowledge') renderKnowledge();
+      if (state.page === 'setup') { /* chips already committed */ }
+      lucide.createIcons();
+      return;
+    }
+    if (state.page === 'knowledge') updateFileProgress(id, k.progress);
+    setTimeout(tick, 700);
+  };
+  setTimeout(tick, 700);
+}
+function updateFileProgress(id, pct) {
+  const bar = document.querySelector(`[data-progress="${id}"] .bar`);
+  if (bar) bar.style.width = pct + '%';
+}
+
+/* ============================================================
+   KNOWLEDGE PAGE
+============================================================ */
+function renderKnowledge() {
+  const wrap = document.getElementById('page-knowledge');
+  const head = `<div class="page-head row-between">
+      <div><h1>Knowledge</h1><p>The documents and pages your assistants answer from.</p></div>
+      ${state.knowledge.length ? `<button class="btn btn-primary" onclick="focusUpload()"><i data-lucide="plus"></i> Add source</button>` : ''}
+    </div>`;
+
+  const uploader = `
+    <div class="upload-row" style="margin-bottom:24px">
+      <div class="dropzone" id="dzK" tabindex="0" role="button" aria-label="Upload documents">
+        <div class="dz-ico"><i data-lucide="upload-cloud"></i></div>
+        <div class="dz-title">Drop files or click to upload</div>
+        <div class="dz-sub">PDF, DOCX, TXT · up to 50 MB each</div>
+        <input type="file" id="fileInputK" multiple hidden />
+      </div>
+      <div class="url-box"><div class="url-inner">
+        <label for="urlInputK">Add a URL to crawl</label>
+        <div class="url-input-group">
+          <input type="url" id="urlInputK" placeholder="https://docs.yourcompany.com" />
+          <button class="btn btn-secondary btn-sm" id="addUrlK">Add</button>
+        </div>
+        <div class="hint">We'll fetch and index the page content.</div>
+      </div></div>
+    </div>`;
+
+  if (!state.knowledge.length) {
+    wrap.innerHTML = head + uploader + `
+      <div class="empty">
+        <div class="empty-ico"><i data-lucide="database"></i></div>
+        <h3>No knowledge sources yet</h3>
+        <p>Your assistant needs documents to answer from. Add a PDF, a Word doc, or a URL to get started.</p>
+        <button class="btn btn-primary" onclick="focusUpload()"><i data-lucide="plus"></i> Add your first source</button>
+      </div>`;
+    lucide.createIcons();
+    wireKnowledgeUpload();
+    return;
+  }
+
+  wrap.innerHTML = head + uploader + `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Source</th><th>Type</th><th>Status</th><th>Chunks</th><th>Added</th><th></th></tr></thead>
+        <tbody>
+          ${state.knowledge.map(k => `
+            <tr>
+              <td class="cell-file">
+                <div class="file-ico"><i data-lucide="${fileTypeIcon(k.type)}"></i></div>
+                <div>
+                  <div class="cell-primary">${k.name}</div>
+                  ${k.status==='Indexing' ? `<div class="file-progress" data-progress="${k.id}"><div class="bar" style="width:${k.progress}%"></div></div>` : `<div class="text-3" style="font-size:12px">${k.type==='URL'?'Web page':'Document'}</div>`}
+                </div>
+              </td>
+              <td><span class="badge type">${k.type}</span></td>
+              <td>${statusBadge(k.status)}</td>
+              <td class="mono">${k.status==='Ready'? k.chunks.toLocaleString() : '—'}</td>
+              <td class="text-2">${k.date}</td>
+              <td style="text-align:right"><button class="icon-btn" aria-label="Remove ${k.name}" onclick="removeKnowledge('${k.id}')"><i data-lucide="trash-2"></i></button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  lucide.createIcons();
+  wireKnowledgeUpload();
+}
+function statusBadge(status) {
+  if (status === 'Ready') return `<span class="badge ready"><span class="dot"></span>Ready</span>`;
+  if (status === 'Indexing') return `<span class="badge indexing"><i data-lucide="loader" style="width:11px"></i>Indexing…</span>`;
+  return `<span class="badge failed"><span class="dot"></span>Failed</span>`;
+}
+function wireKnowledgeUpload() {
+  const dz = document.getElementById('dzK'), fi = document.getElementById('fileInputK');
+  if (dz) {
+    dz.onclick = () => fi.click();
+    dz.onkeydown = e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); fi.click(); } };
+    ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('dragover'); }));
+    ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('dragover'); }));
+    dz.addEventListener('drop', e => addKnowledgeFiles([...e.dataTransfer.files].map(f=>f.name)));
+    fi.onchange = () => { addKnowledgeFiles([...fi.files].map(f=>f.name)); fi.value=''; };
+  }
+  const addUrl = document.getElementById('addUrlK');
+  if (addUrl) addUrl.onclick = () => {
+    const inp = document.getElementById('urlInputK'); const v = inp.value.trim(); if (!v) return;
+    addKnowledge(v.replace(/^https?:\/\//,''), 'URL'); inp.value='';
+  };
+}
+function addKnowledgeFiles(names) { names.forEach(n => addKnowledge(n, guessType(n))); }
+function addKnowledge(name, type) {
+  const k = { id: nid(), name, type, status: 'Indexing', date: todayStr(), chunks: 0, progress: 8 };
+  state.knowledge.push(k);
+  renderAll();
+  simulateIndex(k.id);
+  toast(`Added “${name}” — indexing`, 'info');
+}
+async function removeKnowledge(id) {
+  const k = state.knowledge.find(x => x.id === id);
+  const ok = await confirmModal('Remove this source?', `“${k.name}” will be removed and assistants will stop answering from it.`, 'Remove', true);
+  if (!ok) return;
+  state.knowledge = state.knowledge.filter(x => x.id !== id);
+  renderAll();
+  toast('Source removed', 'success');
+}
+function focusUpload() {
+  const inp = document.getElementById('urlInputK') || document.getElementById('fileInputK');
+  document.getElementById('dzK')?.scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+/* ============================================================
+   ASSISTANTS PAGE
+============================================================ */
+function renderAssistants() {
+  const wrap = document.getElementById('page-assistants');
+  const head = `<div class="page-head row-between">
+      <div><h1>Assistants</h1><p>AI assistants grounded in your knowledge.</p></div>
+      ${state.assistants.length ? `<button class="btn btn-primary" onclick="openSetup(state.knowledge.length?2:1)"><i data-lucide="plus"></i> New assistant</button>` : ''}
+    </div>`;
+
+  if (!state.assistants.length) {
+    wrap.innerHTML = head + `
+      <div class="empty">
+        <div class="empty-ico"><i data-lucide="bot"></i></div>
+        <h3>No assistants yet</h3>
+        <p>Start by adding knowledge first, then come back here to build your assistant. An assistant is only as good as the documents behind it.</p>
+        <button class="btn btn-primary" onclick="go('knowledge')"><i data-lucide="database"></i> Add knowledge first</button>
+      </div>`;
+    lucide.createIcons();
+    return;
+  }
+
+  wrap.innerHTML = head + `<div class="assist-grid">
+    ${state.assistants.map(a => `
+      <div class="assist-card">
+        <div class="ac-head">
+          <div>
+            <div class="ac-name">${a.name}</div>
+          </div>
+          <div class="flex gap-sm">
+            <span class="badge ${a.status==='Live'?'live':'draft'}"><span class="dot"></span>${a.status}</span>
+            <div class="menu-wrap">
+              <button class="icon-btn" aria-label="Assistant options" onclick="toggleMenu(event,'${a.id}')"><i data-lucide="more-horizontal"></i></button>
+              <div class="menu" id="menu-${a.id}">
+                <button onclick="openDetail('${a.id}')"><i data-lucide="settings-2"></i> Configure</button>
+                <button onclick="openSetup(3)"><i data-lucide="rocket"></i> Deploy</button>
+                <button class="danger" onclick="deleteAssistant('${a.id}')"><i data-lucide="trash-2"></i> Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="ac-desc">${a.desc}</div>
+        <div class="ac-metrics">
+          <div class="metric-block">
+            <div class="m-label">Queries · 7d</div>
+            <div class="m-value">${a.queries7d.toLocaleString()}</div>
+          </div>
+          <div class="metric-block">
+            <div class="m-label">Avg score</div>
+            <div class="m-value score ${scoreClass(a.avgScore)}">${fmtScore(a.avgScore)}</div>
+          </div>
+          <div style="margin-left:auto">${sparkSVG(a.spark, 100, 32, a.avgScore>=0.6?'#4F6EF7':'#EF4444')}</div>
+        </div>
+        <div class="ac-foot">
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="openDetail('${a.id}')">Open</button>
+        </div>
+      </div>`).join('')}
+  </div>`;
+  lucide.createIcons();
+}
+function toggleMenu(e, id) {
+  e.stopPropagation();
+  document.querySelectorAll('.menu').forEach(m => { if (m.id !== 'menu-'+id) m.classList.remove('open'); });
+  document.getElementById('menu-'+id).classList.toggle('open');
+}
+document.addEventListener('click', () => document.querySelectorAll('.menu').forEach(m => m.classList.remove('open')));
+async function deleteAssistant(id) {
+  const a = state.assistants.find(x => x.id === id);
+  const ok = await confirmModal('Delete this assistant?', `“${a.name}” and its deployment will be permanently removed.`, 'Delete', true);
+  if (!ok) return;
+  state.assistants = state.assistants.filter(x => x.id !== id);
+  renderAll();
+  toast('Assistant deleted', 'success');
+}
+
+/* ============================================================
+   ANALYTICS PAGE
+============================================================ */
+let analyticsRange = 7;
+function renderAnalytics() {
+  const wrap = document.getElementById('page-analytics');
+  const active = state.assistants.filter(a => a.queries7d > 0);
+  const head = `<div class="page-head"><h1>Analytics</h1><p>Answer quality and where your knowledge falls short.</p></div>`;
+
+  if (!active.length) {
+    wrap.innerHTML = head + `
+      <div class="empty">
+        <div class="empty-ico"><i data-lucide="line-chart"></i></div>
+        <h3>No quality data yet</h3>
+        <p>Ask your assistant some questions to see quality data appear here. Scores update as real queries come in.</p>
+        ${state.assistants.length ? `<button class="btn btn-secondary" onclick="openDetail('${state.assistants[0].id}')"><i data-lucide="message-square"></i> Try the chat preview</button>` : `<button class="btn btn-primary" onclick="go('knowledge')">Add knowledge first</button>`}
+      </div>`;
+    lucide.createIcons();
+    return;
+  }
+
+  wrap.innerHTML = head + `
+    <div class="card chart-card">
+      <div class="chart-head">
+        <div>
+          <div class="label" style="margin-bottom:4px">Answer quality score over time</div>
+          <div class="chart-legend">
+            ${active.map((a,i)=>`<span class="legend-item"><span class="swatch" style="background:${chartColor(i)}"></span>${a.name}</span>`).join('')}
+          </div>
+        </div>
+        <div class="seg-control">
+          <button class="${analyticsRange===7?'on':''}" onclick="setRange(7)">7d</button>
+          <button class="${analyticsRange===30?'on':''}" onclick="setRange(30)">30d</button>
+        </div>
+      </div>
+      ${lineChart(active)}
+    </div>
+
+    <div class="row-between mb-16 mt-24">
+      <h3 style="font-size:15px">Knowledge gaps</h3>
+      <span class="text-3" style="font-size:12px">Questions your assistants couldn't answer</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Question asked</th><th>Times asked</th><th>Suggested action</th></tr></thead>
+        <tbody>
+          ${knowledgeGaps().map(g => `
+            <tr>
+              <td class="cell-primary">${g.q}</td>
+              <td class="mono">${g.n}</td>
+              <td><a href="#" onclick="go('knowledge');return false;"><i data-lucide="plus" style="width:13px;vertical-align:-2px"></i> ${g.action}</a></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  lucide.createIcons();
+}
+function setRange(r) { analyticsRange = r; renderAnalytics(); }
+function chartColor(i) { return ['#4F6EF7','#1A1A2E','#F59E0B','#22C55E'][i % 4]; }
+function knowledgeGaps() {
+  return [
+    { q: 'What is the parental leave policy for contractors?', n: 47, action: 'Add HR contractor policy' },
+    { q: 'How do I request SSO access for a vendor?', n: 31, action: 'Add IT access doc' },
+    { q: 'What are the 2026 holiday dates?', n: 22, action: 'Add holiday calendar' },
+    { q: 'Where is the expense reimbursement form?', n: 18, action: 'Add finance doc' },
+    { q: 'What is the refund window for annual plans?', n: 12, action: 'Add billing FAQ' },
+  ];
+}
+function lineChart(assistants) {
+  const w = 864, h = 240, padL = 34, padB = 24, padT = 10, padR = 10;
+  const iw = w - padL - padR, ih = h - padT - padB;
+  const n = analyticsRange === 7 ? 7 : 12;
+  // gridlines for score 0.4..1.0
+  const yTicks = [0.4,0.6,0.8,1.0];
+  const yToPx = v => padT + ih - ((v - 0.4) / 0.6) * ih;
+  const grid = yTicks.map(v => `
+    <line x1="${padL}" y1="${yToPx(v).toFixed(1)}" x2="${w-padR}" y2="${yToPx(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+    <text x="6" y="${(yToPx(v)+4).toFixed(1)}" font-size="10" fill="var(--text-3)" font-family="JetBrains Mono">${v.toFixed(1)}</text>`).join('');
+  const lines = assistants.map((a, ai) => {
+    const base = a.avgScore || 0.7;
+    const data = Array.from({length:n}, (_,i) => {
+      const wobble = Math.sin((i + ai*2) * 0.9) * 0.05 + (Math.random()-0.5)*0.03;
+      return Math.max(0.42, Math.min(0.99, base - 0.06 + (i/n)*0.08 + wobble));
+    });
+    const step = iw / (n - 1);
+    const pts = data.map((v,i) => [padL + i*step, yToPx(v)]);
+    const path = pts.map((p,i)=>(i===0?'M':'L')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+    const dots = pts.map(p => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.5" fill="${chartColor(ai)}"/>`).join('');
+    return `<path d="${path}" fill="none" stroke="${chartColor(ai)}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+  }).join('');
+  const xlabels = Array.from({length:n},(_,i)=>{
+    const step = iw/(n-1);
+    const lbl = analyticsRange===7 ? ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i] : (i%2===0?`W${Math.floor(i/2)+1}`:'');
+    return `<text x="${(padL+i*step).toFixed(1)}" y="${h-6}" font-size="10" fill="var(--text-3)" text-anchor="middle" font-family="Inter">${lbl}</text>`;
+  }).join('');
+  return `<svg width="100%" viewBox="0 0 ${w} ${h}" style="display:block">${grid}${lines}${xlabels}</svg>`;
+}
+
+/* ============================================================
+   ASSISTANT DETAIL / CHAT
+============================================================ */
+function openDetail(id) { state.detailId = id; go('detail'); }
+function renderDetail() {
+  const a = state.assistants.find(x => x.id === state.detailId);
+  const wrap = document.getElementById('page-detail');
+  if (!a) { wrap.innerHTML = `<div class="empty"><p>Assistant not found.</p></div>`; return; }
+  const kb = a.kb.map(id => state.knowledge.find(k => k.id === id)).filter(Boolean);
+  wrap.innerHTML = `
+    <div class="row-between" style="margin-bottom:20px">
+      <div class="flex gap-sm">
+        <button class="btn btn-ghost btn-sm" onclick="go('assistants')"><i data-lucide="arrow-left"></i> Assistants</button>
+        <div style="width:1px;height:20px;background:var(--border)"></div>
+        <div><span style="font-weight:600;font-size:16px;letter-spacing:-0.02em">${a.name}</span>
+        <span class="badge ${a.status==='Live'?'live':'draft'}" style="margin-left:8px"><span class="dot"></span>${a.status}</span></div>
+      </div>
+      <button class="btn btn-primary" onclick="openSetup(3)"><i data-lucide="rocket"></i> Deploy</button>
+    </div>
+    <div class="detail-layout">
+      <div class="detail-config">
+        <div class="dc-section">
+          <span class="label">Name</span>
+          <input type="text" value="${a.name}" onchange="updateAssistant('${a.id}','name',this.value)"/>
+        </div>
+        <div class="dc-section">
+          <span class="label">System prompt</span>
+          <textarea onchange="updateAssistant('${a.id}','prompt',this.value)">${a.prompt}</textarea>
+        </div>
+        <div class="dc-section">
+          <span class="label">Tone</span>
+          <div class="seg-control" style="width:100%">
+            ${['Professional','Friendly','Technical'].map(t=>`<button style="flex:1" class="${a.tone===t?'on':''}" onclick="updateAssistant('${a.id}','tone','${t}')">${t}</button>`).join('')}
+          </div>
+        </div>
+        <div class="dc-section">
+          <span class="label">Knowledge attached (${kb.length})</span>
+          <div class="kb-attached">
+            ${kb.length ? kb.map(k=>`<div class="kb-item"><i data-lucide="${fileTypeIcon(k.type)}"></i><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k.name}</span>${statusMini(k.status)}</div>`).join('') : `<div class="text-3" style="font-size:13px">No sources attached.</div>`}
+          </div>
+        </div>
+      </div>
+      <div class="chat">
+        <div class="chat-head">
+          <div class="ch-name">Chat preview</div>
+          <span class="text-3" style="font-size:12px">Responses are grounded & cited</span>
+        </div>
+        <div class="chat-body" id="chatBody"></div>
+        <div class="chat-input-bar">
+          <input type="text" id="chatInput" placeholder="Ask ${a.name} a question…" aria-label="Message"/>
+          <button class="btn btn-primary" id="chatSend" aria-label="Send"><i data-lucide="arrow-up"></i></button>
+        </div>
+      </div>
+    </div>`;
+  lucide.createIcons();
+  initChat(a, kb);
+}
+function statusMini(status) {
+  if (status==='Ready') return `<span class="badge ready" style="padding:1px 6px">Ready</span>`;
+  if (status==='Indexing') return `<span class="badge indexing" style="padding:1px 6px">Indexing</span>`;
+  return `<span class="badge failed" style="padding:1px 6px">Failed</span>`;
+}
+function updateAssistant(id, field, val) {
+  const a = state.assistants.find(x => x.id === id); if (!a) return;
+  a[field] = val;
+  if (field === 'name') { renderAll(); toast('Saved', 'success'); }
+  else toast('Saved', 'success');
+}
+
+function initChat(a, kb) {
+  const body = document.getElementById('chatBody');
+  const input = document.getElementById('chatInput');
+  const send = document.getElementById('chatSend');
+  const readySources = kb.filter(k => k.status === 'Ready');
+
+  addBot(`Hi — I'm ${a.name}. Ask me anything about your ${readySources.length} knowledge source${readySources.length!==1?'s':''}, and I'll answer with citations.`, []);
+
+  function addUser(text) {
+    body.appendChild(el(`<div class="msg user"><div class="m-avatar">You</div><div class="m-bubble">${escapeHtml(text)}</div></div>`));
+    body.scrollTop = body.scrollHeight;
+  }
+  function addBot(text, cites) {
+    const citeHtml = (cites && cites.length) ? `<div class="cites">${cites.map(c=>`
+      <span class="cite" tabindex="0"><i data-lucide="file-text"></i>${c.label}
+        <span class="cite-tip"><span class="ct-label">Retrieved chunk</span>${c.chunk}</span>
+      </span>`).join('')}</div>` : '';
+    const node = el(`<div class="msg bot"><div class="m-avatar">AI</div><div class="m-bubble">${text}${citeHtml}</div></div>`);
+    body.appendChild(node);
+    lucide.createIcons({ nodes: [node] });
+    body.scrollTop = body.scrollHeight;
+  }
+  function typing() {
+    const t = el(`<div class="msg bot" id="typingMsg"><div class="m-avatar">AI</div><div class="m-bubble"><span class="typing"><span></span><span></span><span></span></span></div></div>`);
+    body.appendChild(t); body.scrollTop = body.scrollHeight; return t;
+  }
+
+  function respond(q) {
+    addUser(q);
+    input.value = '';
+    const t = typing();
+    setTimeout(() => {
+      t.remove();
+      if (!readySources.length) {
+        addBot(`I don't have any indexed knowledge to answer from yet. Add a source on the Knowledge page and I'll be able to help.`, []);
+        return;
+      }
+      // Fake grounded answer + citations from real attached sources
+      const src1 = readySources[0];
+      const src2 = readySources[1] || readySources[0];
+      const answer = mockAnswer(q, a);
+      const cites = [
+        { label: `${shortName(src1.name)}, p.${Math.floor(Math.random()*12+1)}`, chunk: `“…${answer.snippet}…” — extracted from ${src1.name}.` },
+      ];
+      if (readySources.length > 1) cites.push({ label: `${shortName(src2.name)}, p.${Math.floor(Math.random()*12+1)}`, chunk: `Supporting context retrieved from ${src2.name}.` });
+      addBot(answer.text, cites);
+    }, 900);
+  }
+
+  send.onclick = () => { const v = input.value.trim(); if (v) respond(v); };
+  input.onkeydown = e => { if (e.key === 'Enter') { const v = input.value.trim(); if (v) respond(v); } };
+  input.focus();
+}
+function shortName(n) { return n.length > 22 ? n.slice(0, 20) + '…' : n; }
+function mockAnswer(q, a) {
+  const toneOpen = a.tone === 'Friendly' ? 'Great question! ' : a.tone === 'Technical' ? '' : 'Based on your documents, ';
+  const bodies = [
+    { text: `${toneOpen}according to your knowledge base, the policy allows this within the standard guidelines. Employees should submit the relevant request through the internal portal, and approvals are typically processed within two business days.`, snippet: 'requests are processed within two business days of submission' },
+    { text: `${toneOpen}the documentation states that this is supported. The recommended approach is to follow the step-by-step process outlined in the onboarding section, which covers configuration and access requirements.`, snippet: 'follow the step-by-step process in the onboarding section' },
+    { text: `${toneOpen}I found a relevant answer. The current guidance is to contact your administrator for elevated permissions, and standard requests are handled automatically through the self-service flow.`, snippet: 'standard requests are handled through the self-service flow' },
+  ];
+  return bodies[Math.floor(Math.random() * bodies.length)];
+}
+function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ============================================================
+   INIT
+============================================================ */
+lucide.createIcons();
+renderAll();
+go('home');
+</script>
+</body>
+</html>

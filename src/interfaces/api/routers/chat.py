@@ -213,7 +213,7 @@ async def ask_stream(
         answer_text = "".join(full)
         tokens_used = max(1, (len(bot.system_prompt) + len(prompt) + len(answer_text)) // 4)
         refused = not input_verdict.allowed or answer_text.strip().startswith(
-            "I can only answer questions about"
+            "I'm here to help with our open roles and your application"
         )
         # Output guardrail. Tokens are already streamed, so on a leak we can't
         # un-send — we flag it on the request log for triage and mark it refused.

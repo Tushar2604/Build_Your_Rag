@@ -73,7 +73,7 @@ def test_citation_grounding_rewards_correct_abstention() -> None:
 
 
 def test_refusal_correct() -> None:
-    refusal = "I can only answer questions about the provided documents."
+    refusal = "I'm here to help with our open roles and your application."
     answer = "The refund window is 30 days."
     assert refusal_correct(refusal, expect_refusal=True) is True
     assert refusal_correct(answer, expect_refusal=False) is True

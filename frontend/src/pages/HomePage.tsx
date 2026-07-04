@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { listChatbots, Chatbot } from "../api/chatbots";
+import { listDocuments } from "../api/documents";
 import { getChatbotAnalytics, getChatbotRequests, RequestLog, ChatbotAnalytics } from "../api/analytics";
 
 function StatusDot({ live }: { live: boolean }) {
@@ -39,12 +40,17 @@ interface AssistantRow {
 export default function HomePage() {
   const [rows, setRows]               = useState<AssistantRow[]>([]);
   const [recentLogs, setRecentLogs]   = useState<RequestLog[]>([]);
+  const [docStats, setDocStats]       = useState<{ total: number; ready: number } | null>(null);
   const [loading, setLoading]         = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const bots = await listChatbots();
+        const [bots, docs] = await Promise.all([
+          listChatbots(),
+          listDocuments().catch(() => []),
+        ]);
+        setDocStats({ total: docs.length, ready: docs.filter((d) => d.status === "ready").length });
         if (bots.length === 0) { setLoading(false); return; }
 
         const analyticsResults = await Promise.allSettled(
@@ -118,8 +124,8 @@ export default function HomePage() {
         />
         <MetricCard
           label="Knowledge sources"
-          value="—"
-          sub="connect via Knowledge tab"
+          value={loading || !docStats ? "—" : `${docStats.ready} / ${docStats.total}`}
+          sub={docStats && docStats.total > 0 ? "indexed / total" : "connect via Knowledge tab"}
         />
       </div>
 

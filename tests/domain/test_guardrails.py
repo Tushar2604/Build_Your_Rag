@@ -74,7 +74,7 @@ def test_scan_output_allows_normal_answer() -> None:
 def test_guard_refusal_is_detected_as_a_refusal() -> None:
     # GUARD_REFUSAL must start with the canonical opener so `refused` detection
     # and analytics treat a blocked request as a refusal.
-    assert GUARD_REFUSAL.startswith("I can only answer questions about")
+    assert GUARD_REFUSAL.startswith("I'm here to help with our open roles and your application")
 
 
 # --- structural isolation ----------------------------------------------------
@@ -97,5 +97,5 @@ def test_build_grounded_prompt_neutralises_delimiter_breakout() -> None:
 
 
 def test_default_system_prompt_has_injection_resistance() -> None:
-    assert "ONLY the provided context" in DEFAULT_SYSTEM_PROMPT  # grounding kept
+    assert "reference material" in DEFAULT_SYSTEM_PROMPT  # grounding kept
     assert "untrusted" in DEFAULT_SYSTEM_PROMPT.lower()  # injection clause added

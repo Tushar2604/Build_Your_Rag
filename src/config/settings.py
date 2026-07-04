@@ -103,10 +103,15 @@ class Settings(BaseSettings):
     public_anon_window_seconds: int = 600
 
     # --- Limits / quotas ---
-    max_upload_mb: int = 20
+    max_upload_mb: int = 100
     tenant_daily_token_quota: int = 200_000
     tenant_max_documents: int = 200
     retrieval_top_k: int = 5
+
+    # --- Hiring Agent ---
+    # Set HIRING_AGENT_ENABLED=true to mount the /api/v1/hiring/* routes.
+    # Off by default so the module is invisible to existing chatbot traffic.
+    hiring_agent_enabled: bool = False
 
     # --- Agent ---
     # Hard ceiling on agent reasoning steps per request (defence against a loop

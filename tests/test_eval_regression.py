@@ -40,7 +40,7 @@ async def test_runner_scores_retrieval_and_refusal() -> None:
         {
             "where?": TargetOutput(answer="It's in doc a.", retrieved_doc_ids=["a", "b"]),
             "scope?": TargetOutput(
-                answer="I can only answer questions about the provided documents.",
+                answer="I'm here to help with our open roles and your application.",
                 retrieved_doc_ids=[],
             ),
         }

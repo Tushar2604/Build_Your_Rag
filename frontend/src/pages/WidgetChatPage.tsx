@@ -90,7 +90,7 @@ export default function WidgetChatPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
         <div className="text-center">
           <p className="text-lg font-semibold text-gray-900">Chatbot unavailable</p>
           <p className="text-sm text-gray-500 mt-1">{error}</p>
@@ -101,7 +101,7 @@ export default function WidgetChatPage() {
 
   if (!config) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-sm text-gray-400">
+      <div className="min-h-screen flex items-center justify-center bg-canvas text-sm text-gray-400">
         Loading…
       </div>
     );
@@ -168,7 +168,7 @@ export default function WidgetChatPage() {
             Send
           </button>
         </div>
-        <p className="text-center text-[10px] text-gray-300 mt-2">Powered by RAG Platform</p>
+        <p className="text-center text-[10px] text-gray-300 mt-2">Powered by Kore AI</p>
       </form>
     </div>
   );

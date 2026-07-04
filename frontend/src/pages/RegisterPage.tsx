@@ -26,7 +26,7 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen flex bg-white">
       {/* Left branding panel */}
-      <div className="hidden lg:flex flex-col w-[480px] flex-shrink-0 bg-gray-950 px-12 py-14">
+      <div className="hidden lg:flex flex-col w-[480px] flex-shrink-0 bg-ink-950 px-12 py-14">
         <div className="flex items-center gap-2.5 mb-auto">
           <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center flex-shrink-0">
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
@@ -60,8 +60,8 @@ export default function RegisterPage() {
       </div>
 
       {/* Right form panel */}
-      <div className="flex-1 flex items-center justify-center px-6 py-12 bg-gray-50">
-        <div className="w-full max-w-sm">
+      <div className="flex-1 flex items-center justify-center px-6 py-12 bg-canvas">
+        <div className="w-full max-w-sm animate-fade-in">
           <div className="flex items-center gap-2 mb-8 lg:hidden">
             <div className="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center">
               <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>

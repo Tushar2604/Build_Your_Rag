@@ -13,6 +13,7 @@ import AssistantDetailPage from "./pages/AssistantDetailPage";
 import KnowledgePage      from "./pages/KnowledgePage";
 import AnalyticsPage      from "./pages/AnalyticsPage";
 import SettingsPage       from "./pages/SettingsPage";
+import HiringAgentPage    from "./pages/HiringAgentPage";
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
               <Route path="/assistants" element={<AssistantsPage />}     />
               <Route path="/assistants/:id" element={<AssistantDetailPage />} />
               <Route path="/knowledge"  element={<KnowledgePage />}      />
+              <Route path="/hiring-agent" element={<HiringAgentPage />}  />
               <Route path="/analytics"  element={<AnalyticsPage />}      />
               <Route path="/settings"   element={<SettingsPage />}       />
 
