@@ -16,15 +16,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.ports.repositories import (
     ChatbotDailyStat,
+    GoogleOAuthConnection,
     ProviderStat,
     RequestLog,
 )
 from src.domain.chat.entities import ChatSession, Message
 from src.domain.chatbot.entities import Chatbot
 from src.domain.document.entities import Chunk, Document, IngestionStatus
+from src.domain.interview.entities import Interview
 from src.domain.shared.identifiers import (
     ChatbotId,
     DocumentId,
+    InterviewId,
     MessageId,
     SessionId,
     TenantId,
@@ -241,6 +244,26 @@ class ChunkRepositoryImpl:
             )
         )
 
+    async def list_for_document(self, tenant_id: TenantId, document_id: DocumentId) -> list[Chunk]:
+        rows = (
+            await self._s.execute(
+                select(m.ChunkModel)
+                .where(m.ChunkModel.tenant_id == tenant_id, m.ChunkModel.document_id == document_id)
+                .order_by(m.ChunkModel.ordinal)
+            )
+        ).scalars()
+        return [
+            Chunk(
+                id=str(row.id),
+                tenant_id=TenantId(row.tenant_id),
+                document_id=DocumentId(row.document_id),
+                ordinal=row.ordinal,
+                text=row.text,
+                token_estimate=row.token_estimate,
+            )
+            for row in rows
+        ]
+
     async def search(
         self,
         tenant_id: TenantId,
@@ -334,6 +357,7 @@ class ChatbotRepositoryImpl:
         if row is None:
             return
         row.name = chatbot.name
+        row.channel = chatbot.channel
         row.system_prompt = chatbot.system_prompt
         row.retrieval = map_.chatbot_retrieval_to_jsonb(chatbot.retrieval)
         row.allowed_document_ids = [str(d) for d in chatbot.allowed_document_ids]
@@ -356,6 +380,7 @@ def _chatbot_to_row(chatbot: Chatbot) -> m.ChatbotModel:
         id=chatbot.id,
         tenant_id=chatbot.tenant_id,
         name=chatbot.name,
+        channel=chatbot.channel,
         system_prompt=chatbot.system_prompt,
         retrieval=map_.chatbot_retrieval_to_jsonb(chatbot.retrieval),
         allowed_document_ids=[str(d) for d in chatbot.allowed_document_ids],
@@ -609,3 +634,123 @@ class RequestLogRepositoryImpl:
             )
         ).scalars()
         return [_request_log_to_domain(r) for r in rows]
+
+
+class InterviewRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, interview: Interview) -> None:
+        self._s.add(_interview_to_row(interview))
+
+    async def get(self, tenant_id: TenantId, interview_id: InterviewId) -> Interview | None:
+        row = (
+            await self._s.execute(
+                select(m.InterviewModel).where(
+                    m.InterviewModel.id == interview_id,
+                    m.InterviewModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.interview_to_domain(row) if row else None
+
+    async def get_by_token(self, access_token: str) -> Interview | None:
+        row = (
+            await self._s.execute(
+                select(m.InterviewModel).where(m.InterviewModel.access_token == access_token)
+            )
+        ).scalar_one_or_none()
+        return map_.interview_to_domain(row) if row else None
+
+    async def update(self, interview: Interview) -> None:
+        row = await self._s.get(m.InterviewModel, interview.id)
+        if row is None:
+            return
+        row.candidate_name = interview.candidate_name
+        row.candidate_email = interview.candidate_email
+        row.role_title = interview.role_title
+        row.scheduled_at = interview.scheduled_at
+        row.status = interview.status
+        row.questions = list(interview.questions)
+        row.transcript = map_.transcript_to_jsonb(interview.transcript)
+        row.current_question_index = interview.current_question_index
+        row.google_event_id = interview.google_event_id
+        row.calendar_link = interview.calendar_link
+        row.report_storage_key = interview.report_storage_key
+        row.overall_score = interview.overall_score
+        row.overall_verdict = interview.overall_verdict
+        row.scores = map_.scores_to_jsonb(interview.scores)
+        row.updated_at = datetime.now(UTC)
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[Interview]:
+        rows = (
+            await self._s.execute(
+                select(m.InterviewModel)
+                .where(m.InterviewModel.tenant_id == tenant_id)
+                .order_by(m.InterviewModel.scheduled_at.desc())
+            )
+        ).scalars()
+        return [map_.interview_to_domain(r) for r in rows]
+
+
+def _interview_to_row(interview: Interview) -> m.InterviewModel:
+    return m.InterviewModel(
+        id=interview.id,
+        tenant_id=interview.tenant_id,
+        candidate_name=interview.candidate_name,
+        candidate_email=interview.candidate_email,
+        role_title=interview.role_title,
+        job_document_id=interview.job_document_id,
+        resume_document_id=interview.resume_document_id,
+        scheduled_at=interview.scheduled_at,
+        status=interview.status,
+        access_token=interview.access_token,
+        questions=list(interview.questions),
+        transcript=map_.transcript_to_jsonb(interview.transcript),
+        current_question_index=interview.current_question_index,
+        google_event_id=interview.google_event_id,
+        calendar_link=interview.calendar_link,
+        report_storage_key=interview.report_storage_key,
+        overall_score=interview.overall_score,
+        overall_verdict=interview.overall_verdict,
+        scores=map_.scores_to_jsonb(interview.scores),
+        created_at=interview.created_at,
+        updated_at=interview.updated_at,
+    )
+
+
+class GoogleConnectionRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def get(self, tenant_id: TenantId) -> GoogleOAuthConnection | None:
+        row = await self._s.get(m.GoogleOAuthConnectionModel, tenant_id)
+        return map_.google_connection_to_domain(row) if row else None
+
+    async def upsert(self, connection: GoogleOAuthConnection) -> None:
+        row = await self._s.get(m.GoogleOAuthConnectionModel, connection.tenant_id)
+        if row is None:
+            self._s.add(
+                m.GoogleOAuthConnectionModel(
+                    tenant_id=connection.tenant_id,
+                    access_token=connection.access_token,
+                    refresh_token=connection.refresh_token,
+                    expires_at=connection.expires_at,
+                    scope=connection.scope,
+                    connected_email=connection.connected_email,
+                    created_at=connection.created_at,
+                    updated_at=connection.updated_at,
+                )
+            )
+        else:
+            row.access_token = connection.access_token
+            row.refresh_token = connection.refresh_token
+            row.expires_at = connection.expires_at
+            row.scope = connection.scope
+            row.connected_email = connection.connected_email
+            row.updated_at = datetime.now(UTC)
+
+    async def delete(self, tenant_id: TenantId) -> None:
+        row = await self._s.get(m.GoogleOAuthConnectionModel, tenant_id)
+        if row is not None:
+            await self._s.delete(row)

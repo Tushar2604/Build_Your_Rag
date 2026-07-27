@@ -38,6 +38,7 @@ def _to_response(bot: Chatbot) -> ChatbotResponse:
     return ChatbotResponse(
         id=bot.id,
         name=bot.name,
+        channel=bot.channel,
         system_prompt=bot.system_prompt,
         top_k=bot.retrieval.top_k,
         is_public=bot.is_public,
@@ -61,6 +62,7 @@ async def create_chatbot(
     bot = Chatbot(
         tenant_id=principal.tenant_id,
         name=body.name,
+        channel=body.channel,
         system_prompt=body.system_prompt or DEFAULT_SYSTEM_PROMPT,
         retrieval=RetrievalConfig(top_k=body.top_k),
         allowed_document_ids=[DocumentId(d) for d in body.allowed_document_ids],
@@ -113,6 +115,8 @@ async def update_chatbot(
 
         if body.name is not None:
             bot.name = body.name
+        if body.channel is not None:
+            bot.channel = body.channel
         if body.system_prompt is not None:
             bot.system_prompt = body.system_prompt
         if body.top_k is not None:

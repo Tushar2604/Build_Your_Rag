@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import uuid
 
+from src.application.ports.repositories import GoogleOAuthConnection
 from src.domain.chat.entities import ChatSession, Citation, Message, MessageRole
 from src.domain.chatbot.entities import Chatbot, RetrievalConfig, WidgetConfig
 from src.domain.document.entities import Document, IngestionStatus
+from src.domain.interview.entities import Interview, QuestionScore, TranscriptTurn
 from src.domain.shared.identifiers import (
     ChatbotId,
     DocumentId,
+    InterviewId,
     MessageId,
     SessionId,
     TenantId,
@@ -84,6 +87,7 @@ def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
         id=ChatbotId(row.id),
         tenant_id=TenantId(row.tenant_id),
         name=row.name,
+        channel=row.channel or "text",  # type: ignore[arg-type]
         system_prompt=row.system_prompt,
         retrieval=RetrievalConfig(
             top_k=rc.get("top_k", 5),
@@ -161,3 +165,61 @@ def citations_to_jsonb(citations: list[Citation]) -> list[dict]:
         }
         for c in citations
     ]
+
+
+def interview_to_domain(row: m.InterviewModel) -> Interview:
+    return Interview(
+        id=InterviewId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        candidate_name=row.candidate_name,
+        candidate_email=row.candidate_email,
+        role_title=row.role_title,
+        job_document_id=DocumentId(row.job_document_id),
+        resume_document_id=DocumentId(row.resume_document_id),
+        scheduled_at=row.scheduled_at,
+        status=row.status,  # type: ignore[arg-type]
+        access_token=row.access_token,
+        questions=list(row.questions or []),
+        transcript=[TranscriptTurn(role=t["role"], content=t["content"]) for t in (row.transcript or [])],
+        current_question_index=row.current_question_index,
+        google_event_id=row.google_event_id,
+        calendar_link=row.calendar_link,
+        report_storage_key=row.report_storage_key,
+        overall_score=row.overall_score,
+        overall_verdict=row.overall_verdict,
+        scores=[
+            QuestionScore(
+                question=s["question"],
+                answer=s.get("answer", ""),
+                score=s["score"],
+                justification=s.get("justification", ""),
+            )
+            for s in (row.scores or [])
+        ],
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def transcript_to_jsonb(transcript: list[TranscriptTurn]) -> list[dict]:
+    return [{"role": t.role, "content": t.content} for t in transcript]
+
+
+def scores_to_jsonb(scores: list[QuestionScore]) -> list[dict]:
+    return [
+        {"question": s.question, "answer": s.answer, "score": s.score, "justification": s.justification}
+        for s in scores
+    ]
+
+
+def google_connection_to_domain(row: m.GoogleOAuthConnectionModel) -> GoogleOAuthConnection:
+    return GoogleOAuthConnection(
+        tenant_id=TenantId(row.tenant_id),
+        access_token=row.access_token,
+        refresh_token=row.refresh_token,
+        expires_at=row.expires_at,
+        scope=row.scope,
+        connected_email=row.connected_email,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )

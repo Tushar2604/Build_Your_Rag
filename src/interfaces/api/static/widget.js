@@ -73,7 +73,7 @@
   }
 
   /* ─── styles ──────────────────────────────────────────────────────────── */
-  function bubbleStyles(theme, position) {
+  function bubbleStyles(theme, position, bodyCss) {
     var side = position === "bottom-left" ? "left" : "right";
     return [
       ":host{all:initial}",
@@ -108,21 +108,21 @@
       ".panel.open{display:flex;transform:translateY(0) scale(1);opacity:1}",
 
       /* Chat chrome */
-      chatChrome(theme),
+      bodyCss,
     ].join("");
   }
 
-  function inlineStyles(theme) {
+  function inlineStyles(theme, bodyCss) {
     return [
       ":host{all:initial;display:block;width:100%;height:100%}",
       "*{box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}",
       ".panel{display:flex;flex-direction:column;width:100%;height:100%;",
         "background:#fff;border-radius:inherit;overflow:hidden}",
-      chatChrome(theme),
+      bodyCss,
     ].join("");
   }
 
-  function chatChrome(theme) {
+  function headerStyles(theme) {
     return [
       /* Header */
       ".header{background:" + theme + ";color:#fff;padding:14px 16px;",
@@ -138,6 +138,12 @@
         "display:flex;align-items:center;justify-content:center}",
       ".close-btn:hover{opacity:1;background:rgba(255,255,255,.15)}",
       ".close-btn svg{width:18px;height:18px;pointer-events:none}",
+    ].join("");
+  }
+
+  function chatChrome(theme) {
+    return [
+      headerStyles(theme),
 
       /* Messages */
       ".msgs{flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:10px;",
@@ -200,12 +206,68 @@
     ].join("");
   }
 
+  /* ─── voice-call chrome (call-style UI for "voice" channel chatbots) ──── */
+  function voiceChrome(theme) {
+    return [
+      headerStyles(theme),
+
+      ".call-body{flex:1;display:flex;flex-direction:column;align-items:center;",
+        "overflow:hidden;background:#f7f8fa}",
+      ".orb-wrap{display:flex;flex-direction:column;align-items:center;",
+        "padding:28px 16px 16px;flex-shrink:0}",
+      ".orb{position:relative;width:84px;height:84px;border-radius:50%;border:none;",
+        "background:" + theme + ";color:#fff;cursor:pointer;",
+        "display:flex;align-items:center;justify-content:center;",
+        "box-shadow:0 6px 20px rgba(0,0,0,.18);transition:transform .15s}",
+      ".orb:hover:not(:disabled){transform:scale(1.05)}",
+      ".orb:disabled{cursor:default}",
+      ".orb svg{width:30px;height:30px;pointer-events:none;position:relative}",
+      ".orb-ring{position:absolute;inset:0;border-radius:50%;background:" + theme + ";",
+        "opacity:.3;animation:ping 1.4s cubic-bezier(0,0,.2,1) infinite}",
+      ".orb.pulse{animation:pulse 1.2s ease-in-out infinite}",
+      "@keyframes ping{75%,100%{transform:scale(1.7);opacity:0}}",
+      ".call-state{font-size:13px;font-weight:500;color:#4b5563;margin:14px 0 0}",
+      ".end-call{background:none;border:none;color:#dc2626;font-size:11px;",
+        "cursor:pointer;margin-top:6px;padding:2px}",
+      ".end-call:hover{text-decoration:underline}",
+      ".call-unsupported{font-size:11px;color:#92400e;background:#fffbeb;",
+        "border-radius:8px;padding:6px 10px;margin-top:10px;max-width:260px;text-align:center}",
+
+      ".transcript{flex:1;width:100%;overflow-y:auto;padding:0 14px;",
+        "display:flex;flex-direction:column;gap:8px}",
+      ".transcript::-webkit-scrollbar{width:4px}",
+      ".transcript::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:4px}",
+      ".transcript-empty{font-size:11px;color:#9ca3af;text-align:center;margin-top:12px}",
+      ".caption{max-width:85%;padding:8px 13px;border-radius:16px;",
+        "font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word;}",
+      ".caption.user{align-self:flex-end;background:" + theme + ";color:#fff;border-bottom-right-radius:4px}",
+      ".caption.assistant{align-self:flex-start;background:#fff;color:#1a1d2e;",
+        "border:1px solid #e5e7eb;border-bottom-left-radius:4px}",
+
+      ".call-composer{display:none;gap:8px;padding:12px;border-top:1px solid #e5e7eb;",
+        "background:#fff;flex-shrink:0;width:100%}",
+      ".call-composer.visible{display:flex}",
+      ".call-input{flex:1;border:1px solid #d1d5db;border-radius:10px;",
+        "padding:9px 12px;font-size:13px;outline:none;font-family:inherit}",
+      ".call-input:focus{border-color:" + theme + "}",
+      ".call-send{border-radius:10px;border:none;background:" + theme + ";color:#fff;",
+        "padding:0 16px;font-size:13px;cursor:pointer}",
+      ".call-send:disabled{opacity:.4;cursor:default}",
+
+      /* Branding */
+      ".branding{font-size:10px;color:#c4c9d4;text-align:center;padding:4px 0 8px;",
+        "background:#fff;flex-shrink:0}",
+      ".branding a{color:inherit;text-decoration:none}",
+      ".branding a:hover{text-decoration:underline}",
+    ].join("");
+  }
+
   /* ─── SSE streaming ───────────────────────────────────────────────────── */
-  function stream(url, message, handlers) {
+  function stream(url, body, handlers) {
     fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: message }),
+      body: JSON.stringify(body || {}),
     })
       .then(function (res) {
         if (!res.ok || !res.body) {
@@ -259,7 +321,7 @@
 
     /* style */
     var styleEl = el("style");
-    styleEl.textContent = opts.inline ? inlineStyles(theme) : bubbleStyles(theme, position);
+    styleEl.textContent = opts.inline ? inlineStyles(theme, chatChrome(theme)) : bubbleStyles(theme, position, chatChrome(theme));
     root.appendChild(styleEl);
 
     /* header */
@@ -379,7 +441,7 @@
           var answerBubble   = null;
           var pendingCites   = null;
 
-          stream(PUBLIC + "/sessions/" + sid + "/stream", text, {
+          stream(PUBLIC + "/sessions/" + sid + "/stream", { message: text }, {
             onCitations: function (c) { pendingCites = c; },
             onToken: function (tok) {
               if (!answerBubble) {
@@ -436,8 +498,34 @@
       }
     });
 
-    /* show welcome */
-    addBubble("bot", welcome);
+    /* AI-generated opening turn — falls back to the static welcome message on
+       any failure (network, quota, etc.), so the chat is never left blank. */
+    (function greet() {
+      busy = true;
+      sendBtn.disabled = true;
+      textarea.disabled = true;
+      var typing = addTypingDot();
+      var bubble = null;
+      function fallback() {
+        if (typing.parentNode) typing.remove();
+        if (!bubble) addBubble("bot", welcome);
+        reset();
+      }
+      ensureSession()
+        .then(function (sid) {
+          stream(PUBLIC + "/sessions/" + sid + "/greeting", {}, {
+            onCitations: function () {},
+            onToken: function (tok) {
+              if (!bubble) { typing.remove(); bubble = addBubble("bot", ""); }
+              bubble.textContent += tok;
+              scrollToBottom();
+            },
+            onError: fallback,
+            onDone: fallback,
+          });
+        })
+        .catch(fallback);
+    })();
 
     /* close handler (if provided by caller) */
     if (typeof opts.onClose === "function") {
@@ -447,6 +535,268 @@
     }
 
     return { panel: panel, textarea: textarea };
+  }
+
+  /* ─── build the voice-call UI ("voice" channel chatbots) ──────────────── */
+  function buildVoiceChat(root, config, opts) {
+    var w        = config.widget || {};
+    var theme    = w.theme_color       || "#2563eb";
+    var name     = w.display_name      || config.name || "Assistant";
+    var position = w.launcher_position || "bottom-right";
+
+    var STATE_LABEL = {
+      idle: "Tap to start the call",
+      connecting: "Connecting…",
+      listening: "Listening…",
+      thinking: "Thinking…",
+      speaking: "Speaking…",
+    };
+
+    var styleEl = el("style");
+    styleEl.textContent = opts.inline ? inlineStyles(theme, voiceChrome(theme)) : bubbleStyles(theme, position, voiceChrome(theme));
+    root.appendChild(styleEl);
+
+    var closeBtn = el("button", { class: "close-btn", "aria-label": "Close chat",
+      html: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 6l8 8M6 14L14 6"/></svg>' });
+    var header = el("div", { class: "header" }, [
+      el("div", { class: "header-left" }, [
+        el("div", { class: "header-avatar",
+          html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>'}),
+        el("div", {}, [
+          el("h1", { text: name }),
+          el("div", { class: "header-sub", text: "AI Assistant" }),
+        ]),
+      ]),
+      closeBtn,
+    ]);
+
+    var micIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 10-6 0v6a3 3 0 003 3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-14 0M12 18v4"/></svg>';
+    var thinkIcon = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></svg>';
+
+    var orb = el("button", { class: "orb", type: "button", "aria-label": "Start voice call", html: micIcon });
+    var stateLabel = el("p", { class: "call-state", text: STATE_LABEL.idle });
+    var endCallBtn = el("button", { class: "end-call", type: "button", text: "End call" });
+    endCallBtn.style.display = "none";
+    var orbWrap = el("div", { class: "orb-wrap" }, [orb, stateLabel, endCallBtn]);
+
+    var sttSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    var ttsSupported = "speechSynthesis" in window;
+    if (!sttSupported) {
+      orbWrap.appendChild(el("p", { class: "call-unsupported",
+        text: "Voice input isn't supported in this browser — try Chrome or Edge. You can still type below." }));
+    }
+
+    var transcript = el("div", { class: "transcript" });
+    var transcriptEmpty = el("p", { class: "transcript-empty", text: name + " will greet you when the call starts." });
+    transcript.appendChild(transcriptEmpty);
+
+    var callInput = el("input", { class: "call-input", type: "text",
+      placeholder: sttSupported ? "…or type instead" : "Type your message", "aria-label": "Message" });
+    var callSend = el("button", { class: "call-send", type: "button", text: "Send" });
+    var callComposer = el("div", { class: "call-composer" }, [callInput, callSend]);
+
+    var body = el("div", { class: "call-body" }, [orbWrap, transcript, callComposer]);
+
+    var panel = el("div", { class: "panel", role: "dialog", "aria-label": name });
+    panel.appendChild(header);
+    panel.appendChild(body);
+    panel.appendChild(el("div", { class: "branding" }, [
+      document.createTextNode("Powered by "),
+      el("a", { href: API_BASE, target: "_blank", rel: "noopener", text: "Kore AI" }),
+    ]));
+    root.appendChild(panel);
+
+    /* ── call state machine ── */
+    var state = "idle";
+    var sessionId = null;
+    var recognition = null;
+    var silenceTimer = null;
+    // How long to wait after speech stops before treating the utterance as
+    // finished. Driving this ourselves (continuous + interim results)
+    // instead of relying on the browser's own endpointing is what fixes the
+    // mic hanging open forever on repeat use — some browsers' built-in
+    // silence detection simply never fires a second time in the same page.
+    var SILENCE_TIMEOUT_MS = 6000;
+
+    function setState(s) {
+      state = s;
+      stateLabel.textContent = STATE_LABEL[s];
+      orb.disabled = (s === "connecting" || s === "thinking");
+      orb.classList.toggle("pulse", s === "connecting" || s === "thinking");
+      orb.innerHTML = s === "thinking" ? thinkIcon : micIcon;
+      var ring = orb.querySelector(".orb-ring");
+      if ((s === "listening" || s === "speaking") && !ring) {
+        orb.appendChild(el("span", { class: "orb-ring" }));
+      } else if (s !== "listening" && s !== "speaking" && ring) {
+        ring.remove();
+      }
+      endCallBtn.style.display = s === "idle" ? "none" : "";
+      callComposer.classList.toggle("visible", s !== "idle");
+    }
+
+    function scrollTranscript() { transcript.scrollTop = transcript.scrollHeight; }
+
+    function addCaption(role, text) {
+      if (transcriptEmpty.parentNode) transcriptEmpty.remove();
+      var c = el("div", { class: "caption " + role });
+      c.textContent = text;
+      transcript.appendChild(c);
+      scrollTranscript();
+      return c;
+    }
+
+    function speak(text, onEnd) {
+      if (!ttsSupported || !text) { if (onEnd) onEnd(); return; }
+      try {
+        window.speechSynthesis.cancel();
+        var utter = new SpeechSynthesisUtterance(text);
+        if (onEnd) { utter.onend = onEnd; utter.onerror = onEnd; }
+        window.speechSynthesis.speak(utter);
+      } catch (e) { if (onEnd) onEnd(); }
+    }
+
+    function clearSilenceTimer() {
+      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    }
+
+    function startListening() {
+      if (!sttSupported) return;
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SR();
+      recognition.lang = "en-US";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      var finalizedText = "";
+      var latestInterim = "";
+      var stopping = false;
+
+      function armSilenceTimer() {
+        clearSilenceTimer();
+        silenceTimer = setTimeout(function () {
+          if (!stopping) {
+            stopping = true;
+            try { recognition.stop(); } catch (e) {}
+          }
+        }, SILENCE_TIMEOUT_MS);
+      }
+
+      recognition.onresult = function (e) {
+        armSilenceTimer();
+        latestInterim = "";
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          var chunk = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finalizedText += chunk + " ";
+          else latestInterim += chunk;
+        }
+      };
+      recognition.onerror = function () { stopping = true; clearSilenceTimer(); };
+      recognition.onend = function () {
+        stopping = true;
+        clearSilenceTimer();
+        var text = (finalizedText + " " + latestInterim).trim();
+        if (text) handleUtterance(text);
+      };
+      armSilenceTimer(); // in case the candidate never says anything at all
+      recognition.start();
+    }
+
+    function stopListening() {
+      clearSilenceTimer();
+      if (recognition) { try { recognition.stop(); } catch (e) {} }
+    }
+
+    function afterReply(fullText) {
+      if (ttsSupported) {
+        setState("speaking");
+        speak(fullText, function () {
+          if (sttSupported) { setState("listening"); startListening(); }
+          else setState("idle");
+        });
+      } else if (sttSupported) {
+        setState("listening");
+        startListening();
+      } else {
+        setState("idle");
+      }
+    }
+
+    function handleUtterance(text) {
+      if (!sessionId || state === "thinking") return;
+      addCaption("user", text);
+      setState("thinking");
+      var full = "";
+      var caption = addCaption("assistant", "");
+      stream(PUBLIC + "/sessions/" + sessionId + "/stream", { message: text }, {
+        onCitations: function () {},
+        onToken: function (tok) { full += tok; caption.textContent += tok; scrollTranscript(); },
+        onDone: function () { afterReply(full); },
+        onError: function (msg) { caption.textContent = msg || "Something went wrong."; afterReply(""); },
+      });
+    }
+
+    function startCall() {
+      setState("connecting");
+      fetch(PUBLIC + "/sessions", { method: "POST" })
+        .then(function (r) {
+          if (!r.ok) throw new Error("Could not start session");
+          return r.json();
+        })
+        .then(function (d) {
+          sessionId = d.session_id;
+          var full = "";
+          var caption = addCaption("assistant", "");
+          setState("thinking");
+          stream(PUBLIC + "/sessions/" + sessionId + "/greeting", {}, {
+            onCitations: function () {},
+            onToken: function (tok) { full += tok; caption.textContent += tok; scrollTranscript(); },
+            onDone: function () { afterReply(full); },
+            onError: function () { caption.textContent = "Hi! How can I help?"; afterReply(caption.textContent); },
+          });
+        })
+        .catch(function () {
+          addCaption("assistant", "Could not connect. Please try again.");
+          setState("idle");
+        });
+    }
+
+    function endCall() {
+      stopListening();
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+      sessionId = null;
+      setState("idle");
+    }
+
+    orb.onclick = function () {
+      if (state === "idle") startCall();
+      else if (state === "speaking") {
+        try { window.speechSynthesis.cancel(); } catch (e) {}
+        if (sttSupported) { setState("listening"); startListening(); }
+      }
+    };
+    endCallBtn.onclick = endCall;
+
+    function sendTyped() {
+      var text = callInput.value.trim();
+      if (!text) return;
+      callInput.value = "";
+      handleUtterance(text);
+    }
+    callSend.onclick = sendTyped;
+    callInput.onkeydown = function (e) {
+      if (e.key === "Enter") { e.preventDefault(); sendTyped(); }
+    };
+
+    setState("idle");
+
+    if (typeof opts.onClose === "function") {
+      closeBtn.onclick = function () { endCall(); opts.onClose(); };
+    } else {
+      closeBtn.style.display = "none";
+    }
+
+    return { panel: panel, textarea: null };
   }
 
   /* ─── BUBBLE MODE ─────────────────────────────────────────────────────── */
@@ -476,7 +826,8 @@
       ].join(""),
     });
 
-    var chat = buildChat(root, config, {
+    var builder = config.channel === "voice" ? buildVoiceChat : buildChat;
+    var chat = builder(root, config, {
       inline: false,
       onClose: function () { toggle(false); },
     });
@@ -490,7 +841,7 @@
       launcher.classList.toggle("open", open);
       launcher.setAttribute("aria-expanded", String(open));
       if (open) {
-        setTimeout(function () { chat.textarea.focus(); }, 220);
+        setTimeout(function () { if (chat.textarea) chat.textarea.focus(); }, 220);
         try { window.parent.postMessage({ type: "kore:opened" }, "*"); } catch (e) {}
       } else {
         try { window.parent.postMessage({ type: "kore:closed" }, "*"); } catch (e) {}
@@ -524,7 +875,8 @@
     /* adopt border-radius from container */
     container.style.overflow = "hidden";
     var root = container.attachShadow({ mode: "open" });
-    buildChat(root, config, { inline: true });
+    var builder = config.channel === "voice" ? buildVoiceChat : buildChat;
+    builder(root, config, { inline: true });
   }
 
   /* ─── boot ────────────────────────────────────────────────────────────── */

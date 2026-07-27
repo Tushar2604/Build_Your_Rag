@@ -37,6 +37,9 @@ COPY scripts ./scripts
 # single public origin for the API, the widget script, and the share page.
 COPY --from=frontend /web/dist ./frontend/dist
 
+# appuser needs write access to create the local-disk upload fallback
+# (LOCAL_STORAGE_DIR, a relative path under /app) when R2_* is unset.
+RUN chown -R appuser:appuser /app
 USER appuser
 EXPOSE 8000
 

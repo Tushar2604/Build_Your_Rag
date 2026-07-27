@@ -124,6 +124,7 @@ class ChatbotModel(Base):
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(120))
+    channel: Mapped[str] = mapped_column(String(16), default="text")
     system_prompt: Mapped[str] = mapped_column(Text)
     retrieval: Mapped[dict] = mapped_column(JSONB, default=dict)
     allowed_document_ids: Mapped[list] = mapped_column(JSONB, default=list)
@@ -210,6 +211,57 @@ class UsageCounterModel(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     day: Mapped[date] = mapped_column(Date, index=True)
     tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class InterviewModel(Base):
+    __tablename__ = "interviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    candidate_name: Mapped[str] = mapped_column(String(200), default="")
+    candidate_email: Mapped[str] = mapped_column(String(320))
+    role_title: Mapped[str] = mapped_column(String(200), default="")
+    job_document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    resume_document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="scheduled", index=True)
+    access_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    questions: Mapped[list] = mapped_column(JSONB, default=list)
+    transcript: Mapped[list] = mapped_column(JSONB, default=list)
+    current_question_index: Mapped[int] = mapped_column(Integer, default=0)
+    google_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    calendar_link: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    report_storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    overall_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    overall_verdict: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    scores: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class GoogleOAuthConnectionModel(Base):
+    __tablename__ = "google_oauth_connections"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    access_token: Mapped[str] = mapped_column(Text)
+    refresh_token: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    scope: Mapped[str] = mapped_column(String(500), default="")
+    connected_email: Mapped[str] = mapped_column(String(320), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
 
 
 class AuditEventModel(Base):

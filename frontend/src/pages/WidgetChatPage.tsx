@@ -4,9 +4,11 @@ import {
   getPublicConfig,
   createPublicSession,
   streamPublic,
+  streamPublicGreeting,
   PublicConfig,
   PublicCitation,
 } from "../api/public";
+import VoiceCallPanel from "../components/VoiceCallPanel";
 
 interface ChatMessage {
   role: "user" | "bot";
@@ -18,6 +20,60 @@ export default function WidgetChatPage() {
   const { publicKey = "" } = useParams();
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getPublicConfig(publicKey).then(setConfig).catch((e) => setError(e.message));
+  }, [publicKey]);
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-gray-900">Chatbot unavailable</p>
+          <p className="text-sm text-gray-500 mt-1">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!config) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-canvas text-sm text-gray-400">
+        Loading…
+      </div>
+    );
+  }
+
+  const theme = config.widget.theme_color;
+  const name = config.widget.display_name || config.name;
+
+  if (config.channel === "voice") {
+    return (
+      <div className="min-h-screen flex flex-col bg-gray-100">
+        <header className="px-5 py-4 text-white shadow-sm" style={{ backgroundColor: theme }}>
+          <h1 className="text-base font-semibold">{name}</h1>
+        </header>
+        <div className="flex-1">
+          <VoiceCallPanel
+            botName={name}
+            theme={theme}
+            adapter={{
+              createSession: () => createPublicSession(publicKey),
+              greet: (sid, h) =>
+                streamPublicGreeting(publicKey, sid, { onToken: h.onToken, onDone: () => h.onDone?.(), onError: h.onError }),
+              ask: (sid, text, h) =>
+                streamPublic(publicKey, sid, text, { onToken: h.onToken, onDone: () => h.onDone?.(), onError: h.onError }),
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return <TextWidgetChat publicKey={publicKey} config={config} />;
+}
+
+function TextWidgetChat({ publicKey, config }: { publicKey: string; config: PublicConfig }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,12 +81,30 @@ export default function WidgetChatPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    getPublicConfig(publicKey)
-      .then((c) => {
-        setConfig(c);
-        setMessages([{ role: "bot", content: c.widget.welcome_message }]);
+    setMessages([{ role: "bot", content: "" }]);
+    setBusy(true);
+    createPublicSession(publicKey)
+      .then((sid) => {
+        sessionRef.current = sid;
+        streamPublicGreeting(publicKey, sid, {
+          onToken: (tok) =>
+            setMessages((m) => {
+              const copy = [...m];
+              copy[0] = { ...copy[0], content: copy[0].content + tok };
+              return copy;
+            }),
+          onDone: () => setBusy(false),
+          onError: () => {
+            setMessages([{ role: "bot", content: config.widget.welcome_message }]);
+            setBusy(false);
+          },
+        });
       })
-      .catch((e) => setError(e.message));
+      .catch(() => {
+        setMessages([{ role: "bot", content: config.widget.welcome_message }]);
+        setBusy(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicKey]);
 
   useEffect(() => {
@@ -88,33 +162,11 @@ export default function WidgetChatPage() {
     }
   }
 
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
-        <div className="text-center">
-          <p className="text-lg font-semibold text-gray-900">Chatbot unavailable</p>
-          <p className="text-sm text-gray-500 mt-1">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!config) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-canvas text-sm text-gray-400">
-        Loading…
-      </div>
-    );
-  }
-
   const theme = config.widget.theme_color;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
-      <header
-        className="px-5 py-4 text-white shadow-sm"
-        style={{ backgroundColor: theme }}
-      >
+      <header className="px-5 py-4 text-white shadow-sm" style={{ backgroundColor: theme }}>
         <h1 className="text-base font-semibold">{config.widget.display_name || config.name}</h1>
       </header>
 

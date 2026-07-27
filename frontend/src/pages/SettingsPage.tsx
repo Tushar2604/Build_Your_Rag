@@ -3,13 +3,16 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../store/auth";
 import { listChatbots, Chatbot } from "../api/chatbots";
 import { getChatbotRequests, RequestLog } from "../api/analytics";
+import { getGoogleStatus, connectGoogle, disconnectGoogle, GoogleStatus } from "../api/integrations";
+import { ApiError } from "../api/client";
 
-type Tab = "general" | "apikeys" | "audit";
+type Tab = "general" | "apikeys" | "integrations" | "audit";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "general", label: "General"   },
-  { id: "apikeys", label: "API Keys"  },
-  { id: "audit",   label: "Audit log" },
+  { id: "general",      label: "General"      },
+  { id: "apikeys",      label: "API Keys"     },
+  { id: "integrations", label: "Integrations" },
+  { id: "audit",        label: "Audit log"    },
 ];
 
 /* ── General tab ── */
@@ -161,6 +164,98 @@ function ApiKeysTab() {
   );
 }
 
+/* ── Integrations tab ── */
+function IntegrationsTab() {
+  const [status, setStatus] = useState<GoogleStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    setLoading(true);
+    getGoogleStatus()
+      .then(setStatus)
+      .catch(() => setStatus({ connected: false, email: "" }))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function connect() {
+    setBusy(true);
+    setError(null);
+    try {
+      await connectGoogle();
+      // navigation away happens inside connectGoogle(); nothing else to do
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to start Google connection.");
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    setBusy(true);
+    setError(null);
+    try {
+      await disconnectGoogle();
+      load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to disconnect.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6 max-w-xl">
+      <div className="card p-5 space-y-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="section-title">Google Calendar</h3>
+            <p className="text-xs text-gray-500 mt-1 max-w-sm">
+              Connect a Google account so scheduled Virtual Interviews are automatically added to your calendar, with the candidate invited.
+            </p>
+          </div>
+          <svg className="w-8 h-8 flex-shrink-0" viewBox="0 0 48 48">
+            <path fill="#4285F4" d="M45 24c0-1.6-.1-2.8-.4-4.1H24v7.5h11.9c-.2 2-1.6 5-4.6 7l7.4 5.7C42.9 35.8 45 30.4 45 24z"/>
+            <path fill="#34A853" d="M24 46c6.2 0 11.4-2 15.2-5.5l-7.4-5.7c-2 1.4-4.7 2.3-7.8 2.3-6 0-11.1-4-12.9-9.5l-7.6 5.9C7.4 40.8 15 46 24 46z"/>
+            <path fill="#FBBC05" d="M11.1 27.6c-.5-1.4-.7-2.9-.7-4.6s.3-3.2.7-4.6l-7.6-5.9C1.6 15.6 1 19.6 1 23s.6 7.4 2.5 10.5z"/>
+            <path fill="#EA4335" d="M24 10.7c3.4 0 5.8 1.5 7.1 2.7l6.5-6.3C33.6 3.5 30.2 2 24 2 15 2 7.4 7.2 3.5 14.5l7.6 5.9c1.8-5.5 6.9-9.7 12.9-9.7z"/>
+          </svg>
+        </div>
+
+        {loading ? (
+          <div className="skeleton h-9 w-40" />
+        ) : status?.connected ? (
+          <div className="flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-emerald-800">Connected</p>
+              {status.email && <p className="text-xs text-emerald-700 mt-0.5">{status.email}</p>}
+            </div>
+            <button onClick={disconnect} disabled={busy} className="btn-secondary text-xs px-3 py-1.5 h-auto">
+              {busy ? "Disconnecting…" : "Disconnect"}
+            </button>
+          </div>
+        ) : (
+          <button onClick={connect} disabled={busy} className="btn-primary">
+            {busy ? "Redirecting…" : "Connect Google Calendar"}
+          </button>
+        )}
+
+        {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+      </div>
+
+      <div className="card p-5">
+        <h3 className="section-title mb-2">Email delivery (Resend)</h3>
+        <p className="text-xs text-gray-500">
+          Interview invite emails are sent via Resend, configured with <code className="font-mono bg-gray-100 px-1 rounded">RESEND_API_KEY</code> in
+          the server's environment — not here. Without it, scheduling still works; you'll get a link to share manually instead.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ── Audit log tab ── */
 function AuditTab() {
   const [bots,     setBots]     = useState<Chatbot[]>([]);
@@ -278,9 +373,10 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {activeTab === "general" && <GeneralTab />}
-      {activeTab === "apikeys" && <ApiKeysTab />}
-      {activeTab === "audit"   && <AuditTab />}
+      {activeTab === "general"      && <GeneralTab />}
+      {activeTab === "apikeys"      && <ApiKeysTab />}
+      {activeTab === "integrations" && <IntegrationsTab />}
+      {activeTab === "audit"        && <AuditTab />}
     </div>
   );
 }

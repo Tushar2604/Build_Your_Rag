@@ -16,9 +16,11 @@ from typing import Protocol, runtime_checkable
 from src.domain.chat.entities import ChatSession, Message
 from src.domain.chatbot.entities import Chatbot
 from src.domain.document.entities import Chunk, Document
+from src.domain.interview.entities import Interview
 from src.domain.shared.identifiers import (
     ChatbotId,
     DocumentId,
+    InterviewId,
     MessageId,
     SessionId,
     TenantId,
@@ -68,6 +70,14 @@ class ChunkRepository(Protocol):
 
     async def add_many(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None: ...
     async def delete_for_document(self, tenant_id: TenantId, document_id: DocumentId) -> None: ...
+    async def list_for_document(
+        self, tenant_id: TenantId, document_id: DocumentId
+    ) -> list[Chunk]:
+        """All chunks for one document, in ordinal order — reconstructs full
+        text. Used where a small, fixed document set (e.g. one resume + one
+        job description) should be passed as complete context rather than
+        top-k retrieved."""
+        ...
     async def search(
         self,
         tenant_id: TenantId,
@@ -189,6 +199,41 @@ class RequestLogRepository(Protocol):
 
 
 @runtime_checkable
+class InterviewRepository(Protocol):
+    async def add(self, interview: Interview) -> None: ...
+    async def get(self, tenant_id: TenantId, interview_id: InterviewId) -> Interview | None: ...
+    async def get_by_token(self, access_token: str) -> Interview | None:
+        """Resolve by the candidate's opaque access token — NOT tenant-scoped
+        (the candidate has no tenant context), mirroring
+        ChatbotRepository.get_by_public_key."""
+        ...
+    async def update(self, interview: Interview) -> None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[Interview]: ...
+
+
+@dataclass
+class GoogleOAuthConnection:
+    """One tenant's 'Connect Google Calendar' tokens. Absent for a tenant =
+    not connected; scheduling an interview simply skips the calendar step."""
+
+    tenant_id: TenantId
+    access_token: str
+    refresh_token: str
+    expires_at: datetime
+    scope: str = ""
+    connected_email: str = ""
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@runtime_checkable
+class GoogleConnectionRepository(Protocol):
+    async def get(self, tenant_id: TenantId) -> GoogleOAuthConnection | None: ...
+    async def upsert(self, connection: GoogleOAuthConnection) -> None: ...
+    async def delete(self, tenant_id: TenantId) -> None: ...
+
+
+@runtime_checkable
 class UnitOfWork(Protocol):
     """Transaction boundary. A use case opens one UoW, does its work through the
     repositories, then commits. Collected domain events are dispatched on commit.
@@ -204,6 +249,8 @@ class UnitOfWork(Protocol):
     usage: UsageRepository
     analytics: AnalyticsRepository
     request_logs: RequestLogRepository
+    interviews: InterviewRepository
+    google_connections: GoogleConnectionRepository
 
     async def __aenter__(self) -> UnitOfWork: ...
     async def __aexit__(self, *args: object) -> None: ...

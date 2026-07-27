@@ -13,6 +13,8 @@ from functools import lru_cache
 
 from src.config.settings import Settings, get_settings
 from src.infrastructure.agent.builder import build_agent_loop
+from src.infrastructure.calendar.google import GoogleCalendarClient
+from src.infrastructure.email.resend import ResendEmailSender
 from src.infrastructure.llm.embeddings import GeminiEmbedder
 from src.infrastructure.llm.providers import FailoverLLM, build_llm
 from src.infrastructure.messaging.event_bus import InProcessEventBus
@@ -43,6 +45,11 @@ class Container:
         self.chunker = RecursiveChunker()
         self.hasher = Argon2PasswordHasher()
         self.tokens = JwtTokenService(settings)
+        # Virtual Interview integrations — both are no-ops (`.enabled is False`)
+        # until their settings are configured; nothing in the interview flow
+        # hard-depends on either.
+        self.calendar = GoogleCalendarClient(settings)
+        self.email = ResendEmailSender(settings)
         # Best-effort burst guard for anonymous public-widget traffic.
         self.anon_rate_limiter = SlidingWindowRateLimiter(
             max_events=settings.public_anon_max_messages,

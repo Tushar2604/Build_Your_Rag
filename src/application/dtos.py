@@ -8,6 +8,7 @@ evolve independently.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -82,3 +83,20 @@ class AgentAnswerOutput(BaseModel):
     stop_reason: str
     tools_used: list[str]
     steps: list[AgentStepOut]
+
+
+class ScheduleInterviewInput(BaseModel):
+    candidate_name: str = Field(default="", max_length=200)
+    candidate_email: EmailStr
+    role_title: str = Field(default="", max_length=200)
+    job_document_id: uuid.UUID
+    resume_document_id: uuid.UUID
+    scheduled_at: datetime
+
+
+class ScheduleInterviewOutput(BaseModel):
+    interview_id: uuid.UUID
+    candidate_name: str
+    join_url: str
+    calendar_created: bool
+    email_sent: bool

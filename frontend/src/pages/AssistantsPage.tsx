@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { listChatbots, createChatbot, Chatbot } from "../api/chatbots";
+import { listChatbots, createChatbot, Chatbot, Channel } from "../api/chatbots";
 import { listDocuments, Document } from "../api/documents";
 import { ApiError } from "../api/client";
 
@@ -37,6 +37,7 @@ interface CreateModalProps {
 function CreateModal({ documents, onCreate, onClose }: CreateModalProps) {
   const [step, setStep]               = useState<1 | 2 | 3>(1);
   const [name, setName]               = useState("");
+  const [channel, setChannel]         = useState<Channel>("text");
   const [useCase, setUseCase]         = useState<string>("support");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_PROMPTS.support);
@@ -60,6 +61,7 @@ function CreateModal({ documents, onCreate, onClose }: CreateModalProps) {
     try {
       const bot = await createChatbot({
         name,
+        channel,
         system_prompt: systemPrompt,
         top_k: topK,
         is_public: false,
@@ -108,6 +110,36 @@ function CreateModal({ documents, onCreate, onClose }: CreateModalProps) {
           {/* Step 1 — Identity */}
           {step === 1 && (
             <div className="px-6 py-5 space-y-5">
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 mb-3">How will people talk to it?</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setChannel("text")}
+                    className={`text-left px-3 py-3 rounded-lg border text-xs transition-colors ${
+                      channel === "text"
+                        ? "border-brand-500 bg-brand-50 text-brand-800"
+                        : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className="font-medium block">💬 Text chatbot</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5 block">Chat bubbles — playground, share link, embed</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChannel("voice")}
+                    className={`text-left px-3 py-3 rounded-lg border text-xs transition-colors ${
+                      channel === "voice"
+                        ? "border-brand-500 bg-brand-50 text-brand-800"
+                        : "border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50"
+                    }`}
+                  >
+                    <span className="font-medium block">🎙️ Voice chatbot</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5 block">Phone-call style — listens and speaks replies</span>
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-2">Changeable anytime in Configuration.</p>
+              </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-900 mb-3">What is this assistant for?</h3>
                 <label className="label">Name</label>
@@ -364,7 +396,7 @@ export default function AssistantsPage() {
                       to={`/assistants/${bot.id}`}
                       className="font-medium text-gray-900 hover:text-brand-700 transition-colors"
                     >
-                      {bot.name}
+                      {bot.channel === "voice" ? "🎙️" : "💬"} {bot.name}
                     </Link>
                   </td>
                   <td><StatusPill bot={bot} /></td>

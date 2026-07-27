@@ -23,6 +23,8 @@ from src.infrastructure.persistence.repositories import (
     ChatRepositoryImpl,
     ChunkRepositoryImpl,
     DocumentRepositoryImpl,
+    GoogleConnectionRepositoryImpl,
+    InterviewRepositoryImpl,
     RequestLogRepositoryImpl,
     TenantRepositoryImpl,
     UsageRepositoryImpl,
@@ -69,6 +71,8 @@ class SqlAlchemyUnitOfWork:
         self.usage = UsageRepositoryImpl(s)
         self.analytics = AnalyticsRepositoryImpl(s)
         self.request_logs = RequestLogRepositoryImpl(s)
+        self.interviews = InterviewRepositoryImpl(s)
+        self.google_connections = GoogleConnectionRepositoryImpl(s)
 
     async def _bind_scope(self) -> None:
         if self._session is None or self._tenant_id is None:

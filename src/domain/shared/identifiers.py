@@ -15,6 +15,7 @@ DocumentId = NewType("DocumentId", uuid.UUID)
 ChatbotId = NewType("ChatbotId", uuid.UUID)
 SessionId = NewType("SessionId", uuid.UUID)
 MessageId = NewType("MessageId", uuid.UUID)
+InterviewId = NewType("InterviewId", uuid.UUID)
 
 
 def new_id() -> uuid.UUID:

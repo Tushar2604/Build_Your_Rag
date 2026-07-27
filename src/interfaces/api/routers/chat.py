@@ -14,6 +14,7 @@ from src.application.dtos import AskInput
 from src.application.ports.repositories import RequestLog
 from src.application.use_cases.ask_chatbot import AskChatbot
 from src.domain.chat.entities import ChatSession, Message, MessageRole
+from src.domain.chatbot.entities import OPENER_INSTRUCTION
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
     build_grounded_prompt,
@@ -247,6 +248,91 @@ async def ask_stream(
             provider=served_by.get("provider"),
             tokens_used=tokens_used,
         )
+
+        yield {"event": "done", "data": json.dumps({"tokens_used": tokens_used})}
+
+    return EventSourceResponse(event_generator())
+
+
+@router.post("/sessions/{session_id}/greeting")
+async def greet(
+    session_id: uuid.UUID,
+    principal: PrincipalDep,
+    container: ContainerDep,
+) -> EventSourceResponse:
+    """AI-generated opening turn for a brand-new session — same SSE contract as
+    /stream (citations -> token* -> done) but with no user input: the model
+    greets the visitor and asks what they're here for, grounded in the chatbot's
+    own system prompt. Only valid once, before any other message exists."""
+
+    started = time.perf_counter()
+
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        session = await uow.chats.get_session(principal.tenant_id, SessionId(session_id))
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        bot = await uow.chatbots.get(principal.tenant_id, session.chatbot_id)
+        if bot is None:
+            raise HTTPException(status_code=404, detail="Chatbot not found")
+        existing = await uow.chats.list_messages(principal.tenant_id, SessionId(session_id))
+        if existing:
+            raise HTTPException(status_code=400, detail="Session already started")
+        tenant = await uow.tenants.get(principal.tenant_id)
+        used = await uow.usage.tokens_used_today(principal.tenant_id)
+        if tenant and used >= tenant.daily_token_quota:
+            raise QuotaExceededError("Daily token quota exceeded.")
+
+    async def event_generator():  # type: ignore[no-untyped-def]
+        yield {"event": "citations", "data": "[]"}
+        full: list[str] = []
+        served_by: dict[str, str] = {}
+        try:
+            async for token in container.llm.stream(
+                bot.system_prompt,
+                OPENER_INSTRUCTION,
+                on_provider=lambda name: served_by.__setitem__("provider", name),
+            ):
+                full.append(token)
+                yield {"event": "token", "data": token}
+        except Exception as exc:  # noqa: BLE001 - log then end the stream
+            log.warning("greeting.generation_failed", error=str(exc))
+            yield {"event": "error", "data": json.dumps({"detail": "Generation failed."})}
+            return
+
+        answer_text = "".join(full)
+        tokens_used = max(1, (len(bot.system_prompt) + len(OPENER_INSTRUCTION) + len(answer_text)) // 4)
+
+        assistant = Message(
+            session_id=SessionId(session_id),
+            tenant_id=principal.tenant_id,
+            role=MessageRole.ASSISTANT,
+            content=answer_text,
+            tokens_used=tokens_used,
+            provider=served_by.get("provider"),
+        )
+        async with container.unit_of_work() as uow:
+            uow.set_tenant_scope(principal.tenant_id)
+            await uow.chats.add_message(assistant)
+            await uow.usage.add_tokens(principal.tenant_id, tokens_used)
+            try:
+                await uow.request_logs.add(
+                    RequestLog(
+                        tenant_id=principal.tenant_id,
+                        chatbot_id=bot.id,
+                        session_id=SessionId(session_id),
+                        message_id=assistant.id,
+                        query="(session start)",
+                        answer=answer_text,
+                        status="ok",
+                        provider=served_by.get("provider"),
+                        tokens_used=tokens_used,
+                        latency_ms=int((time.perf_counter() - started) * 1000),
+                    )
+                )
+            except Exception:  # noqa: BLE001 - logging is best-effort
+                pass
+            await uow.commit()
 
         yield {"event": "done", "data": json.dumps({"tokens_used": tokens_used})}
 

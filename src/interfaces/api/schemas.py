@@ -12,6 +12,10 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+# Verdict vocabulary shared with hiring_agent's collect_feedback_tool.
+InterviewVerdict = Literal["strong_hire", "hire", "maybe", "no_hire"]
+InterviewStatus = Literal["scheduled", "in_progress", "completed", "cancelled"]
+
 
 # --- Auth ---
 class RegisterRequest(BaseModel):
@@ -67,6 +71,7 @@ class WidgetConfigSchema(BaseModel):
 
 class CreateChatbotRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    channel: Literal["text", "voice"] = "text"
     system_prompt: str | None = None
     top_k: int = Field(default=5, ge=1, le=20)
     is_public: bool = False
@@ -78,6 +83,7 @@ class UpdateChatbotRequest(BaseModel):
     edit appearance, sharing, and the embed allowlist."""
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    channel: Literal["text", "voice"] | None = None
     system_prompt: str | None = Field(default=None, min_length=1)
     top_k: int | None = Field(default=None, ge=1, le=20)
     is_public: bool | None = None
@@ -88,6 +94,7 @@ class UpdateChatbotRequest(BaseModel):
 class ChatbotResponse(BaseModel):
     id: uuid.UUID
     name: str
+    channel: Literal["text", "voice"]
     system_prompt: str
     top_k: int
     is_public: bool
@@ -106,6 +113,7 @@ class PublicConfigResponse(BaseModel):
 
     chatbot_id: uuid.UUID
     name: str
+    channel: Literal["text", "voice"]
     widget: WidgetConfigSchema
 
 
@@ -203,3 +211,64 @@ class RequestLogResponse(BaseModel):
     latency_ms: int
     error: str | None
     answer: str | None
+
+
+# --- Virtual Interview ---
+class ScheduleInterviewRequest(BaseModel):
+    candidate_name: str = Field(default="", max_length=200)
+    candidate_email: EmailStr
+    role_title: str = Field(default="", max_length=200)
+    job_document_id: uuid.UUID
+    resume_document_id: uuid.UUID
+    scheduled_at: datetime
+
+
+class QuestionScoreResponse(BaseModel):
+    question: str
+    answer: str
+    score: int
+    justification: str
+
+
+class TranscriptTurnResponse(BaseModel):
+    role: Literal["assistant", "user"]
+    content: str
+
+
+class InterviewResponse(BaseModel):
+    id: uuid.UUID
+    candidate_name: str
+    candidate_email: str
+    role_title: str
+    scheduled_at: datetime
+    status: InterviewStatus
+    questions: list[str]
+    transcript: list[TranscriptTurnResponse]
+    calendar_link: str | None
+    overall_score: float | None
+    overall_verdict: InterviewVerdict | None
+    scores: list[QuestionScoreResponse]
+    has_report: bool
+    join_url: str
+    calendar_created: bool = False
+    email_sent: bool = False
+
+
+# --- Virtual Interview: candidate-facing (token-scoped, no auth) ---
+class InterviewBootstrapResponse(BaseModel):
+    candidate_name: str
+    role_title: str
+    tenant_name: str
+    scheduled_at: datetime
+    status: InterviewStatus
+    can_join: bool
+
+
+# --- Google Calendar integration ---
+class GoogleStatusResponse(BaseModel):
+    connected: bool
+    email: str = ""
+
+
+class GoogleConnectResponse(BaseModel):
+    authorize_url: str

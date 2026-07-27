@@ -4,9 +4,11 @@ import {
   getPublicConfig,
   createPublicSession,
   streamPublic,
+  streamPublicGreeting,
   PublicConfig,
   PublicCitation,
 } from "../api/public";
+import VoiceCallPanel from "../components/VoiceCallPanel";
 
 interface Message {
   role: "user" | "bot";
@@ -77,23 +79,120 @@ function CitationList({ citations }: { citations: PublicCitation[] }) {
 
 export default function EmbedChatPage() {
   const { publicKey = "" } = useParams<{ publicKey: string }>();
-  const [config,   setConfig]   = useState<PublicConfig | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input,    setInput]    = useState("");
-  const [busy,     setBusy]     = useState(false);
-  const [loadErr,  setLoadErr]  = useState<string | null>(null);
-  const sessionRef              = useRef<string | null>(null);
-  const scrollRef               = useRef<HTMLDivElement>(null);
-  const inputRef                = useRef<HTMLTextAreaElement>(null);
+  const [config,  setConfig]  = useState<PublicConfig | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   useEffect(() => {
     getPublicConfig(publicKey)
       .then((cfg) => {
         setConfig(cfg);
-        setMessages([{ role: "bot", text: cfg.widget.welcome_message }]);
         window.parent.postMessage({ type: "kore:ready", name: cfg.name }, "*");
       })
       .catch((e) => setLoadErr(e.message || "Failed to load assistant."));
+  }, [publicKey]);
+
+  if (loadErr) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+        height: "100dvh", fontFamily: "sans-serif", background: "#f9fafb" }}>
+        <div style={{ textAlign: "center" }}>
+          <p style={{ fontSize: 14, fontWeight: 600, color: "#111827", margin: 0 }}>Assistant unavailable</p>
+          <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>{loadErr}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!config) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+        height: "100dvh", background: "#f9fafb" }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[0, 1, 2].map((i) => (
+            <div key={i} style={{
+              width: 8, height: 8, borderRadius: "50%", background: "#d1d5db",
+              animation: "pulse 1.2s ease-in-out infinite", animationDelay: `${i * 0.2}s`,
+            }} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const theme = config.widget.theme_color;
+  const name  = config.widget.display_name || config.name;
+
+  if (config.channel === "voice") {
+    return (
+      <>
+        <style>{`* { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; } html, body { margin: 0; padding: 0; height: 100%; }`}</style>
+        <div style={{ display: "flex", flexDirection: "column", height: "100dvh", background: "#fff" }}>
+          <div style={{ background: theme, color: "#fff", padding: "12px 16px", flexShrink: 0 }}>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{name}</p>
+          </div>
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            <VoiceCallPanel
+              botName={name}
+              theme={theme}
+              adapter={{
+                createSession: () => createPublicSession(publicKey),
+                greet: (sid, h) =>
+                  streamPublicGreeting(publicKey, sid, { onToken: h.onToken, onDone: () => h.onDone?.(), onError: h.onError }),
+                ask: (sid, text, h) =>
+                  streamPublic(publicKey, sid, text, { onToken: h.onToken, onDone: () => h.onDone?.(), onError: h.onError }),
+              }}
+            />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return <TextEmbedChat publicKey={publicKey} config={config} />;
+}
+
+function TextEmbedChat({ publicKey, config }: { publicKey: string; config: PublicConfig }) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input,    setInput]    = useState("");
+  const [busy,     setBusy]     = useState(false);
+  const sessionRef              = useRef<string | null>(null);
+  const scrollRef               = useRef<HTMLDivElement>(null);
+  const inputRef                = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    // AI-generated opening turn — falls back to the static welcome message
+    // if greeting generation fails.
+    setMessages([{ role: "bot", text: "", streaming: true }]);
+    setBusy(true);
+    createPublicSession(publicKey)
+      .then((sid) => {
+        sessionRef.current = sid;
+        streamPublicGreeting(publicKey, sid, {
+          onToken: (tok) =>
+            setMessages((m) => {
+              const copy = [...m];
+              copy[0] = { ...copy[0], text: copy[0].text + tok };
+              return copy;
+            }),
+          onDone: () => {
+            setMessages((m) => {
+              const copy = [...m];
+              copy[0] = { ...copy[0], streaming: false };
+              return copy;
+            });
+            setBusy(false);
+          },
+          onError: () => {
+            setMessages([{ role: "bot", text: config.widget.welcome_message }]);
+            setBusy(false);
+          },
+        });
+      })
+      .catch(() => {
+        setMessages([{ role: "bot", text: config.widget.welcome_message }]);
+        setBusy(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicKey]);
 
   useEffect(() => {
@@ -175,36 +274,8 @@ export default function EmbedChatPage() {
     }
   }
 
-  const theme = config?.widget.theme_color ?? "#2563eb";
-  const name  = config?.widget.display_name || config?.name || "Assistant";
-
-  if (loadErr) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
-        height: "100dvh", fontFamily: "sans-serif", background: "#f9fafb" }}>
-        <div style={{ textAlign: "center" }}>
-          <p style={{ fontSize: 14, fontWeight: 600, color: "#111827", margin: 0 }}>Assistant unavailable</p>
-          <p style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>{loadErr}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!config) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
-        height: "100dvh", background: "#f9fafb" }}>
-        <div style={{ display: "flex", gap: 6 }}>
-          {[0, 1, 2].map((i) => (
-            <div key={i} style={{
-              width: 8, height: 8, borderRadius: "50%", background: "#d1d5db",
-              animation: "pulse 1.2s ease-in-out infinite", animationDelay: `${i * 0.2}s`,
-            }} />
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const theme = config.widget.theme_color;
+  const name  = config.widget.display_name || config.name;
 
   return (
     <>
@@ -232,7 +303,7 @@ export default function EmbedChatPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
             </svg>
           </div>
-          <div>
+          <div style={{ flex: 1 }}>
             <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{name}</p>
             <p style={{ margin: 0, fontSize: 11, opacity: 0.7 }}>AI Assistant</p>
           </div>

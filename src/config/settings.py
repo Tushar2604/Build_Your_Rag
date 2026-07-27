@@ -108,6 +108,19 @@ class Settings(BaseSettings):
     tenant_max_documents: int = 200
     retrieval_top_k: int = 5
 
+    # --- Google Calendar OAuth (per-tenant "Connect Google Calendar") ---
+    # Blank = the integration is simply unavailable (Settings shows "not
+    # configured"); scheduling an interview still works, it just skips the
+    # calendar step. See docs/design/ for the Google Cloud Console setup steps.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+
+    # --- Resend (candidate interview-invite email) ---
+    # Blank = scheduling an interview skips sending email; the admin UI shows a
+    # copyable link instead. No hard dependency either way.
+    resend_api_key: str = ""
+    resend_from_email: str = "interviews@example.com"
+
     # --- Hiring Agent ---
     # Set HIRING_AGENT_ENABLED=true to mount the /api/v1/hiring/* routes.
     # Off by default so the module is invisible to existing chatbot traffic.
@@ -133,6 +146,18 @@ class Settings(BaseSettings):
     @property
     def langfuse_enabled(self) -> bool:
         return bool(self.langfuse_public_key and self.langfuse_secret_key)
+
+    @property
+    def google_oauth_enabled(self) -> bool:
+        return bool(self.google_oauth_client_id and self.google_oauth_client_secret)
+
+    @property
+    def google_oauth_redirect_uri(self) -> str:
+        return f"{self.app_base_url.rstrip('/')}/api/v1/integrations/google/callback"
+
+    @property
+    def resend_enabled(self) -> bool:
+        return bool(self.resend_api_key)
 
     @field_validator("database_url")
     @classmethod

@@ -7,9 +7,12 @@ export interface WidgetConfig {
   launcher_position: "bottom-right" | "bottom-left";
 }
 
+export type Channel = "text" | "voice";
+
 export interface Chatbot {
   id: string;
   name: string;
+  channel: Channel;
   system_prompt: string;
   top_k: number;
   is_public: boolean;
@@ -22,6 +25,7 @@ export interface Chatbot {
 
 export interface CreateChatbotInput {
   name: string;
+  channel?: Channel;
   system_prompt?: string;
   top_k?: number;
   is_public?: boolean;
@@ -30,6 +34,7 @@ export interface CreateChatbotInput {
 
 export interface UpdateChatbotInput {
   name?: string;
+  channel?: Channel;
   system_prompt?: string;
   top_k?: number;
   is_public?: boolean;

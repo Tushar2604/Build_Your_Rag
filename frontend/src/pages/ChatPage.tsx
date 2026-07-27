@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, FormEvent, KeyboardEvent } from "react";
 import { useParams, Link } from "react-router-dom";
 import { getChatbot, Chatbot } from "../api/chatbots";
-import { createSession, askStream } from "../api/chat";
+import { createSession, askStream, greetStream } from "../api/chat";
 import { CitationPayload } from "../api/client";
+import { useVoice } from "../hooks/useVoice";
 
 interface ChatMessage {
   id: string;
@@ -88,22 +89,64 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<(() => void) | null>(null);
 
+  const {
+    sttSupported,
+    ttsSupported,
+    listening,
+    startListening,
+    stopListening,
+    voiceMode,
+    setVoiceMode,
+    speak,
+  } = useVoice((transcript) => sendMessage(transcript));
+
   useEffect(() => {
     if (!chatbotId) return;
     Promise.all([getChatbot(chatbotId), createSession(chatbotId)])
       .then(([bot, session]) => {
         setChatbot(bot);
         setSessionId(session.session_id);
+
+        // AI-generated opening turn — the model greets first instead of the
+        // page sitting empty. Silently falls back to the empty state on error.
+        const greetingMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "",
+          streaming: true,
+        };
+        let greetingText = "";
+        setMessages([greetingMsg]);
+        greetStream(session.session_id, {
+          onToken: (token) => {
+            greetingText += token;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === greetingMsg.id ? { ...m, content: m.content + token } : m,
+              ),
+            );
+          },
+          onDone: () => {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === greetingMsg.id ? { ...m, streaming: false } : m)),
+            );
+            if (voiceMode) speak(greetingText);
+          },
+          onError: () => {
+            setMessages((prev) => prev.filter((m) => m.id !== greetingMsg.id));
+          },
+        });
       })
       .catch((err) => setError(err.message ?? "Failed to initialize chat."));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatbotId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  function sendMessage() {
-    const text = input.trim();
+  function sendMessage(overrideText?: string) {
+    const text = (overrideText ?? input).trim();
     if (!text || !sessionId || isStreaming) return;
 
     setInput("");
@@ -124,6 +167,7 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
 
+    let fullAnswer = "";
     abortRef.current = askStream(sessionId, text, {
       onCitations: (citations) => {
         setMessages((prev) =>
@@ -133,6 +177,7 @@ export default function ChatPage() {
         );
       },
       onToken: (token) => {
+        fullAnswer += token;
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantMsg.id
@@ -151,6 +196,7 @@ export default function ChatPage() {
         );
         setIsStreaming(false);
         inputRef.current?.focus();
+        if (voiceMode) speak(fullAnswer);
       },
       onError: (err) => {
         setMessages((prev) =>
@@ -216,10 +262,31 @@ export default function ChatPage() {
             </p>
           )}
         </div>
+        {ttsSupported && (
+          <button
+            type="button"
+            onClick={() => setVoiceMode(!voiceMode)}
+            aria-pressed={voiceMode}
+            aria-label={voiceMode ? "Turn off voice replies" : "Turn on voice replies"}
+            title={voiceMode ? "Voice replies on" : "Voice replies off"}
+            className={`ml-auto h-9 w-9 flex-shrink-0 rounded-lg flex items-center justify-center border ${
+              voiceMode
+                ? "bg-brand-50 border-brand-200 text-brand-600"
+                : "bg-white border-gray-200 text-gray-400"
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5L6 9H2v6h4l5 4V5z" />
+              {voiceMode && (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" />
+              )}
+            </svg>
+          </button>
+        )}
         {chatbotId && (
           <Link
             to={`/chatbots/${chatbotId}/settings`}
-            className="btn-secondary ml-auto h-9 px-3 text-xs"
+            className={`btn-secondary h-9 px-3 text-xs ${ttsSupported ? "" : "ml-auto"}`}
           >
             Embed &amp; Share
           </Link>
@@ -277,6 +344,27 @@ export default function ChatPage() {
               maxLength={8000}
             />
           </div>
+
+          {sttSupported && (
+            <button
+              type="button"
+              onClick={() => (listening ? stopListening() : startListening())}
+              disabled={!sessionId || isStreaming}
+              aria-pressed={listening}
+              aria-label={listening ? "Stop dictating" : "Ask by voice"}
+              title={listening ? "Listening… tap to stop" : "Ask by voice"}
+              className={`flex-shrink-0 h-10 w-10 rounded-xl flex items-center justify-center border ${
+                listening
+                  ? "bg-red-50 border-red-200 text-red-600 animate-pulse"
+                  : "btn-secondary"
+              }`}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15a3 3 0 003-3V6a3 3 0 10-6 0v6a3 3 0 003 3z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-14 0M12 18v3" />
+              </svg>
+            </button>
+          )}
 
           {isStreaming ? (
             <button

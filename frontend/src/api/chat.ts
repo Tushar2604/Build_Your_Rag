@@ -42,3 +42,17 @@ export function askStream(
 ): () => void {
   return streamSSE(`/sessions/${sessionId}/stream`, { message }, handlers);
 }
+
+/** AI-generated opening turn for a brand-new session — same SSE contract as
+ * askStream, but with no user message (the model greets first). */
+export function greetStream(
+  sessionId: string,
+  handlers: {
+    onCitations?: (c: CitationPayload[]) => void;
+    onToken?: (t: string) => void;
+    onDone?: (tokensUsed: number) => void;
+    onError?: (e: string) => void;
+  },
+): () => void {
+  return streamSSE(`/sessions/${sessionId}/greeting`, {}, handlers);
+}

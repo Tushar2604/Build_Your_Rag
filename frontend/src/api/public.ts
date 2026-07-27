@@ -1,13 +1,14 @@
 // Public, unauthenticated client for the hosted share-by-link chat page.
 // Mirrors the embeddable widget's contract but lives in the SPA.
 
-import type { WidgetConfig } from "./chatbots";
+import type { Channel, WidgetConfig } from "./chatbots";
 
 const BASE = "/api/v1/public";
 
 export interface PublicConfig {
   chatbot_id: string;
   name: string;
+  channel: Channel;
   widget: WidgetConfig;
 }
 
@@ -33,29 +34,27 @@ export async function createPublicSession(publicKey: string): Promise<string> {
   return data.session_id as string;
 }
 
-export function streamPublic(
-  publicKey: string,
-  sessionId: string,
-  message: string,
-  handlers: {
-    onCitations?: (c: PublicCitation[]) => void;
-    onToken?: (t: string) => void;
-    onDone?: () => void;
-    onError?: (e: string) => void;
-  },
-): () => void {
+type StreamHandlers = {
+  onCitations?: (c: PublicCitation[]) => void;
+  onToken?: (t: string) => void;
+  onDone?: () => void;
+  onError?: (e: string) => void;
+};
+
+function streamUrl(publicKey: string, sessionId: string, path: string): string {
+  return `${BASE}/chatbots/${encodeURIComponent(publicKey)}/sessions/${sessionId}/${path}`;
+}
+
+function _stream(url: string, body: unknown, handlers: StreamHandlers): () => void {
   const controller = new AbortController();
   (async () => {
     try {
-      const res = await fetch(
-        `${BASE}/chatbots/${encodeURIComponent(publicKey)}/sessions/${sessionId}/stream`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message }),
-          signal: controller.signal,
-        },
-      );
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
       if (!res.ok || !res.body) {
         handlers.onError?.(`HTTP ${res.status}`);
         return;
@@ -92,4 +91,23 @@ export function streamPublic(
     }
   })();
   return () => controller.abort();
+}
+
+export function streamPublic(
+  publicKey: string,
+  sessionId: string,
+  message: string,
+  handlers: StreamHandlers,
+): () => void {
+  return _stream(streamUrl(publicKey, sessionId, "stream"), { message }, handlers);
+}
+
+/** AI-generated opening turn for a brand-new session — same contract as
+ * streamPublic, but with no user message (the model greets first). */
+export function streamPublicGreeting(
+  publicKey: string,
+  sessionId: string,
+  handlers: StreamHandlers,
+): () => void {
+  return _stream(streamUrl(publicKey, sessionId, "greeting"), {}, handlers);
 }

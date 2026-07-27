@@ -2,10 +2,11 @@ import {
   useState, useEffect, useRef, useCallback, KeyboardEvent,
 } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { getChatbot, updateChatbot, rotateChatbotKey, Chatbot } from "../api/chatbots";
-import { createSession, askStream } from "../api/chat";
+import { getChatbot, updateChatbot, rotateChatbotKey, Chatbot, Channel } from "../api/chatbots";
+import { createSession, askStream, greetStream } from "../api/chat";
 import { getChatbotAnalytics, getChatbotRequests, ChatbotAnalytics, RequestLog } from "../api/analytics";
 import { CitationPayload, ApiError } from "../api/client";
+import VoiceCallPanel from "../components/VoiceCallPanel";
 
 /* ── shared types ── */
 type Tab = "overview" | "config" | "playground" | "deployments" | "analytics";
@@ -159,6 +160,7 @@ function OverviewTab({ bot }: { bot: Chatbot }) {
 ════════════════════════════════════════════ */
 function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => void }) {
   const [name,          setName]          = useState(bot.name);
+  const [channel,       setChannel]       = useState<Channel>(bot.channel);
   const [systemPrompt,  setSystemPrompt]  = useState(bot.system_prompt);
   const [topK,          setTopK]          = useState(bot.top_k);
   const [isPublic,      setIsPublic]      = useState(bot.is_public);
@@ -179,7 +181,7 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
     try {
       const origins = originsText.split("\n").map((o) => o.trim()).filter(Boolean);
       const updated = await updateChatbot(bot.id, {
-        name, system_prompt: systemPrompt, top_k: topK, is_public: isPublic,
+        name, channel, system_prompt: systemPrompt, top_k: topK, is_public: isPublic,
         allowed_origins: origins,
         widget: { display_name: displayName, theme_color: themeColor, welcome_message: welcome, launcher_position: position },
       });
@@ -212,6 +214,27 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
             <p className="text-xs text-gray-400 text-right mt-1">{systemPrompt.length}/4000</p>
           </div>
         </div>
+      </SectionCard>
+
+      {/* Channel */}
+      <SectionCard title="Channel">
+        <div className="segmented">
+          {(["text", "voice"] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => { setChannel(c); mark(); }}
+              className={channel === c ? "segmented-item-active" : "segmented-item"}
+            >
+              {c === "text" ? "💬 Text" : "🎙️ Voice"}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 mt-2">
+          {channel === "text"
+            ? "A standard text chat. Available in the Playground, share link, and embeds."
+            : "A phone-call-style experience — continuous listen, auto-reply, auto-speak. Replaces the chat window everywhere this assistant is used."}
+        </p>
       </SectionCard>
 
       {/* Retrieval */}
@@ -334,6 +357,26 @@ interface ChatMsg {
 }
 
 function PlaygroundTab({ bot }: { bot: Chatbot }) {
+  if (bot.channel === "voice") {
+    return (
+      <div className="h-[calc(100vh-180px)] min-h-[480px] border border-gray-200 rounded-xl overflow-hidden bg-white">
+        <VoiceCallPanel
+          botName={bot.name}
+          adapter={{
+            createSession: async () => (await createSession(bot.id)).session_id,
+            greet: (sid, h) =>
+              greetStream(sid, { onToken: h.onToken, onDone: () => h.onDone?.(), onError: h.onError }),
+            ask: (sid, text, h) =>
+              askStream(sid, text, { onToken: h.onToken, onDone: (tokens) => h.onDone?.(tokens), onError: h.onError }),
+          }}
+        />
+      </div>
+    );
+  }
+  return <TextPlaygroundTab bot={bot} />;
+}
+
+function TextPlaygroundTab({ bot }: { bot: Chatbot }) {
   const [sessionId, setSessionId]     = useState<string | null>(null);
   const [messages,  setMessages]      = useState<ChatMsg[]>([]);
   const [input,     setInput]         = useState("");
@@ -348,8 +391,27 @@ function PlaygroundTab({ bot }: { bot: Chatbot }) {
 
   useEffect(() => {
     createSession(bot.id)
-      .then((s) => setSessionId(s.session_id))
+      .then((s) => {
+        setSessionId(s.session_id);
+
+        // AI-generated opening turn — the model greets first instead of the
+        // playground sitting empty. Silently skipped on error.
+        const greetingMsg: ChatMsg = { id: crypto.randomUUID(), role: "assistant", content: "", streaming: true };
+        setMessages([greetingMsg]);
+        greetStream(s.session_id, {
+          onToken: (t) => {
+            setMessages((p) => p.map((m) => m.id === greetingMsg.id ? { ...m, content: m.content + t } : m));
+          },
+          onDone: () => {
+            setMessages((p) => p.map((m) => m.id === greetingMsg.id ? { ...m, streaming: false } : m));
+          },
+          onError: () => {
+            setMessages((p) => p.filter((m) => m.id !== greetingMsg.id));
+          },
+        });
+      })
       .catch((e) => setInitErr(e.message ?? "Failed to start session."));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bot.id]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -491,7 +553,7 @@ function PlaygroundTab({ bot }: { bot: Chatbot }) {
               <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
             </button>
           ) : (
-            <button type="button" onClick={send} disabled={!input.trim() || !sessionId} className="btn-primary flex-shrink-0 h-9 px-3">
+            <button type="button" onClick={() => send()} disabled={!input.trim() || !sessionId} className="btn-primary flex-shrink-0 h-9 px-3">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
               </svg>

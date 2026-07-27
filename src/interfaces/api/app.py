@@ -31,6 +31,8 @@ from src.interfaces.api.routers import (
     chatbots,
     documents,
     health,
+    integrations,
+    interviews,
     public,
     uploads,
 )
@@ -164,6 +166,8 @@ def create_app() -> FastAPI:
     app.include_router(agent.router, prefix=api_prefix)
     app.include_router(public.router, prefix=api_prefix)
     app.include_router(uploads.router, prefix=api_prefix)
+    app.include_router(interviews.router, prefix=api_prefix)
+    app.include_router(integrations.router, prefix=api_prefix)
 
     if settings.hiring_agent_enabled:
         app.include_router(hiring_router, prefix=api_prefix)
