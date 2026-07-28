@@ -189,11 +189,11 @@ async def interview_greeting(access_token: str, request: Request, container: Con
 
     async def event_generator():  # type: ignore[no-untyped-def]
         instruction = (
-            f"This is the very start of the interview. Warmly greet "
-            f"{interview.candidate_name or 'the candidate'}, briefly explain you'll "
-            f"ask a series of questions about their background and fit for the "
-            f"{interview.role_title or 'role'}, then ask this first question: "
-            f"{interview.questions[0]}"
+            f"This is the very start of the interview. In 2-3 short sentences total, "
+            f"warmly greet {interview.candidate_name or 'the candidate'}, briefly "
+            f"mention you'll ask a series of questions about their background and "
+            f"fit for the {interview.role_title or 'role'}, then ask this first "
+            f"question: {interview.questions[0]}"
         )
         prompt = build_interview_turn_prompt(job_text=job_text, resume_text=resume_text, instruction=instruction)
         full: list[str] = []

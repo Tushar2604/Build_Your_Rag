@@ -32,6 +32,10 @@ INTERVIEWER_SYSTEM_PROMPT = (
     "You may ask ONE short natural follow-up to their answer if something "
     "genuinely warrants it, but do not turn this into a multi-question "
     "tangent — the interview has a fixed set of questions to get through. "
+    "STRICT LENGTH LIMIT: every message must be at most 2-3 short sentences "
+    "(roughly 40 words). This is spoken aloud to the candidate, so never "
+    "produce long paragraphs, numbered lists, or multiple questions at once — "
+    "a real interviewer speaks in short, natural turns, not monologues. "
     # --- Grounding ---
     "Use the job description and resume reference material below for context "
     "about the role and the candidate's background. Do not invent facts about "
@@ -79,6 +83,11 @@ class Interview:
     resume_document_id: DocumentId
     scheduled_at: datetime
     id: InterviewId = field(default_factory=lambda: InterviewId(new_id()))
+    # Set only for batch-created interviews: an optional self-service deadline
+    # (no fixed meeting slot at bulk scale — see InterviewBatch). None for
+    # single-scheduled interviews, which stay joinable indefinitely once
+    # scheduled_at arrives, same as before this field existed.
+    window_closes_at: datetime | None = None
     access_token: str = field(default_factory=generate_interview_token)
     status: InterviewStatus = "scheduled"
     questions: list[str] = field(default_factory=list)
@@ -95,7 +104,11 @@ class Interview:
 
     def can_join(self, now: datetime) -> bool:
         """Whether the candidate may start the interview right now."""
-        return self.status == "scheduled" and now >= self.scheduled_at
+        if self.status != "scheduled" or now < self.scheduled_at:
+            return False
+        if self.window_closes_at is not None and now > self.window_closes_at:
+            return False
+        return True
 
     def current_question(self) -> str | None:
         if 0 <= self.current_question_index < len(self.questions):

@@ -230,6 +230,7 @@ class InterviewModel(Base):
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
     )
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    window_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="scheduled", index=True)
     access_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     questions: Mapped[list] = mapped_column(JSONB, default=list)
@@ -247,6 +248,56 @@ class InterviewModel(Base):
     )
 
 
+class InterviewBatchModel(Base):
+    __tablename__ = "interview_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    role_title: Mapped[str] = mapped_column(String(200), default="")
+    job_document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    window_opens_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    window_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="collecting", index=True)
+    total_count: Mapped[int] = mapped_column(Integer, default=0)
+    sent_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class BatchCandidateModel(Base):
+    __tablename__ = "interview_batch_candidates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("interview_batches.id", ondelete="CASCADE"), index=True
+    )
+    resume_document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE")
+    )
+    resume_filename: Mapped[str] = mapped_column(String(500), default="")
+    candidate_name: Mapped[str] = mapped_column(String(200), default="")
+    candidate_email: Mapped[str] = mapped_column(String(320), default="")
+    status: Mapped[str] = mapped_column(String(20), default="ingesting", index=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    interview_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("interviews.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
 class GoogleOAuthConnectionModel(Base):
     __tablename__ = "google_oauth_connections"
 
@@ -258,6 +309,46 @@ class GoogleOAuthConnectionModel(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     scope: Mapped[str] = mapped_column(String(500), default="")
     connected_email: Mapped[str] = mapped_column(String(320), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class WhatsAppChannelModel(Base):
+    __tablename__ = "whatsapp_channels"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    chatbot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="CASCADE"), unique=True
+    )
+    phone_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    twilio_account_sid: Mapped[str] = mapped_column(String(64))
+    twilio_auth_token: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class WhatsAppConversationModel(Base):
+    __tablename__ = "whatsapp_conversations"
+    __table_args__ = (
+        UniqueConstraint("whatsapp_channel_id", "phone_number", name="uq_whatsapp_conv_channel_phone"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    whatsapp_channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("whatsapp_channels.id", ondelete="CASCADE"), index=True
+    )
+    phone_number: Mapped[str] = mapped_column(String(32))
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="CASCADE")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

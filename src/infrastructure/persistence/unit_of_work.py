@@ -19,16 +19,20 @@ from src.infrastructure.persistence.database import get_sessionmaker
 from src.infrastructure.persistence.repositories import (
     AnalyticsRepositoryImpl,
     ApiKeyRepositoryImpl,
+    BatchCandidateRepositoryImpl,
     ChatbotRepositoryImpl,
     ChatRepositoryImpl,
     ChunkRepositoryImpl,
     DocumentRepositoryImpl,
     GoogleConnectionRepositoryImpl,
+    InterviewBatchRepositoryImpl,
     InterviewRepositoryImpl,
     RequestLogRepositoryImpl,
     TenantRepositoryImpl,
     UsageRepositoryImpl,
     UserRepositoryImpl,
+    WhatsAppChannelRepositoryImpl,
+    WhatsAppConversationRepositoryImpl,
 )
 
 
@@ -72,7 +76,11 @@ class SqlAlchemyUnitOfWork:
         self.analytics = AnalyticsRepositoryImpl(s)
         self.request_logs = RequestLogRepositoryImpl(s)
         self.interviews = InterviewRepositoryImpl(s)
+        self.interview_batches = InterviewBatchRepositoryImpl(s)
+        self.batch_candidates = BatchCandidateRepositoryImpl(s)
         self.google_connections = GoogleConnectionRepositoryImpl(s)
+        self.whatsapp_channels = WhatsAppChannelRepositoryImpl(s)
+        self.whatsapp_conversations = WhatsAppConversationRepositoryImpl(s)
 
     async def _bind_scope(self) -> None:
         if self._session is None or self._tenant_id is None:

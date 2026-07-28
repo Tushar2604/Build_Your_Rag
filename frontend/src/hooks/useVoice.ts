@@ -21,10 +21,15 @@ function getSpeechRecognitionCtor(): any {
 // same page never finalizes at all, which is exactly the "keeps on
 // listening forever" bug this replaces. Driving our own pause-detection off
 // interim results (continuous mode) fixes that and gives predictable,
-// tunable behavior.
-const SILENCE_TIMEOUT_MS = 6000;
+// tunable behavior. Also doubles as the "the user hasn't said anything at
+// all" check-in threshold, per the user's explicit "~5 seconds" ask.
+const SILENCE_TIMEOUT_MS = 5000;
 
-export function useVoice(onTranscript: (text: string) => void, storageKey = "kore:voiceMode") {
+export function useVoice(
+  onTranscript: (text: string) => void,
+  onSilence?: () => void,
+  storageKey = "kore:voiceMode",
+) {
   const SpeechRecognitionCtor = getSpeechRecognitionCtor();
   const sttSupported = !!SpeechRecognitionCtor;
   const ttsSupported = typeof window !== "undefined" && "speechSynthesis" in window;
@@ -42,6 +47,8 @@ export function useVoice(onTranscript: (text: string) => void, storageKey = "kor
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
+  const onSilenceRef = useRef(onSilence);
+  onSilenceRef.current = onSilence;
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {
@@ -113,6 +120,7 @@ export function useVoice(onTranscript: (text: string) => void, storageKey = "kor
       setListening(false);
       const text = (finalizedText + " " + latestInterim).trim();
       if (text) onTranscriptRef.current(text);
+      else onSilenceRef.current?.();
     };
     recognitionRef.current = rec;
     setListening(true);

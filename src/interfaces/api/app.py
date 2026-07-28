@@ -32,9 +32,11 @@ from src.interfaces.api.routers import (
     documents,
     health,
     integrations,
+    interview_batches,
     interviews,
     public,
     uploads,
+    whatsapp,
 )
 from src.hiring_agent.routes import router as hiring_router
 
@@ -167,7 +169,9 @@ def create_app() -> FastAPI:
     app.include_router(public.router, prefix=api_prefix)
     app.include_router(uploads.router, prefix=api_prefix)
     app.include_router(interviews.router, prefix=api_prefix)
+    app.include_router(interview_batches.router, prefix=api_prefix)
     app.include_router(integrations.router, prefix=api_prefix)
+    app.include_router(whatsapp.router, prefix=api_prefix)
 
     if settings.hiring_agent_enabled:
         app.include_router(hiring_router, prefix=api_prefix)

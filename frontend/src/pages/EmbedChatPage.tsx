@@ -9,6 +9,7 @@ import {
   PublicCitation,
 } from "../api/public";
 import VoiceCallPanel from "../components/VoiceCallPanel";
+import { useIdleNudge } from "../hooks/useIdleNudge";
 
 interface Message {
   role: "user" | "bot";
@@ -16,6 +17,12 @@ interface Message {
   citations?: PublicCitation[];
   streaming?: boolean;
 }
+
+const NUDGE_LINES = [
+  "Just checking in — are you still there?",
+  "No rush! I'm here whenever you're ready to continue.",
+  "Still with me? Let me know if you have any questions.",
+];
 
 function TypingDots() {
   return (
@@ -198,6 +205,13 @@ function TextEmbedChat({ publicKey, config }: { publicKey: string; config: Publi
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  useIdleNudge(!busy && messages.length > 0, () => {
+    setMessages((m) => [
+      ...m,
+      { role: "bot", text: NUDGE_LINES[Math.floor(Math.random() * NUDGE_LINES.length)] },
+    ]);
+  });
 
   /* Listen for programmatic messages from the parent page */
   useEffect(() => {

@@ -7,6 +7,13 @@ import { createSession, askStream, greetStream } from "../api/chat";
 import { getChatbotAnalytics, getChatbotRequests, ChatbotAnalytics, RequestLog } from "../api/analytics";
 import { CitationPayload, ApiError } from "../api/client";
 import VoiceCallPanel from "../components/VoiceCallPanel";
+import { useIdleNudge } from "../hooks/useIdleNudge";
+
+const NUDGE_LINES = [
+  "Just checking in — are you still there?",
+  "No rush! I'm here whenever you're ready to continue.",
+  "Still with me? Let me know if you have any questions.",
+];
 
 /* ── shared types ── */
 type Tab = "overview" | "config" | "playground" | "deployments" | "analytics";
@@ -415,6 +422,17 @@ function TextPlaygroundTab({ bot }: { bot: Chatbot }) {
   }, [bot.id]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  useIdleNudge(!streaming && messages.length > 0, () => {
+    setMessages((p) => [
+      ...p,
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: NUDGE_LINES[Math.floor(Math.random() * NUDGE_LINES.length)],
+      },
+    ]);
+  });
 
   function send() {
     const text = input.trim();

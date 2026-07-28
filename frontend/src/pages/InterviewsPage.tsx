@@ -338,12 +338,20 @@ export default function InterviewsPage() {
             {loading ? "Loading…" : `${interviews.length} interview${interviews.length !== 1 ? "s" : ""} scheduled`}
           </p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="btn-primary">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          Schedule interview
-        </button>
+        <div className="flex items-center gap-2">
+          <Link to="/interviews/bulk" className="btn-secondary">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 8.25h16.5" />
+            </svg>
+            Bulk invite
+          </Link>
+          <button onClick={() => setShowCreate(true)} className="btn-primary">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Schedule interview
+          </button>
+        </div>
       </div>
 
       {loading ? (

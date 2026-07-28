@@ -16,6 +16,8 @@ ChatbotId = NewType("ChatbotId", uuid.UUID)
 SessionId = NewType("SessionId", uuid.UUID)
 MessageId = NewType("MessageId", uuid.UUID)
 InterviewId = NewType("InterviewId", uuid.UUID)
+InterviewBatchId = NewType("InterviewBatchId", uuid.UUID)
+BatchCandidateId = NewType("BatchCandidateId", uuid.UUID)
 
 
 def new_id() -> uuid.UUID:

@@ -13,7 +13,9 @@ import AssistantsPage     from "./pages/AssistantsPage";
 import AssistantDetailPage from "./pages/AssistantDetailPage";
 import KnowledgePage      from "./pages/KnowledgePage";
 import InterviewsPage     from "./pages/InterviewsPage";
+import BulkInterviewPage  from "./pages/BulkInterviewPage";
 import InterviewDetailPage from "./pages/InterviewDetailPage";
+import ChannelsPage       from "./pages/ChannelsPage";
 import AnalyticsPage      from "./pages/AnalyticsPage";
 import SettingsPage       from "./pages/SettingsPage";
 import HiringAgentPage    from "./pages/HiringAgentPage";
@@ -45,7 +47,9 @@ export default function App() {
               <Route path="/assistants/:id" element={<AssistantDetailPage />} />
               <Route path="/knowledge"  element={<KnowledgePage />}      />
               <Route path="/interviews" element={<InterviewsPage />}     />
+              <Route path="/interviews/bulk" element={<BulkInterviewPage />} />
               <Route path="/interviews/:id" element={<InterviewDetailPage />} />
+              <Route path="/channels"  element={<ChannelsPage />}      />
               <Route path="/hiring-agent" element={<HiringAgentPage />}  />
               <Route path="/analytics"  element={<AnalyticsPage />}      />
               <Route path="/settings"   element={<SettingsPage />}       />

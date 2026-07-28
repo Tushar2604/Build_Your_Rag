@@ -264,6 +264,52 @@ class InterviewBootstrapResponse(BaseModel):
     can_join: bool
 
 
+# --- Bulk interview invites ---
+BatchStatus = Literal["collecting", "sending", "completed"]
+CandidateStatus = Literal["ingesting", "needs_review", "excluded", "scheduled", "failed"]
+
+
+class CreateBatchRequest(BaseModel):
+    role_title: str = Field(default="", max_length=200)
+    job_document_id: uuid.UUID
+    window_opens_at: datetime
+    window_closes_at: datetime | None = None
+
+
+class AttachBatchResumeRequest(BaseModel):
+    resume_document_id: uuid.UUID
+    resume_filename: str = Field(default="", max_length=500)
+
+
+class PatchBatchCandidateRequest(BaseModel):
+    candidate_name: str | None = Field(default=None, max_length=200)
+    candidate_email: str | None = Field(default=None, max_length=320)
+    excluded: bool | None = None
+
+
+class BatchCandidateResponse(BaseModel):
+    id: uuid.UUID
+    resume_filename: str
+    candidate_name: str
+    candidate_email: str
+    status: CandidateStatus
+    error: str | None
+    interview_id: uuid.UUID | None
+
+
+class InterviewBatchResponse(BaseModel):
+    id: uuid.UUID
+    role_title: str
+    job_document_id: uuid.UUID
+    window_opens_at: datetime
+    window_closes_at: datetime | None
+    status: BatchStatus
+    total_count: int
+    sent_count: int
+    failed_count: int
+    candidates: list[BatchCandidateResponse] = Field(default_factory=list)
+
+
 # --- Google Calendar integration ---
 class GoogleStatusResponse(BaseModel):
     connected: bool
@@ -272,3 +318,21 @@ class GoogleStatusResponse(BaseModel):
 
 class GoogleConnectResponse(BaseModel):
     authorize_url: str
+
+
+# --- WhatsApp channel (via Twilio) ---
+class ConnectWhatsAppRequest(BaseModel):
+    chatbot_id: uuid.UUID
+    phone_number: str = Field(min_length=5, max_length=32)
+    twilio_account_sid: str = Field(min_length=1, max_length=64)
+    twilio_auth_token: str = Field(min_length=1, max_length=255)
+
+
+class WhatsAppChannelResponse(BaseModel):
+    id: uuid.UUID
+    chatbot_id: uuid.UUID
+    chatbot_name: str
+    phone_number: str
+    status: str
+    webhook_url: str
+    created_at: datetime

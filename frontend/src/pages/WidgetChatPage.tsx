@@ -9,12 +9,19 @@ import {
   PublicCitation,
 } from "../api/public";
 import VoiceCallPanel from "../components/VoiceCallPanel";
+import { useIdleNudge } from "../hooks/useIdleNudge";
 
 interface ChatMessage {
   role: "user" | "bot";
   content: string;
   citations?: PublicCitation[];
 }
+
+const NUDGE_LINES = [
+  "Just checking in — are you still there?",
+  "No rush! I'm here whenever you're ready to continue.",
+  "Still with me? Let me know if you have any questions.",
+];
 
 export default function WidgetChatPage() {
   const { publicKey = "" } = useParams();
@@ -110,6 +117,13 @@ function TextWidgetChat({ publicKey, config }: { publicKey: string; config: Publ
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
+
+  useIdleNudge(!busy && messages.length > 0, () => {
+    setMessages((m) => [
+      ...m,
+      { role: "bot", content: NUDGE_LINES[Math.floor(Math.random() * NUDGE_LINES.length)] },
+    ]);
+  });
 
   async function send(e: FormEvent) {
     e.preventDefault();

@@ -14,9 +14,9 @@ import structlog
 
 from src.application.ports.repositories import UnitOfWork
 from src.application.ports.services import LLMProvider
+from src.application.use_cases._interview_shared import build_invite_html, generate_interview_questions
 from src.domain.document.entities import IngestionStatus
 from src.domain.interview.entities import Interview
-from src.domain.interview.prompts import build_interview_turn_prompt
 from src.domain.shared.errors import InvalidStateError, NotFoundError
 from src.domain.shared.identifiers import DocumentId, TenantId
 from src.infrastructure.calendar.google import GoogleCalendarClient
@@ -58,7 +58,7 @@ class ScheduleInterview:
             resume_text = await self._full_text(uow, tenant_id, resume_document_id)
 
         name = candidate_name.strip() or await self._extract_name(resume_text)
-        questions = await self._generate_questions(job_text, resume_text)
+        questions = await generate_interview_questions(self._llm, job_text, resume_text)
 
         interview = Interview(
             tenant_id=tenant_id,
@@ -119,7 +119,7 @@ class ScheduleInterview:
             return await self._email.send(
                 to=interview.candidate_email,
                 subject=f"Your interview for {interview.role_title or 'the role'} is scheduled",
-                html=_invite_html(interview, join_url),
+                html=build_invite_html(interview, join_url),
             )
         except Exception:  # noqa: BLE001 - email is best-effort
             log.warning("interview.email_send_failed", tenant_id=str(interview.tenant_id))
@@ -147,34 +147,3 @@ class ScheduleInterview:
         first_line = result.text.strip().splitlines()[0] if result.text.strip() else ""
         return first_line.strip(' "\'')[:200]
 
-    async def _generate_questions(self, job_text: str, resume_text: str) -> list[str]:
-        prompt = build_interview_turn_prompt(
-            job_text=job_text,
-            resume_text=resume_text,
-            instruction=(
-                "Generate 5 to 7 structured interview questions that probe the "
-                "candidate's fit for this specific role, referencing specifics "
-                "from their resume where relevant. Reply with ONLY the "
-                "questions, one per line, no numbering, no extra commentary."
-            ),
-        )
-        result = await self._llm.generate(
-            "You are an expert interview question designer for technical and behavioral hiring.",
-            prompt,
-        )
-        lines = [line.strip(" -\t*") for line in result.text.splitlines() if line.strip()]
-        return lines[:8] or ["Tell me about your relevant experience for this role."]
-
-
-def _invite_html(interview: Interview, join_url: str) -> str:
-    greeting = f"Hi {interview.candidate_name}," if interview.candidate_name else "Hi,"
-    role = interview.role_title or "the role"
-    when = interview.scheduled_at.strftime("%B %d, %Y at %H:%M UTC")
-    return (
-        f"<p>{greeting}</p>"
-        f"<p>You're invited to interview for <strong>{role}</strong> on "
-        f"<strong>{when}</strong>.</p>"
-        f"<p>When it's time, join here: <a href=\"{join_url}\">{join_url}</a></p>"
-        f"<p>The interview is conducted by an AI interviewer over voice — just "
-        f"open the link and follow the prompts. No account needed.</p>"
-    )

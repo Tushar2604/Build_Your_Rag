@@ -359,6 +359,32 @@
     var sessionId = null;
     var busy      = false;
 
+    /* "are you still there?" idle follow-up — typing takes longer than
+       speaking, so this is much more generous than the voice check-in
+       delay (confirmed with the user as the preferred value). */
+    var IDLE_NUDGE_DELAY_MS = 22000;
+    var MAX_IDLE_NUDGES = 2;
+    var NUDGE_LINES = [
+      "Just checking in — are you still there?",
+      "No rush! I'm here whenever you're ready to continue.",
+      "Still with me? Let me know if you have any questions.",
+    ];
+    var idleTimer = null;
+    var idleNudgeCount = 0;
+
+    function clearIdleNudge() {
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    }
+    function armIdleNudge() {
+      clearIdleNudge();
+      if (idleNudgeCount >= MAX_IDLE_NUDGES) return;
+      idleTimer = setTimeout(function () {
+        idleNudgeCount += 1;
+        addBubble("bot", NUDGE_LINES[Math.floor(Math.random() * NUDGE_LINES.length)]);
+        armIdleNudge();
+      }, IDLE_NUDGE_DELAY_MS);
+    }
+
     function scrollToBottom() {
       msgs.scrollTop = msgs.scrollHeight;
     }
@@ -428,6 +454,8 @@
       var text = textarea.value.trim();
       if (!text || busy) return;
       busy = true;
+      idleNudgeCount = 0;
+      clearIdleNudge();
       sendBtn.disabled = true;
       textarea.disabled = true;
       textarea.value = "";
@@ -482,6 +510,7 @@
       sendBtn.disabled = false;
       textarea.disabled = false;
       textarea.focus();
+      armIdleNudge();
     }
 
     sendBtn.onclick = send;
@@ -616,7 +645,16 @@
     // instead of relying on the browser's own endpointing is what fixes the
     // mic hanging open forever on repeat use — some browsers' built-in
     // silence detection simply never fires a second time in the same page.
-    var SILENCE_TIMEOUT_MS = 6000;
+    // Also doubles as the "candidate hasn't said anything at all" check-in
+    // threshold, per the user's explicit "~5 seconds" ask.
+    var SILENCE_TIMEOUT_MS = 5000;
+    var CHECK_IN_LINES = [
+      "Are you still there?",
+      "Just checking in — take your time, I'm still here whenever you're ready.",
+      "Hello? Let me know when you'd like to continue.",
+    ];
+    var MAX_CHECK_INS = 2;
+    var silenceStreak = 0;
 
     function setState(s) {
       state = s;
@@ -697,6 +735,7 @@
         clearSilenceTimer();
         var text = (finalizedText + " " + latestInterim).trim();
         if (text) handleUtterance(text);
+        else handleSilence();
       };
       armSilenceTimer(); // in case the candidate never says anything at all
       recognition.start();
@@ -722,8 +761,31 @@
       }
     }
 
+    function handleSilence() {
+      // Only relevant while we were actively waiting on the candidate —
+      // ignore stray onend firings from a mic stopped for another reason.
+      if (state !== "listening") return;
+      silenceStreak += 1;
+      if (silenceStreak < MAX_CHECK_INS) {
+        var line = CHECK_IN_LINES[Math.floor(Math.random() * CHECK_IN_LINES.length)];
+        addCaption("assistant", line);
+        setState("speaking");
+        speak(line, function () {
+          if (sttSupported) { setState("listening"); startListening(); }
+          else setState("idle");
+        });
+      } else {
+        var closing = "It looks like we've lost you — feel free to start the call again whenever you're ready.";
+        addCaption("assistant", closing);
+        stopListening();
+        setState("speaking");
+        speak(closing, function () { endCall(); });
+      }
+    }
+
     function handleUtterance(text) {
       if (!sessionId || state === "thinking") return;
+      silenceStreak = 0;
       addCaption("user", text);
       setState("thinking");
       var full = "";
@@ -738,6 +800,7 @@
 
     function startCall() {
       setState("connecting");
+      silenceStreak = 0;
       fetch(PUBLIC + "/sessions", { method: "POST" })
         .then(function (r) {
           if (!r.ok) throw new Error("Could not start session");
@@ -765,6 +828,7 @@
       stopListening();
       try { window.speechSynthesis.cancel(); } catch (e) {}
       sessionId = null;
+      silenceStreak = 0;
       setState("idle");
     }
 

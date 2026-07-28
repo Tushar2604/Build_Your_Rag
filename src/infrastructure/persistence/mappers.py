@@ -8,14 +8,21 @@ from __future__ import annotations
 
 import uuid
 
-from src.application.ports.repositories import GoogleOAuthConnection
+from src.application.ports.repositories import (
+    GoogleOAuthConnection,
+    WhatsAppChannel,
+    WhatsAppConversation,
+)
 from src.domain.chat.entities import ChatSession, Citation, Message, MessageRole
 from src.domain.chatbot.entities import Chatbot, RetrievalConfig, WidgetConfig
 from src.domain.document.entities import Document, IngestionStatus
+from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview, QuestionScore, TranscriptTurn
 from src.domain.shared.identifiers import (
+    BatchCandidateId,
     ChatbotId,
     DocumentId,
+    InterviewBatchId,
     InterviewId,
     MessageId,
     SessionId,
@@ -177,6 +184,7 @@ def interview_to_domain(row: m.InterviewModel) -> Interview:
         job_document_id=DocumentId(row.job_document_id),
         resume_document_id=DocumentId(row.resume_document_id),
         scheduled_at=row.scheduled_at,
+        window_closes_at=row.window_closes_at,
         status=row.status,  # type: ignore[arg-type]
         access_token=row.access_token,
         questions=list(row.questions or []),
@@ -212,6 +220,40 @@ def scores_to_jsonb(scores: list[QuestionScore]) -> list[dict]:
     ]
 
 
+def interview_batch_to_domain(row: m.InterviewBatchModel) -> InterviewBatch:
+    return InterviewBatch(
+        id=InterviewBatchId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        role_title=row.role_title,
+        job_document_id=DocumentId(row.job_document_id),
+        window_opens_at=row.window_opens_at,
+        window_closes_at=row.window_closes_at,
+        status=row.status,  # type: ignore[arg-type]
+        total_count=row.total_count,
+        sent_count=row.sent_count,
+        failed_count=row.failed_count,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def batch_candidate_to_domain(row: m.BatchCandidateModel) -> BatchCandidate:
+    return BatchCandidate(
+        id=BatchCandidateId(row.id),
+        tenant_id=TenantId(row.tenant_id),
+        batch_id=InterviewBatchId(row.batch_id),
+        resume_document_id=DocumentId(row.resume_document_id),
+        resume_filename=row.resume_filename,
+        candidate_name=row.candidate_name,
+        candidate_email=row.candidate_email,
+        status=row.status,  # type: ignore[arg-type]
+        error=row.error,
+        interview_id=InterviewId(row.interview_id) if row.interview_id else None,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
 def google_connection_to_domain(row: m.GoogleOAuthConnectionModel) -> GoogleOAuthConnection:
     return GoogleOAuthConnection(
         tenant_id=TenantId(row.tenant_id),
@@ -220,6 +262,31 @@ def google_connection_to_domain(row: m.GoogleOAuthConnectionModel) -> GoogleOAut
         expires_at=row.expires_at,
         scope=row.scope,
         connected_email=row.connected_email,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def whatsapp_channel_to_domain(row: m.WhatsAppChannelModel) -> WhatsAppChannel:
+    return WhatsAppChannel(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        chatbot_id=ChatbotId(row.chatbot_id),
+        phone_number=row.phone_number,
+        twilio_account_sid=row.twilio_account_sid,
+        twilio_auth_token=row.twilio_auth_token,
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def whatsapp_conversation_to_domain(row: m.WhatsAppConversationModel) -> WhatsAppConversation:
+    return WhatsAppConversation(
+        id=row.id,
+        whatsapp_channel_id=row.whatsapp_channel_id,
+        phone_number=row.phone_number,
+        session_id=SessionId(row.session_id),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,14 +19,19 @@ from src.application.ports.repositories import (
     GoogleOAuthConnection,
     ProviderStat,
     RequestLog,
+    WhatsAppChannel,
+    WhatsAppConversation,
 )
 from src.domain.chat.entities import ChatSession, Message
 from src.domain.chatbot.entities import Chatbot
 from src.domain.document.entities import Chunk, Document, IngestionStatus
+from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
 from src.domain.shared.identifiers import (
+    BatchCandidateId,
     ChatbotId,
     DocumentId,
+    InterviewBatchId,
     InterviewId,
     MessageId,
     SessionId,
@@ -670,6 +675,7 @@ class InterviewRepositoryImpl:
         row.candidate_email = interview.candidate_email
         row.role_title = interview.role_title
         row.scheduled_at = interview.scheduled_at
+        row.window_closes_at = interview.window_closes_at
         row.status = interview.status
         row.questions = list(interview.questions)
         row.transcript = map_.transcript_to_jsonb(interview.transcript)
@@ -703,6 +709,7 @@ def _interview_to_row(interview: Interview) -> m.InterviewModel:
         job_document_id=interview.job_document_id,
         resume_document_id=interview.resume_document_id,
         scheduled_at=interview.scheduled_at,
+        window_closes_at=interview.window_closes_at,
         status=interview.status,
         access_token=interview.access_token,
         questions=list(interview.questions),
@@ -716,6 +723,146 @@ def _interview_to_row(interview: Interview) -> m.InterviewModel:
         scores=map_.scores_to_jsonb(interview.scores),
         created_at=interview.created_at,
         updated_at=interview.updated_at,
+    )
+
+
+class InterviewBatchRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, batch: InterviewBatch) -> None:
+        self._s.add(
+            m.InterviewBatchModel(
+                id=batch.id,
+                tenant_id=batch.tenant_id,
+                role_title=batch.role_title,
+                job_document_id=batch.job_document_id,
+                window_opens_at=batch.window_opens_at,
+                window_closes_at=batch.window_closes_at,
+                status=batch.status,
+                total_count=batch.total_count,
+                sent_count=batch.sent_count,
+                failed_count=batch.failed_count,
+                created_at=batch.created_at,
+                updated_at=batch.updated_at,
+            )
+        )
+
+    async def get(self, tenant_id: TenantId, batch_id: InterviewBatchId) -> InterviewBatch | None:
+        row = (
+            await self._s.execute(
+                select(m.InterviewBatchModel).where(
+                    m.InterviewBatchModel.id == batch_id,
+                    m.InterviewBatchModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.interview_batch_to_domain(row) if row else None
+
+    async def update(self, batch: InterviewBatch) -> None:
+        row = await self._s.get(m.InterviewBatchModel, batch.id)
+        if row is None:
+            return
+        row.role_title = batch.role_title
+        row.window_opens_at = batch.window_opens_at
+        row.window_closes_at = batch.window_closes_at
+        row.status = batch.status
+        row.total_count = batch.total_count
+        row.sent_count = batch.sent_count
+        row.failed_count = batch.failed_count
+        row.updated_at = datetime.now(UTC)
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[InterviewBatch]:
+        rows = (
+            await self._s.execute(
+                select(m.InterviewBatchModel)
+                .where(m.InterviewBatchModel.tenant_id == tenant_id)
+                .order_by(m.InterviewBatchModel.created_at.desc())
+            )
+        ).scalars().all()
+        return [map_.interview_batch_to_domain(r) for r in rows]
+
+    async def increment_counts(
+        self, tenant_id: TenantId, batch_id: InterviewBatchId, *, total: int = 0, sent: int = 0, failed: int = 0
+    ) -> None:
+        await self._s.execute(
+            update(m.InterviewBatchModel)
+            .where(
+                m.InterviewBatchModel.id == batch_id,
+                m.InterviewBatchModel.tenant_id == tenant_id,
+            )
+            .values(
+                total_count=m.InterviewBatchModel.total_count + total,
+                sent_count=m.InterviewBatchModel.sent_count + sent,
+                failed_count=m.InterviewBatchModel.failed_count + failed,
+                updated_at=datetime.now(UTC),
+            )
+        )
+
+
+class BatchCandidateRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, candidate: BatchCandidate) -> None:
+        self._s.add(_batch_candidate_to_row(candidate))
+
+    async def add_many(self, candidates: list[BatchCandidate]) -> None:
+        for candidate in candidates:
+            self._s.add(_batch_candidate_to_row(candidate))
+
+    async def get(self, tenant_id: TenantId, candidate_id: BatchCandidateId) -> BatchCandidate | None:
+        row = (
+            await self._s.execute(
+                select(m.BatchCandidateModel).where(
+                    m.BatchCandidateModel.id == candidate_id,
+                    m.BatchCandidateModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.batch_candidate_to_domain(row) if row else None
+
+    async def update(self, candidate: BatchCandidate) -> None:
+        row = await self._s.get(m.BatchCandidateModel, candidate.id)
+        if row is None:
+            return
+        row.candidate_name = candidate.candidate_name
+        row.candidate_email = candidate.candidate_email
+        row.status = candidate.status
+        row.error = candidate.error
+        row.interview_id = candidate.interview_id
+        row.updated_at = datetime.now(UTC)
+
+    async def list_for_batch(
+        self, tenant_id: TenantId, batch_id: InterviewBatchId
+    ) -> list[BatchCandidate]:
+        rows = (
+            await self._s.execute(
+                select(m.BatchCandidateModel)
+                .where(
+                    m.BatchCandidateModel.batch_id == batch_id,
+                    m.BatchCandidateModel.tenant_id == tenant_id,
+                )
+                .order_by(m.BatchCandidateModel.created_at.asc())
+            )
+        ).scalars().all()
+        return [map_.batch_candidate_to_domain(r) for r in rows]
+
+
+def _batch_candidate_to_row(candidate: BatchCandidate) -> m.BatchCandidateModel:
+    return m.BatchCandidateModel(
+        id=candidate.id,
+        tenant_id=candidate.tenant_id,
+        batch_id=candidate.batch_id,
+        resume_document_id=candidate.resume_document_id,
+        resume_filename=candidate.resume_filename,
+        candidate_name=candidate.candidate_name,
+        candidate_email=candidate.candidate_email,
+        status=candidate.status,
+        error=candidate.error,
+        interview_id=candidate.interview_id,
+        created_at=candidate.created_at,
+        updated_at=candidate.updated_at,
     )
 
 
@@ -754,3 +901,107 @@ class GoogleConnectionRepositoryImpl:
         row = await self._s.get(m.GoogleOAuthConnectionModel, tenant_id)
         if row is not None:
             await self._s.delete(row)
+
+
+class WhatsAppChannelRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, channel: WhatsAppChannel) -> None:
+        self._s.add(
+            m.WhatsAppChannelModel(
+                id=channel.id,
+                tenant_id=channel.tenant_id,
+                chatbot_id=channel.chatbot_id,
+                phone_number=channel.phone_number,
+                twilio_account_sid=channel.twilio_account_sid,
+                twilio_auth_token=channel.twilio_auth_token,
+                status=channel.status,
+                created_at=channel.created_at,
+                updated_at=channel.updated_at,
+            )
+        )
+
+    async def get(self, tenant_id: TenantId, channel_id: uuid.UUID) -> WhatsAppChannel | None:
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppChannelModel).where(
+                    m.WhatsAppChannelModel.id == channel_id,
+                    m.WhatsAppChannelModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.whatsapp_channel_to_domain(row) if row else None
+
+    async def get_by_chatbot(
+        self, tenant_id: TenantId, chatbot_id: ChatbotId
+    ) -> WhatsAppChannel | None:
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppChannelModel).where(
+                    m.WhatsAppChannelModel.chatbot_id == chatbot_id,
+                    m.WhatsAppChannelModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.whatsapp_channel_to_domain(row) if row else None
+
+    async def get_by_phone_number(self, phone_number: str) -> WhatsAppChannel | None:
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppChannelModel).where(
+                    m.WhatsAppChannelModel.phone_number == phone_number
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.whatsapp_channel_to_domain(row) if row else None
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[WhatsAppChannel]:
+        rows = (
+            await self._s.execute(
+                select(m.WhatsAppChannelModel).where(m.WhatsAppChannelModel.tenant_id == tenant_id)
+            )
+        ).scalars()
+        return [map_.whatsapp_channel_to_domain(r) for r in rows]
+
+    async def delete(self, tenant_id: TenantId, channel_id: uuid.UUID) -> None:
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppChannelModel).where(
+                    m.WhatsAppChannelModel.id == channel_id,
+                    m.WhatsAppChannelModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is not None:
+            await self._s.delete(row)
+
+
+class WhatsAppConversationRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def get(
+        self, whatsapp_channel_id: uuid.UUID, phone_number: str
+    ) -> WhatsAppConversation | None:
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppConversationModel).where(
+                    m.WhatsAppConversationModel.whatsapp_channel_id == whatsapp_channel_id,
+                    m.WhatsAppConversationModel.phone_number == phone_number,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.whatsapp_conversation_to_domain(row) if row else None
+
+    async def add(self, conversation: WhatsAppConversation) -> None:
+        self._s.add(
+            m.WhatsAppConversationModel(
+                id=conversation.id,
+                whatsapp_channel_id=conversation.whatsapp_channel_id,
+                phone_number=conversation.phone_number,
+                session_id=conversation.session_id,
+                created_at=conversation.created_at,
+                updated_at=conversation.updated_at,
+            )
+        )

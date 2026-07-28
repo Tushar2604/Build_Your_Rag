@@ -39,6 +39,18 @@ const STATE_LABEL: Record<CallState, string> = {
   speaking: "Speaking…",
 };
 
+// Varied check-in lines so a real silence doesn't feel like a canned bot
+// message repeating itself.
+const CHECK_IN_LINES = [
+  "Are you still there?",
+  "Just checking in — take your time, I'm still here whenever you're ready.",
+  "Hello? Let me know when you'd like to continue.",
+];
+
+// After this many consecutive silent listening turns, stop nudging and end
+// the call gracefully instead of looping forever.
+const MAX_CHECK_INS = 2;
+
 export default function VoiceCallPanel({
   adapter,
   botName,
@@ -57,9 +69,11 @@ export default function VoiceCallPanel({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stateRef = useRef<CallState>("idle");
   stateRef.current = state;
+  const silenceStreakRef = useRef(0);
 
-  const { sttSupported, ttsSupported, startListening, stopListening, speak } = useVoice((transcript) =>
-    handleTranscript(transcript),
+  const { sttSupported, ttsSupported, startListening, stopListening, speak } = useVoice(
+    (transcript) => handleTranscript(transcript),
+    () => handleSilence(),
   );
 
   useEffect(() => {
@@ -118,8 +132,33 @@ export default function VoiceCallPanel({
     }
   }
 
+  function handleSilence() {
+    // Only relevant while we were actively waiting on the user — ignore
+    // stray onend firings from a mic that was stopped for another reason.
+    if (stateRef.current !== "listening") return;
+    silenceStreakRef.current += 1;
+    if (silenceStreakRef.current < MAX_CHECK_INS) {
+      const line = CHECK_IN_LINES[Math.floor(Math.random() * CHECK_IN_LINES.length)];
+      addCaption("assistant", line);
+      setState("speaking");
+      speak(line, () => {
+        if (sttSupported) {
+          setState("listening");
+          startListening();
+        } else {
+          setState("idle");
+        }
+      });
+    } else {
+      const closing = "It looks like we've lost you — feel free to start the call again whenever you're ready.";
+      addCaption("system", closing);
+      finishCall(closing);
+    }
+  }
+
   function handleTranscript(text: string) {
     if (!sessionRef.current || stateRef.current === "thinking") return;
+    silenceStreakRef.current = 0;
     addCaption("user", text);
     setState("thinking");
     let full = "";
@@ -149,6 +188,7 @@ export default function VoiceCallPanel({
     setState("connecting");
     setEnded(false);
     setCaptions([]);
+    silenceStreakRef.current = 0;
     try {
       const sid = await adapter.createSession();
       sessionRef.current = sid;
@@ -177,6 +217,7 @@ export default function VoiceCallPanel({
     stopListening();
     window.speechSynthesis?.cancel();
     sessionRef.current = null;
+    silenceStreakRef.current = 0;
     setState("idle");
   }
 

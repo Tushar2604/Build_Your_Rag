@@ -16,10 +16,13 @@ from typing import Protocol, runtime_checkable
 from src.domain.chat.entities import ChatSession, Message
 from src.domain.chatbot.entities import Chatbot
 from src.domain.document.entities import Chunk, Document
+from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
 from src.domain.shared.identifiers import (
+    BatchCandidateId,
     ChatbotId,
     DocumentId,
+    InterviewBatchId,
     InterviewId,
     MessageId,
     SessionId,
@@ -211,6 +214,31 @@ class InterviewRepository(Protocol):
     async def list_for_tenant(self, tenant_id: TenantId) -> list[Interview]: ...
 
 
+@runtime_checkable
+class InterviewBatchRepository(Protocol):
+    async def add(self, batch: InterviewBatch) -> None: ...
+    async def get(self, tenant_id: TenantId, batch_id: InterviewBatchId) -> InterviewBatch | None: ...
+    async def update(self, batch: InterviewBatch) -> None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[InterviewBatch]: ...
+    async def increment_counts(
+        self, tenant_id: TenantId, batch_id: InterviewBatchId, *, total: int = 0, sent: int = 0, failed: int = 0
+    ) -> None:
+        """Atomic SQL-level increment — candidates are processed with bounded
+        concurrency, so a read-modify-write here would lose updates."""
+        ...
+
+
+@runtime_checkable
+class BatchCandidateRepository(Protocol):
+    async def add(self, candidate: BatchCandidate) -> None: ...
+    async def add_many(self, candidates: list[BatchCandidate]) -> None: ...
+    async def get(
+        self, tenant_id: TenantId, candidate_id: BatchCandidateId
+    ) -> BatchCandidate | None: ...
+    async def update(self, candidate: BatchCandidate) -> None: ...
+    async def list_for_batch(self, tenant_id: TenantId, batch_id: InterviewBatchId) -> list[BatchCandidate]: ...
+
+
 @dataclass
 class GoogleOAuthConnection:
     """One tenant's 'Connect Google Calendar' tokens. Absent for a tenant =
@@ -233,6 +261,60 @@ class GoogleConnectionRepository(Protocol):
     async def delete(self, tenant_id: TenantId) -> None: ...
 
 
+@dataclass
+class WhatsAppChannel:
+    """A chatbot deployed to WhatsApp via Twilio. 1:1 with a chatbot — one
+    WhatsApp number serves exactly one chatbot. Credentials are per-channel
+    (entered by the admin when connecting), not an operator .env concern."""
+
+    tenant_id: TenantId
+    chatbot_id: ChatbotId
+    phone_number: str  # E.164, no "whatsapp:" prefix, e.g. "+14155238886"
+    twilio_account_sid: str
+    twilio_auth_token: str
+    id: uuid.UUID = field(default_factory=new_id)
+    status: str = "active"
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@runtime_checkable
+class WhatsAppChannelRepository(Protocol):
+    async def add(self, channel: WhatsAppChannel) -> None: ...
+    async def get(self, tenant_id: TenantId, channel_id: uuid.UUID) -> WhatsAppChannel | None: ...
+    async def get_by_chatbot(
+        self, tenant_id: TenantId, chatbot_id: ChatbotId
+    ) -> WhatsAppChannel | None: ...
+    async def get_by_phone_number(self, phone_number: str) -> WhatsAppChannel | None:
+        """Resolve by the Twilio number that received the inbound message —
+        NOT tenant-scoped (Twilio's webhook carries no tenant context),
+        mirroring ChatbotRepository.get_by_public_key."""
+        ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[WhatsAppChannel]: ...
+    async def delete(self, tenant_id: TenantId, channel_id: uuid.UUID) -> None: ...
+
+
+@dataclass
+class WhatsAppConversation:
+    """Maps one WhatsApp sender to a persistent ChatSession, so a phone
+    number gets the same multi-turn memory as the web widget."""
+
+    whatsapp_channel_id: uuid.UUID
+    phone_number: str  # the external sender's number
+    session_id: SessionId
+    id: uuid.UUID = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@runtime_checkable
+class WhatsAppConversationRepository(Protocol):
+    async def get(
+        self, whatsapp_channel_id: uuid.UUID, phone_number: str
+    ) -> WhatsAppConversation | None: ...
+    async def add(self, conversation: WhatsAppConversation) -> None: ...
+
+
 @runtime_checkable
 class UnitOfWork(Protocol):
     """Transaction boundary. A use case opens one UoW, does its work through the
@@ -250,7 +332,11 @@ class UnitOfWork(Protocol):
     analytics: AnalyticsRepository
     request_logs: RequestLogRepository
     interviews: InterviewRepository
+    interview_batches: InterviewBatchRepository
+    batch_candidates: BatchCandidateRepository
     google_connections: GoogleConnectionRepository
+    whatsapp_channels: WhatsAppChannelRepository
+    whatsapp_conversations: WhatsAppConversationRepository
 
     async def __aenter__(self) -> UnitOfWork: ...
     async def __aexit__(self, *args: object) -> None: ...
