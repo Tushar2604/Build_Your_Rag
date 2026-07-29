@@ -1,8 +1,16 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { listChatbots, createChatbot, Chatbot, Channel } from "../api/chatbots";
-import { listDocuments, Document } from "../api/documents";
+import { listDocuments, createUpload, uploadFile, completeUpload, Document } from "../api/documents";
 import { ApiError } from "../api/client";
+
+const ATTACHMENT_UPLOAD_CONCURRENCY = 4;
+
+interface AttachedFileRow {
+  filename: string;
+  status: "uploading" | "done" | "failed";
+  error?: string;
+}
 
 /* ── helpers ── */
 function StatusPill({ bot }: { bot: Chatbot }) {
@@ -45,6 +53,13 @@ function CreateModal({ documents, onCreate, onClose }: CreateModalProps) {
   const [error, setError]             = useState<string | null>(null);
   const [loading, setLoading]         = useState(false);
 
+  // Attach new files (PDF/DOCX/TXT/MD, or images — a screenshot/scan/photo is
+  // transcribed into text by a vision-capable LLM during ingestion) directly
+  // at creation time, instead of requiring a trip to Knowledge first.
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFileRow[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   function pickUseCase(id: string) {
     setUseCase(id);
     setSystemPrompt(DEFAULT_PROMPTS[id] ?? DEFAULT_PROMPTS.custom);
@@ -52,6 +67,47 @@ function CreateModal({ documents, onCreate, onClose }: CreateModalProps) {
 
   function toggleDoc(id: string) {
     setSelectedDocs((prev) => prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]);
+  }
+
+  async function handleAttachFiles(files: FileList | null) {
+    if (!files || !files.length) return;
+    const fileList = Array.from(files);
+    const startIndex = attachedFiles.length;
+    setAttachedFiles((prev) => [...prev, ...fileList.map((f) => ({ filename: f.name, status: "uploading" as const }))]);
+    setAttaching(true);
+
+    function updateRow(i: number, patch: Partial<AttachedFileRow>) {
+      setAttachedFiles((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    }
+
+    let cursor = 0;
+    async function worker() {
+      while (true) {
+        const i = cursor++;
+        if (i >= fileList.length) return;
+        const file = fileList[i];
+        const rowIndex = startIndex + i;
+        try {
+          const { document_id, upload_url } = await createUpload(
+            file.name, file.type || "application/octet-stream", file.size,
+          );
+          await uploadFile(upload_url, file);
+          await completeUpload(document_id);
+          setSelectedDocs((prev) => [...prev, document_id]);
+          updateRow(rowIndex, { status: "done" });
+        } catch (err) {
+          updateRow(rowIndex, {
+            status: "failed",
+            error: err instanceof ApiError ? err.message : "Upload failed.",
+          });
+        }
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(ATTACHMENT_UPLOAD_CONCURRENCY, fileList.length) }, worker),
+    );
+    setAttaching(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleCreate(e: FormEvent) {
@@ -187,38 +243,74 @@ function CreateModal({ documents, onCreate, onClose }: CreateModalProps) {
                 <p className="text-xs text-gray-500 mt-1">The assistant will only answer from selected sources.</p>
               </div>
 
-              {readyDocs.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-gray-200 p-6 text-center">
-                  <p className="text-sm text-gray-500">No ready documents found.</p>
-                  <Link to="/knowledge" className="text-xs text-brand-600 hover:underline mt-1 block">
-                    Upload documents in Knowledge →
-                  </Link>
-                  <p className="text-xs text-gray-400 mt-3">You can skip this and assign sources later.</p>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-1 max-h-52 overflow-y-auto rounded-lg border border-gray-200 p-2">
-                    {readyDocs.map((d) => (
-                      <label key={d.id} className="flex items-center gap-2.5 px-2 py-2 rounded cursor-pointer hover:bg-gray-50">
-                        <input
-                          type="checkbox"
-                          className="w-3.5 h-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                          checked={selectedDocs.includes(d.id)}
-                          onChange={() => toggleDoc(d.id)}
-                        />
-                        <span className="text-sm text-gray-700 truncate flex-1">{d.filename}</span>
-                        <span className="text-xs text-gray-400 tabular-nums">{d.chunk_count} chunks</span>
-                      </label>
+              {/* Attach files right here — PDF, DOCX, TXT, MD, or an image
+                  (screenshot/scan/photo — transcribed into text automatically). */}
+              <div>
+                <label className={`flex items-center gap-3 rounded-lg border-2 border-dashed px-4 py-3 cursor-pointer transition-colors ${
+                  attaching ? "border-gray-200 bg-gray-50" : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                }`}>
+                  <svg className="w-5 h-5 flex-shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                  </svg>
+                  <span className="text-sm text-gray-600 flex-1 min-w-0">
+                    Attach files — PDF, DOCX, TXT, MD, or images
+                  </span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"
+                    className="sr-only"
+                    onChange={(e) => handleAttachFiles(e.target.files)}
+                  />
+                </label>
+                {attachedFiles.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {attachedFiles.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs px-1">
+                        <span className="text-gray-600 truncate flex-1 min-w-0">{f.filename}</span>
+                        <span className={
+                          f.status === "done" ? "text-emerald-600"
+                          : f.status === "failed" ? "text-red-600"
+                          : "text-gray-400"
+                        }>
+                          {f.status === "uploading" && "Uploading…"}
+                          {f.status === "done" && "✓ Attached"}
+                          {f.status === "failed" && (f.error || "Failed")}
+                        </span>
+                      </div>
                     ))}
                   </div>
-                  <p className="text-xs text-gray-400">
-                    {selectedDocs.length === 0
-                      ? "Leave empty to search all documents."
-                      : `${selectedDocs.length} source${selectedDocs.length !== 1 ? "s" : ""} selected`
-                    }
-                  </p>
-                </>
+                )}
+              </div>
+
+              {readyDocs.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center">
+                  Or attach existing documents — <Link to="/knowledge" className="text-brand-600 hover:underline">Knowledge</Link> has none yet.
+                  You can also skip this and assign sources later.
+                </p>
+              ) : (
+                <div className="space-y-1 max-h-52 overflow-y-auto rounded-lg border border-gray-200 p-2">
+                  {readyDocs.map((d) => (
+                    <label key={d.id} className="flex items-center gap-2.5 px-2 py-2 rounded cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="checkbox"
+                        className="w-3.5 h-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                        checked={selectedDocs.includes(d.id)}
+                        onChange={() => toggleDoc(d.id)}
+                      />
+                      <span className="text-sm text-gray-700 truncate flex-1">{d.filename}</span>
+                      <span className="text-xs text-gray-400 tabular-nums">{d.chunk_count} chunks</span>
+                    </label>
+                  ))}
+                </div>
               )}
+              <p className="text-xs text-gray-400">
+                {selectedDocs.length === 0
+                  ? "Leave empty to search all documents."
+                  : `${selectedDocs.length} source${selectedDocs.length !== 1 ? "s" : ""} selected`
+                }
+              </p>
             </div>
           )}
 

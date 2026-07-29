@@ -57,6 +57,7 @@ class InterviewBatch:
     window_opens_at: datetime
     id: InterviewBatchId = field(default_factory=lambda: InterviewBatchId(new_id()))
     window_closes_at: datetime | None = None
+    custom_questions: list[str] = field(default_factory=list)
     status: BatchStatus = "collecting"
     total_count: int = 0
     sent_count: int = 0

@@ -25,6 +25,17 @@ def _estimate_tokens(*parts: str) -> int:
     return max(1, sum(len(p) for p in parts) // 4)
 
 
+# Shared across every vision-capable provider so a screenshot/scan/photo
+# attachment produces real reference material, not a chatty image caption.
+_IMAGE_EXTRACTION_PROMPT = (
+    "Transcribe this image into plain text reference material for a knowledge "
+    "base. Extract all readable text verbatim, describe any tables, charts, or "
+    "diagrams factually (their structure and key values), and note any other "
+    "important visual facts. Be thorough and literal — do not summarize, add "
+    "commentary, or invent anything not actually visible in the image."
+)
+
+
 class OpenAIProvider:
     name = "openai"
 
@@ -75,6 +86,26 @@ class OpenAIProvider:
             if delta:
                 yield delta
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    async def describe_image(self, data: bytes, content_type: str) -> str:
+        import base64
+
+        client = self._ensure()
+        b64 = base64.b64encode(data).decode("ascii")
+        resp = await client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": _IMAGE_EXTRACTION_PROMPT},
+                        {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{b64}"}},
+                    ],
+                },
+            ],
+        )
+        return resp.choices[0].message.content or ""
+
 
 class GroqProvider:
     name = "groq"
@@ -124,6 +155,9 @@ class GroqProvider:
             delta = chunk.choices[0].delta.content
             if delta:
                 yield delta
+
+    async def describe_image(self, data: bytes, content_type: str) -> str:
+        raise NotImplementedError("Groq does not support image extraction in this setup.")
 
 
 class GeminiProvider:
@@ -180,6 +214,24 @@ class GeminiProvider:
         for chunk in stream:
             if chunk.text:
                 yield chunk.text
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    async def describe_image(self, data: bytes, content_type: str) -> str:
+        client = self._ensure()
+
+        def _call() -> str:
+            from google.genai import types
+
+            response = client.models.generate_content(
+                model=self._model,
+                contents=[
+                    types.Part.from_bytes(data=data, mime_type=content_type),
+                    _IMAGE_EXTRACTION_PROMPT,
+                ],
+            )
+            return response.text
+
+        return await asyncio.to_thread(_call)
 
 
 class OllamaProvider:
@@ -259,6 +311,11 @@ class OllamaProvider:
                 if delta:
                     yield delta
 
+    async def describe_image(self, data: bytes, content_type: str) -> str:
+        raise NotImplementedError(
+            "Ollama vision support depends on the locally pulled model — not assumed here."
+        )
+
 
 class FailoverLLM:
     """Tries each provider in order, degrading to the next one on failure."""
@@ -298,6 +355,21 @@ class FailoverLLM:
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 log.warning("llm.failover_stream", provider=provider.name)
+        assert last_exc is not None  # non-empty chain guaranteed by __init__
+        raise last_exc
+
+    async def describe_image(self, data: bytes, content_type: str) -> str:
+        # Same try-next-provider shape as generate() — a provider that isn't
+        # multimodal (Groq, Ollama here) raises NotImplementedError, which is
+        # just another reason to fall through to the next one in the chain.
+        last_exc: Exception | None = None
+        for i, provider in enumerate(self._providers):
+            try:
+                return await provider.describe_image(data, content_type)
+            except Exception as exc:  # noqa: BLE001 - degrade to the next backend
+                last_exc = exc
+                nxt = self._providers[i + 1].name if i + 1 < len(self._providers) else None
+                log.warning("llm.describe_image_failover", provider=provider.name, to=nxt)
         assert last_exc is not None  # non-empty chain guaranteed by __init__
         raise last_exc
 

@@ -35,6 +35,7 @@ from src.interfaces.api.routers import (
     interview_batches,
     interviews,
     public,
+    team,
     uploads,
     whatsapp,
 )
@@ -104,6 +105,7 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
             container.parser,
             container.chunker,
             container.embedder,
+            container.llm,
         )
         resumed = await ResumePendingIngestions(container.unit_of_work(), ingest).execute()
         if resumed:
@@ -170,6 +172,7 @@ def create_app() -> FastAPI:
     app.include_router(uploads.router, prefix=api_prefix)
     app.include_router(interviews.router, prefix=api_prefix)
     app.include_router(interview_batches.router, prefix=api_prefix)
+    app.include_router(team.router, prefix=api_prefix)
     app.include_router(integrations.router, prefix=api_prefix)
     app.include_router(whatsapp.router, prefix=api_prefix)
 

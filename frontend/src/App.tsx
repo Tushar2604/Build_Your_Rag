@@ -19,6 +19,8 @@ import ChannelsPage       from "./pages/ChannelsPage";
 import AnalyticsPage      from "./pages/AnalyticsPage";
 import SettingsPage       from "./pages/SettingsPage";
 import HiringAgentPage    from "./pages/HiringAgentPage";
+import TeamPage           from "./pages/TeamPage";
+import AcceptInvitePage   from "./pages/AcceptInvitePage";
 
 export default function App() {
   return (
@@ -35,6 +37,8 @@ export default function App() {
           <Route path="/embed/:publicKey" element={<EmbedChatPage />} />
           {/* Candidate-facing virtual interview — token-scoped, no account needed */}
           <Route path="/interview/:token" element={<InterviewCallPage />} />
+          {/* Accept a team invite — token-scoped, no account needed yet */}
+          <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
 
           {/* Authenticated routes */}
           <Route element={<ProtectedRoute />}>
@@ -46,13 +50,18 @@ export default function App() {
               <Route path="/assistants" element={<AssistantsPage />}     />
               <Route path="/assistants/:id" element={<AssistantDetailPage />} />
               <Route path="/knowledge"  element={<KnowledgePage />}      />
-              <Route path="/interviews" element={<InterviewsPage />}     />
-              <Route path="/interviews/bulk" element={<BulkInterviewPage />} />
-              <Route path="/interviews/:id" element={<InterviewDetailPage />} />
-              <Route path="/channels"  element={<ChannelsPage />}      />
-              <Route path="/hiring-agent" element={<HiringAgentPage />}  />
               <Route path="/analytics"  element={<AnalyticsPage />}      />
-              <Route path="/settings"   element={<SettingsPage />}       />
+
+              {/* Admin panel: Owner/Admin roles only */}
+              <Route element={<ProtectedRoute requireAdmin />}>
+                <Route path="/interviews" element={<InterviewsPage />}     />
+                <Route path="/interviews/bulk" element={<BulkInterviewPage />} />
+                <Route path="/interviews/:id" element={<InterviewDetailPage />} />
+                <Route path="/channels"  element={<ChannelsPage />}      />
+                <Route path="/hiring-agent" element={<HiringAgentPage />}  />
+                <Route path="/team"       element={<TeamPage />}           />
+                <Route path="/settings"   element={<SettingsPage />}       />
+              </Route>
 
               {/* Legacy redirects so old bookmarks keep working */}
               <Route path="/documents"                         element={<Navigate to="/knowledge"  replace />} />

@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { listInterviews, scheduleInterview, Interview } from "../api/interviews";
-import { listDocuments, createUpload, uploadFile, completeUpload, getDocument, Document } from "../api/documents";
+import {
+  listDocuments, createUpload, uploadFile, completeUpload, createTextDocument, getDocument, Document,
+} from "../api/documents";
 import { ApiError } from "../api/client";
 
 type ResumeUploadStatus = "idle" | "uploading" | "processing" | "ready" | "failed";
@@ -57,25 +59,51 @@ function ScheduleModal({
   const [roleTitle, setRoleTitle] = useState("");
   const [jobDocId, setJobDocId] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [customQuestions, setCustomQuestions] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Interview | null>(null);
 
   // Resume: upload a PDF (or doc/txt) right here — it goes through the exact
   // same ingest-and-embed pipeline as any Knowledge document, it just doesn't
-  // need to already exist there. "Choose existing" stays available for
-  // reusing a resume already in the knowledge base.
-  const [resumeMode, setResumeMode] = useState<"upload" | "existing">("upload");
+  // need to already exist there. "Choose existing" reuses a resume already in
+  // the knowledge base. "Paste LinkedIn" covers candidates whose resume IS
+  // their LinkedIn profile — LinkedIn's ToS blocks automated scraping, so the
+  // admin/candidate copies the profile text by hand instead; it's ingested
+  // through the same from-text endpoint as any pasted knowledge.
+  const [resumeMode, setResumeMode] = useState<"upload" | "existing" | "paste">("upload");
   const [resumeDocId, setResumeDocId] = useState("");
   const [resumeFilename, setResumeFilename] = useState("");
   const [resumeStatus, setResumeStatus] = useState<ResumeUploadStatus>("idle");
   const [resumeError, setResumeError] = useState<string | null>(null);
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [pasteText, setPasteText] = useState("");
   const resumeInputRef = useRef<HTMLInputElement>(null);
   const resumePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const readyDocs = documents.filter((d) => d.status === "ready");
 
   useEffect(() => () => { if (resumePollRef.current) clearInterval(resumePollRef.current); }, []);
+
+  function pollUntilReady(documentId: string) {
+    if (resumePollRef.current) clearInterval(resumePollRef.current);
+    resumePollRef.current = setInterval(async () => {
+      try {
+        const doc = await getDocument(documentId);
+        if (doc.status === "ready") {
+          setResumeStatus("ready");
+          setResumeDocId(documentId);
+          if (resumePollRef.current) { clearInterval(resumePollRef.current); resumePollRef.current = null; }
+        } else if (doc.status === "failed") {
+          setResumeStatus("failed");
+          setResumeError(doc.error || "Failed to process resume.");
+          if (resumePollRef.current) { clearInterval(resumePollRef.current); resumePollRef.current = null; }
+        }
+      } catch {
+        // transient — keep polling
+      }
+    }, 2000);
+  }
 
   async function handleResumeFile(files: FileList | null) {
     const file = files?.[0];
@@ -89,24 +117,7 @@ function ScheduleModal({
       await uploadFile(upload_url, file);
       await completeUpload(document_id);
       setResumeStatus("processing");
-
-      if (resumePollRef.current) clearInterval(resumePollRef.current);
-      resumePollRef.current = setInterval(async () => {
-        try {
-          const doc = await getDocument(document_id);
-          if (doc.status === "ready") {
-            setResumeStatus("ready");
-            setResumeDocId(document_id);
-            if (resumePollRef.current) { clearInterval(resumePollRef.current); resumePollRef.current = null; }
-          } else if (doc.status === "failed") {
-            setResumeStatus("failed");
-            setResumeError(doc.error || "Failed to process resume.");
-            if (resumePollRef.current) { clearInterval(resumePollRef.current); resumePollRef.current = null; }
-          }
-        } catch {
-          // transient — keep polling
-        }
-      }, 2000);
+      pollUntilReady(document_id);
     } catch (err) {
       setResumeStatus("failed");
       setResumeError(err instanceof ApiError ? err.message : "Upload failed.");
@@ -115,12 +126,33 @@ function ScheduleModal({
     }
   }
 
-  function switchResumeMode(mode: "upload" | "existing") {
+  async function handlePasteSubmit() {
+    const text = pasteText.trim();
+    if (!text) return;
+    setResumeError(null);
+    setResumeDocId("");
+    setResumeStatus("uploading");
+    const combined = linkedinUrl.trim() ? `LinkedIn profile: ${linkedinUrl.trim()}\n\n${text}` : text;
+    const filename = `${candidateName.trim() || "Candidate"} - LinkedIn profile.txt`;
+    setResumeFilename(filename);
+    try {
+      const doc = await createTextDocument(filename, combined);
+      setResumeStatus("processing");
+      pollUntilReady(doc.id);
+    } catch (err) {
+      setResumeStatus("failed");
+      setResumeError(err instanceof ApiError ? err.message : "Failed to submit profile text.");
+    }
+  }
+
+  function switchResumeMode(mode: "upload" | "existing" | "paste") {
     setResumeMode(mode);
     setResumeDocId("");
     setResumeFilename("");
     setResumeStatus("idle");
     setResumeError(null);
+    setLinkedinUrl("");
+    setPasteText("");
     if (resumePollRef.current) { clearInterval(resumePollRef.current); resumePollRef.current = null; }
   }
 
@@ -137,6 +169,7 @@ function ScheduleModal({
         job_document_id: jobDocId,
         resume_document_id: resumeDocId,
         scheduled_at: new Date(scheduledAt).toISOString(),
+        custom_questions: customQuestions.split("\n").map((q) => q.trim()).filter(Boolean),
       });
       setResult(iv);
       onCreate(iv);
@@ -236,6 +269,10 @@ function ScheduleModal({
                       className={resumeMode === "existing" ? "segmented-item-active" : "segmented-item"}>
                       Choose existing
                     </button>
+                    <button type="button" onClick={() => switchResumeMode("paste")}
+                      className={resumeMode === "paste" ? "segmented-item-active" : "segmented-item"}>
+                      Paste LinkedIn
+                    </button>
                   </div>
                 </div>
 
@@ -272,7 +309,7 @@ function ScheduleModal({
                       <p className="text-xs text-red-600 mt-1.5">{resumeError || "Failed to process resume."}</p>
                     )}
                   </div>
-                ) : (
+                ) : resumeMode === "existing" ? (
                   <>
                     <select required className="input" value={resumeDocId} onChange={(e) => setResumeDocId(e.target.value)}>
                       <option value="">Select a document…</option>
@@ -284,6 +321,46 @@ function ScheduleModal({
                       </p>
                     )}
                   </>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-500">
+                      LinkedIn doesn't allow automated scraping, so copy the candidate's profile
+                      (About, Experience, Education, Skills) and paste it below.
+                    </p>
+                    <input
+                      type="url"
+                      className="input text-xs"
+                      placeholder="LinkedIn profile URL (optional, for reference)"
+                      value={linkedinUrl}
+                      onChange={(e) => setLinkedinUrl(e.target.value)}
+                      disabled={resumeStatus === "uploading" || resumeStatus === "processing"}
+                    />
+                    <textarea
+                      className="input resize-none text-xs leading-relaxed"
+                      rows={6}
+                      placeholder="Paste the profile text here…"
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                      disabled={resumeStatus === "uploading" || resumeStatus === "processing"}
+                    />
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-400">{pasteText.length.toLocaleString()} characters</p>
+                      <button
+                        type="button"
+                        onClick={handlePasteSubmit}
+                        disabled={!pasteText.trim() || resumeStatus === "uploading" || resumeStatus === "processing"}
+                        className="btn-secondary text-xs px-3 py-1.5 h-auto"
+                      >
+                        {resumeStatus === "uploading" ? "Submitting…" : resumeStatus === "processing" ? "Processing…" : "Use this text"}
+                      </button>
+                    </div>
+                    {resumeStatus === "ready" && (
+                      <p className="text-xs text-emerald-600">✓ Profile indexed and ready</p>
+                    )}
+                    {resumeStatus === "failed" && (
+                      <p className="text-xs text-red-600">{resumeError || "Failed to process profile text."}</p>
+                    )}
+                  </div>
                 )}
               </div>
               <div>
@@ -291,6 +368,20 @@ function ScheduleModal({
                 <input type="datetime-local" required className="input" value={scheduledAt}
                   onChange={(e) => setScheduledAt(e.target.value)} />
                 <p className="text-xs text-gray-400 mt-1">The candidate can join once this time arrives.</p>
+              </div>
+              <div>
+                <label className="label">Custom questions (optional, one per line)</label>
+                <textarea
+                  className="input resize-none text-xs leading-relaxed"
+                  rows={3}
+                  placeholder={"e.g. What's your experience with distributed systems?\nWalk me through a time you disagreed with a teammate."}
+                  value={customQuestions}
+                  onChange={(e) => setCustomQuestions(e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Your questions are always asked first. We'll add a few more from the job description
+                  and resume if you give us fewer than 4.
+                </p>
               </div>
               {error && (
                 <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>

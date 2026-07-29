@@ -47,6 +47,12 @@ class LLMProvider(Protocol):
         of the backend that actually served the request (so the streaming path
         can record provider despite failover)."""
         ...
+    async def describe_image(self, data: bytes, content_type: str) -> str:
+        """Transcribe an image into text for the ingestion pipeline (a chatbot
+        attachment that's a screenshot, scan, or photo rather than a PDF/DOCX).
+        Not every backend is multimodal — a provider that isn't should raise
+        NotImplementedError so a failover chain can try the next one."""
+        ...
 
 
 @runtime_checkable

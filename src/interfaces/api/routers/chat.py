@@ -18,6 +18,7 @@ from src.domain.chatbot.entities import OPENER_INSTRUCTION
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
     build_grounded_prompt,
+    format_message_history,
     scan_input,
     scan_output,
 )
@@ -107,6 +108,13 @@ async def ask_stream(
         used = await uow.usage.tokens_used_today(principal.tenant_id)
         if tenant and used >= tenant.daily_token_quota:
             raise QuotaExceededError("Daily token quota exceeded.")
+        # Fetched BEFORE the current message is added, so it reflects prior
+        # turns only — without this, every turn was generated with no memory
+        # of the conversation so far, which is why the assistant could re-ask
+        # something the visitor already answered.
+        history_text = format_message_history(
+            await uow.chats.list_messages(principal.tenant_id, SessionId(session_id))
+        )
         await uow.chats.add_message(
             Message(
                 session_id=SessionId(session_id),
@@ -187,7 +195,10 @@ async def ask_stream(
         # 2. stream tokens. Capture which backend actually served (failover-aware)
         # so the persisted answer carries an accurate provider for analytics.
         # Untrusted text is isolated in labelled blocks (build_grounded_prompt).
-        prompt = "" if not input_verdict.allowed else build_grounded_prompt(context, body.message)
+        prompt = (
+            "" if not input_verdict.allowed
+            else build_grounded_prompt(context, body.message, history=history_text)
+        )
         full: list[str] = []
         served_by: dict[str, str] = {}
         if not input_verdict.allowed:

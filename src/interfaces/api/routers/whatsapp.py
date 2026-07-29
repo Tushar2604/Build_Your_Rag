@@ -23,7 +23,7 @@ from src.config.settings import get_settings
 from src.domain.chat.entities import ChatSession
 from src.domain.shared.identifiers import ChatbotId
 from src.infrastructure.messaging.twilio_signature import verify_twilio_signature
-from src.interfaces.api.deps import ContainerDep, PrincipalDep
+from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.schemas import ConnectWhatsAppRequest, WhatsAppChannelResponse
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
@@ -58,7 +58,7 @@ def _twiml(message: str) -> Response:
 
 @router.post("/channels", response_model=WhatsAppChannelResponse, status_code=201)
 async def connect_whatsapp(
-    body: ConnectWhatsAppRequest, principal: PrincipalDep, container: ContainerDep
+    body: ConnectWhatsAppRequest, principal: AdminPrincipalDep, container: ContainerDep
 ) -> WhatsAppChannelResponse:
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
@@ -93,7 +93,7 @@ async def connect_whatsapp(
 
 @router.get("/channels", response_model=list[WhatsAppChannelResponse])
 async def list_whatsapp_channels(
-    principal: PrincipalDep, container: ContainerDep
+    principal: AdminPrincipalDep, container: ContainerDep
 ) -> list[WhatsAppChannelResponse]:
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
@@ -107,7 +107,7 @@ async def list_whatsapp_channels(
 
 @router.delete("/channels/{channel_id}", status_code=204)
 async def disconnect_whatsapp(
-    channel_id: uuid.UUID, principal: PrincipalDep, container: ContainerDep
+    channel_id: uuid.UUID, principal: AdminPrincipalDep, container: ContainerDep
 ) -> None:
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)

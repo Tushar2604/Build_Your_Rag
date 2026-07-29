@@ -41,6 +41,7 @@ export interface ScheduleInterviewInput {
   job_document_id: string;
   resume_document_id: string;
   scheduled_at: string;
+  custom_questions?: string[];
 }
 
 export function listInterviews(): Promise<Interview[]> {

@@ -50,6 +50,10 @@ export function completeUpload(documentId: string): Promise<{ status: string }> 
   return api.post<{ status: string }>(`/documents/${documentId}/complete`);
 }
 
+export function createTextDocument(filename: string, text: string): Promise<Document> {
+  return api.post<Document>("/documents/from-text", { filename, text });
+}
+
 export function retryDocument(documentId: string): Promise<{ status: string }> {
   return api.post<{ status: string }>(`/documents/${documentId}/retry`);
 }

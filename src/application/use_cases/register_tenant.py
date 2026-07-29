@@ -66,4 +66,5 @@ class RegisterTenant:
             refresh_token=pair.refresh_token,
             tenant_id=tenant.id,
             user_id=user.id,
+            role=user.role.value,
         )

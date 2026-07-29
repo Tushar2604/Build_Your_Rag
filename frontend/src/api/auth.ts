@@ -6,6 +6,7 @@ export interface TokenResponse {
   token_type: string;
   tenant_id: string;
   user_id: string;
+  role: string;
 }
 
 export function register(

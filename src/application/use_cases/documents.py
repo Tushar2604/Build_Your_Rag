@@ -14,7 +14,7 @@ from src.application.ports.services import ObjectStorage
 from src.config import get_settings
 from src.domain.document.entities import Document, IngestionStatus
 from src.domain.document.events import DocumentUploaded
-from src.domain.shared.errors import NotFoundError, QuotaExceededError
+from src.domain.shared.errors import InvalidStateError, NotFoundError, QuotaExceededError
 from src.domain.shared.identifiers import DocumentId, TenantId, new_id
 
 
@@ -103,3 +103,64 @@ class CompleteUpload:
                 )
             await uow.commit()
         return tenant_id, document_id
+
+
+class CreateTextDocument:
+    """Ingest pasted free text directly as a knowledge document — e.g. a
+    LinkedIn profile the admin/candidate copied by hand (LinkedIn's ToS
+    prohibits scraping it automatically, so this is the paste-it-yourself
+    alternative). Reuses the exact same Document/IngestDocument pipeline as a
+    file upload; the only difference is the bytes are written here instead of
+    via a presigned URL, since there's no file to round-trip through the
+    browser.
+    """
+
+    def __init__(self, uow: UnitOfWork, storage: ObjectStorage) -> None:
+        self._uow = uow
+        self._storage = storage
+
+    async def execute(
+        self, tenant_id: TenantId, *, filename: str, text: str
+    ) -> tuple[TenantId, DocumentId]:
+        if not text.strip():
+            raise InvalidStateError("Pasted text is empty.")
+        data = text.encode("utf-8")
+        settings = get_settings()
+        max_bytes = settings.max_upload_mb * 1024 * 1024
+        if len(data) > max_bytes:
+            raise QuotaExceededError(f"Text exceeds the {settings.max_upload_mb} MB limit.")
+
+        async with self._uow as uow:
+            uow.set_tenant_scope(tenant_id)
+            tenant = await uow.tenants.get(tenant_id)
+            if tenant is None:
+                raise NotFoundError("Tenant not found.")
+            count = await uow.documents.count_for_tenant(tenant_id)
+            if count >= tenant.max_documents:
+                raise QuotaExceededError("Document limit reached for this tenant.")
+
+            doc_id = DocumentId(new_id())
+            doc = Document(
+                id=doc_id,
+                tenant_id=tenant_id,
+                filename=filename or "Pasted text.txt",
+                content_type="text/plain",
+                size_bytes=len(data),
+                storage_key=f"{tenant_id}/{doc_id}/source.txt",
+                checksum="",
+            )
+            await uow.documents.add(doc)
+            await uow.commit()
+
+        await self._storage.put_bytes(doc.storage_key, data, "text/plain")
+
+        async with self._uow as uow:
+            uow.set_tenant_scope(tenant_id)
+            doc = await uow.documents.get(tenant_id, doc_id)
+            doc.transition_to(IngestionStatus.UPLOADED)
+            await uow.documents.update(doc)
+            uow.collect_event(
+                DocumentUploaded(tenant_id=tenant_id, document_id=doc.id, filename=doc.filename)
+            )
+            await uow.commit()
+        return tenant_id, doc_id

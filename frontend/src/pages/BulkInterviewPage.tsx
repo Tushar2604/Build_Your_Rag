@@ -56,6 +56,7 @@ export default function BulkInterviewPage() {
   const [opensAt, setOpensAt] = useState("");
   const [hasDeadline, setHasDeadline] = useState(false);
   const [closesAt, setClosesAt] = useState("");
+  const [customQuestions, setCustomQuestions] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -90,6 +91,7 @@ export default function BulkInterviewPage() {
         job_document_id: jobDocId,
         window_opens_at: new Date(opensAt).toISOString(),
         window_closes_at: hasDeadline && closesAt ? new Date(closesAt).toISOString() : null,
+        custom_questions: customQuestions.split("\n").map((q) => q.trim()).filter(Boolean),
       });
       setBatch(created);
       setStep("upload");
@@ -247,6 +249,20 @@ export default function BulkInterviewPage() {
                 No ready documents yet. <Link to="/knowledge" className="underline">Upload a job description</Link> first.
               </p>
             )}
+          </div>
+          <div>
+            <label className="label">Custom questions (optional, one per line)</label>
+            <textarea
+              className="input resize-none text-xs leading-relaxed"
+              rows={3}
+              placeholder={"e.g. What's your experience with distributed systems?\nWalk me through a time you disagreed with a teammate."}
+              value={customQuestions}
+              onChange={(e) => setCustomQuestions(e.target.value)}
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Asked first for every candidate in this batch. We'll add a few more from the job description
+              and each resume if you give us fewer than 4.
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

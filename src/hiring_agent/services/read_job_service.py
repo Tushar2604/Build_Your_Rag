@@ -103,6 +103,7 @@ class ReadJobService:
             self._parser,
             self._chunker,
             self._embedder,
+            self._llm,
         )
         await ingest.execute(tenant_id, document_id)
 

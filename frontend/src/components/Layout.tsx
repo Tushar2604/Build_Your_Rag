@@ -9,6 +9,8 @@ interface NavItem {
   label: string;
   icon: JSX.Element;
   exact?: boolean;
+  /** Only shown to Owner/Admin roles — the "admin panel" surfaces. */
+  adminOnly?: boolean;
 }
 
 function HomeIcon()       { return <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>; }
@@ -20,6 +22,7 @@ function LogoutIcon()     { return <svg className="w-[18px] h-[18px]" fill="none
 function HiringIcon()     { return <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" /></svg>; }
 function InterviewsIcon() { return <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-2.362A.75.75 0 0121.5 8.808v6.384a.75.75 0 01-1.03.67L15.75 13.5m-9-6h6a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25h-6a2.25 2.25 0 01-2.25-2.25v-6A2.25 2.25 0 016.75 7.5z" /></svg>; }
 function ChannelsIcon()   { return <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 117.424 0M12 12.75a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5zm0 0v6.75m-8.485-3.435a9 9 0 1116.97 0" /></svg>; }
+function TeamIcon()       { return <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}><path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" /></svg>; }
 
 const NAV_SECTIONS: NavSection[] = [
   {
@@ -27,16 +30,17 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/home",       label: "Home",       icon: <HomeIcon />,       exact: true },
       { to: "/assistants", label: "Assistants", icon: <AssistantsIcon /> },
       { to: "/knowledge",  label: "Knowledge",  icon: <KnowledgeIcon />  },
-      { to: "/interviews", label: "Interviews", icon: <InterviewsIcon /> },
-      { to: "/channels",   label: "Channels",   icon: <ChannelsIcon /> },
-      { to: "/hiring-agent", label: "Hiring Agent", icon: <HiringIcon /> },
+      { to: "/interviews", label: "Interviews", icon: <InterviewsIcon />, adminOnly: true },
+      { to: "/channels",   label: "Channels",   icon: <ChannelsIcon />,   adminOnly: true },
+      { to: "/hiring-agent", label: "Hiring Agent", icon: <HiringIcon />, adminOnly: true },
+      { to: "/team",       label: "Team",       icon: <TeamIcon />,       adminOnly: true },
       { to: "/analytics",  label: "Analytics",  icon: <AnalyticsIcon />  },
     ],
   },
 ];
 
 export default function Layout() {
-  const { logout, tenantId } = useAuth();
+  const { logout, tenantId, isAdmin } = useAuth();
   const navigate = useNavigate();
 
   function handleLogout() {
@@ -78,7 +82,7 @@ export default function Layout() {
           <p className="eyebrow px-3 pb-1.5 pt-2">Workspace</p>
           {NAV_SECTIONS.map((section, si) => (
             <ul key={si} className="space-y-0.5" role="list">
-              {section.items.map((item) => (
+              {section.items.filter((item) => !item.adminOnly || isAdmin).map((item) => (
                 <li key={item.to}>
                   <NavLink to={item.to} end={item.exact} className={navClass}>
                     {({ isActive }) => (
@@ -98,16 +102,18 @@ export default function Layout() {
 
         {/* Footer */}
         <div className="px-3 py-3 space-y-1">
-          <NavLink to="/settings" className={navClass}>
-            {({ isActive }) => (
-              <>
-                <span className={isActive ? "text-brand-600" : "text-gray-400 group-hover:text-gray-500"}>
-                  <SettingsIcon />
-                </span>
-                Settings
-              </>
-            )}
-          </NavLink>
+          {isAdmin && (
+            <NavLink to="/settings" className={navClass}>
+              {({ isActive }) => (
+                <>
+                  <span className={isActive ? "text-brand-600" : "text-gray-400 group-hover:text-gray-500"}>
+                    <SettingsIcon />
+                  </span>
+                  Settings
+                </>
+              )}
+            </NavLink>
+          )}
 
           {/* Org row + logout */}
           <div className="flex items-center gap-2.5 rounded-lg border border-gray-200/80 px-2.5 py-2 mt-1">

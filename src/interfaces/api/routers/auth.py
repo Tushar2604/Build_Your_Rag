@@ -26,6 +26,7 @@ async def register(body: RegisterRequest, container: ContainerDep) -> TokenRespo
         refresh_token=result.refresh_token,
         tenant_id=result.tenant_id,
         user_id=result.user_id,
+        role=result.role,
     )
 
 
@@ -38,4 +39,5 @@ async def login(body: LoginRequest, container: ContainerDep) -> TokenResponse:
         refresh_token=result.refresh_token,
         tenant_id=result.tenant_id,
         user_id=result.user_id,
+        role=result.role,
     )

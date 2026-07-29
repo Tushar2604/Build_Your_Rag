@@ -11,13 +11,14 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 
 from src.application.dtos import CreateUploadInput
-from src.application.use_cases.documents import CompleteUpload, CreateUpload
+from src.application.use_cases.documents import CompleteUpload, CreateTextDocument, CreateUpload
 from src.application.use_cases.ingest_document import IngestDocument
 from src.config.container import get_container
 from src.domain.document.entities import IngestionStatus
 from src.domain.shared.identifiers import DocumentId, TenantId
 from src.interfaces.api.deps import ContainerDep, PrincipalDep
 from src.interfaces.api.schemas import (
+    CreateTextDocumentRequest,
     CreateUploadRequest,
     CreateUploadResponse,
     DocumentResponse,
@@ -35,6 +36,7 @@ async def _run_ingestion(tenant_id: TenantId, document_id: DocumentId) -> None:
         container.parser,
         container.chunker,
         container.embedder,
+        container.llm,
     )
     await use_case.execute(tenant_id, document_id)
 
@@ -72,6 +74,24 @@ async def complete_upload(
     )
     background.add_task(_run_ingestion, tenant_id, doc_id)
     return {"status": "ingestion_scheduled"}
+
+
+@router.post("/from-text", response_model=DocumentResponse, status_code=201)
+async def create_text_document(
+    body: CreateTextDocumentRequest,
+    principal: PrincipalDep,
+    container: ContainerDep,
+    background: BackgroundTasks,
+) -> DocumentResponse:
+    """Ingest pasted free text (e.g. a hand-copied LinkedIn profile) as a
+    knowledge document — same pipeline as a file upload, no file involved."""
+    use_case = CreateTextDocument(container.unit_of_work(), container.storage)
+    tenant_id, doc_id = await use_case.execute(principal.tenant_id, filename=body.filename, text=body.text)
+    background.add_task(_run_ingestion, tenant_id, doc_id)
+    return DocumentResponse(
+        id=doc_id, filename=body.filename or "Pasted text.txt",
+        status=IngestionStatus.UPLOADED.value, chunk_count=0, error=None,
+    )
 
 
 @router.get("", response_model=list[DocumentResponse])

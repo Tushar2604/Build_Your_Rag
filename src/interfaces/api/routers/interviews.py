@@ -17,10 +17,10 @@ from src.application.use_cases.finalize_interview import FinalizeInterview
 from src.application.use_cases.schedule_interview import ScheduleInterview
 from src.config.settings import get_settings
 from src.domain.interview.entities import INTERVIEWER_SYSTEM_PROMPT, Interview, TranscriptTurn
-from src.domain.interview.prompts import build_interview_turn_prompt
+from src.domain.interview.prompts import build_interview_turn_prompt, format_transcript
 from src.domain.safety.guardrails import GUARD_REFUSAL, scan_input
 from src.domain.shared.identifiers import DocumentId, InterviewId
-from src.interfaces.api.deps import ContainerDep, PrincipalDep
+from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.schemas import (
     AskRequest,
     InterviewBootstrapResponse,
@@ -68,7 +68,7 @@ def _to_response(interview: Interview) -> InterviewResponse:
 
 @router.post("", response_model=InterviewResponse, status_code=201)
 async def create_interview(
-    body: ScheduleInterviewRequest, principal: PrincipalDep, container: ContainerDep
+    body: ScheduleInterviewRequest, principal: AdminPrincipalDep, container: ContainerDep
 ) -> InterviewResponse:
     settings = get_settings()
     use_case = ScheduleInterview(
@@ -83,6 +83,7 @@ async def create_interview(
         job_document_id=DocumentId(body.job_document_id),
         resume_document_id=DocumentId(body.resume_document_id),
         scheduled_at=body.scheduled_at,
+        custom_questions=body.custom_questions,
     )
     resp = _to_response(interview)
     resp.calendar_created = calendar_created
@@ -91,7 +92,7 @@ async def create_interview(
 
 
 @router.get("", response_model=list[InterviewResponse])
-async def list_interviews(principal: PrincipalDep, container: ContainerDep) -> list[InterviewResponse]:
+async def list_interviews(principal: AdminPrincipalDep, container: ContainerDep) -> list[InterviewResponse]:
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         interviews = await uow.interviews.list_for_tenant(principal.tenant_id)
@@ -100,7 +101,7 @@ async def list_interviews(principal: PrincipalDep, container: ContainerDep) -> l
 
 @router.get("/{interview_id}", response_model=InterviewResponse)
 async def get_interview(
-    interview_id: uuid.UUID, principal: PrincipalDep, container: ContainerDep
+    interview_id: uuid.UUID, principal: AdminPrincipalDep, container: ContainerDep
 ) -> InterviewResponse:
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
@@ -112,7 +113,7 @@ async def get_interview(
 
 @router.get("/{interview_id}/report")
 async def get_interview_report(
-    interview_id: uuid.UUID, principal: PrincipalDep, container: ContainerDep
+    interview_id: uuid.UUID, principal: AdminPrincipalDep, container: ContainerDep
 ) -> Response:
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
@@ -195,7 +196,10 @@ async def interview_greeting(access_token: str, request: Request, container: Con
             f"fit for the {interview.role_title or 'role'}, then ask this first "
             f"question: {interview.questions[0]}"
         )
-        prompt = build_interview_turn_prompt(job_text=job_text, resume_text=resume_text, instruction=instruction)
+        prompt = build_interview_turn_prompt(
+            job_text=job_text, resume_text=resume_text, instruction=instruction,
+            transcript_text=format_transcript(interview.transcript),
+        )
         full: list[str] = []
         try:
             async for token in container.llm.stream(INTERVIEWER_SYSTEM_PROMPT, prompt):
@@ -260,8 +264,12 @@ async def interview_respond(
                 "Briefly and warmly acknowledge the candidate's last answer, thank "
                 "them for their time, and let them know this concludes the interview."
             )
+        # transcript[:-1] excludes the answer just appended above — it's
+        # passed separately as candidate_answer so the model sees it as "the
+        # thing to react to now", not buried as the last line of history.
         prompt = build_interview_turn_prompt(
-            job_text=job_text, resume_text=resume_text, instruction=instruction, candidate_answer=body.message
+            job_text=job_text, resume_text=resume_text, instruction=instruction, candidate_answer=body.message,
+            transcript_text=format_transcript(interview.transcript[:-1]),
         )
         full: list[str] = []
         try:

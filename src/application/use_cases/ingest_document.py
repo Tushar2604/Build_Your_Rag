@@ -10,7 +10,7 @@ from __future__ import annotations
 import structlog
 
 from src.application.ports.repositories import UnitOfWork
-from src.application.ports.services import Chunker, DocumentParser, Embedder, ObjectStorage
+from src.application.ports.services import Chunker, DocumentParser, Embedder, LLMProvider, ObjectStorage
 from src.domain.document.entities import Chunk, Document, IngestionStatus
 from src.domain.document.events import DocumentIngested, DocumentIngestionFailed
 from src.domain.shared.identifiers import DocumentId, TenantId
@@ -29,12 +29,14 @@ class IngestDocument:
         parser: DocumentParser,
         chunker: Chunker,
         embedder: Embedder,
+        llm: LLMProvider,
     ) -> None:
         self._uow = uow
         self._storage = storage
         self._parser = parser
         self._chunker = chunker
         self._embedder = embedder
+        self._llm = llm
 
     async def execute(self, tenant_id: TenantId, document_id: DocumentId) -> None:
         async with self._uow as uow:
@@ -66,7 +68,13 @@ class IngestDocument:
             doc.transition_to(IngestionStatus.PARSING)
             await uow.documents.update(doc)
         raw = await self._storage.get_bytes(doc.storage_key)
-        text = await self._parser.extract_text(raw, doc.content_type, doc.filename)
+        if doc.content_type.startswith("image/"):
+            # No OCR dependency in this stack — a vision-capable LLM
+            # transcribes the image into text, which then flows through the
+            # exact same chunk/embed pipeline as any other document.
+            text = await self._llm.describe_image(raw, doc.content_type)
+        else:
+            text = await self._parser.extract_text(raw, doc.content_type, doc.filename)
 
         # 2. CHUNK
         doc.transition_to(IngestionStatus.CHUNKING)

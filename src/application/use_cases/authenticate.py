@@ -37,4 +37,5 @@ class AuthenticateUser:
             refresh_token=pair.refresh_token,
             tenant_id=user.tenant_id,
             user_id=user.id,
+            role=user.role.value,
         )

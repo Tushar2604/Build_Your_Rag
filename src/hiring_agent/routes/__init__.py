@@ -36,7 +36,7 @@ from src.hiring_agent.types.execution import (
     RunSummary,
 )
 from src.hiring_agent.types.memory import HiringAgentMemory
-from src.interfaces.api.deps import PrincipalDep
+from src.interfaces.api.deps import AdminPrincipalDep
 
 router = APIRouter(prefix="/hiring-agent", tags=["hiring-agent"])
 
@@ -50,7 +50,7 @@ async def hiring_health() -> dict[str, str]:
 @router.post("/plan", response_model=ExecutionPlan)
 async def create_hiring_plan(
     request: PlanRequest,
-    _principal: PrincipalDep,
+    _principal: AdminPrincipalDep,
 ) -> ExecutionPlan:
     """Generate an execution plan for a hiring goal (e.g. 'Hire a Backend Intern').
 
@@ -62,7 +62,7 @@ async def create_hiring_plan(
 @router.post("/run", response_model=WorkflowRunResponse)
 async def run_hiring_workflow(
     request: WorkflowRunRequest,
-    principal: PrincipalDep,
+    principal: AdminPrincipalDep,
 ) -> WorkflowRunResponse:
     """Run the autonomous hiring workflow simulation.
 
@@ -77,7 +77,7 @@ async def run_hiring_workflow(
 @router.post("/resume/{run_id}", response_model=WorkflowRunResponse)
 async def resume_hiring_workflow(
     run_id: UUID,
-    principal: PrincipalDep,
+    principal: AdminPrincipalDep,
 ) -> WorkflowRunResponse:
     """Resume a previously interrupted hiring run from its last persisted state."""
     try:
@@ -89,7 +89,7 @@ async def resume_hiring_workflow(
 @router.post("/execute", response_model=ExecutionState)
 async def execute_hiring_plan(
     request: ExecuteRequest,
-    principal: PrincipalDep,
+    principal: AdminPrincipalDep,
 ) -> ExecutionState:
     """Plan a hiring goal and execute it one task at a time.
 
@@ -103,7 +103,7 @@ async def execute_hiring_plan(
 @router.post("/approve", response_model=ExecutionState)
 async def approve_hiring_task(
     request: ApprovalRequest,
-    principal: PrincipalDep,
+    principal: AdminPrincipalDep,
 ) -> ExecutionState:
     """Approve the pending task and resume execution."""
     try:
@@ -117,7 +117,7 @@ async def approve_hiring_task(
 @router.post("/reject", response_model=ExecutionState)
 async def reject_hiring_task(
     request: ApprovalRequest,
-    principal: PrincipalDep,
+    principal: AdminPrincipalDep,
 ) -> ExecutionState:
     """Reject the pending task (skip it) and resume execution."""
     try:
@@ -129,13 +129,13 @@ async def reject_hiring_task(
 
 
 @router.get("/runs", response_model=list[RunSummary])
-async def list_hiring_runs(_principal: PrincipalDep) -> list[RunSummary]:
+async def list_hiring_runs(_principal: AdminPrincipalDep) -> list[RunSummary]:
     """Execution history — recent hiring runs for the tenant."""
     return await list_runs(_principal.tenant_id)
 
 
 @router.get("/runs/{run_id}", response_model=HiringAgentMemory)
-async def get_hiring_run(run_id: UUID, principal: PrincipalDep) -> HiringAgentMemory:
+async def get_hiring_run(run_id: UUID, principal: AdminPrincipalDep) -> HiringAgentMemory:
     """Full agent memory for one run (timeline, tool logs, rankings, decisions)."""
     try:
         return await get_run(run_id, principal.tenant_id)

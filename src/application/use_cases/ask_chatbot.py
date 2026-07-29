@@ -24,6 +24,7 @@ from src.domain.chatbot.entities import Chatbot
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
     build_grounded_prompt,
+    format_message_history,
     scan_input,
     scan_output,
 )
@@ -97,6 +98,10 @@ class AskChatbot:
             if used >= tenant.daily_token_quota:
                 raise QuotaExceededError("Daily token quota exceeded. Try again tomorrow.")
 
+            # Fetched BEFORE the current message is added, so it reflects prior
+            # turns only — the current message is passed separately as `data.message`.
+            history_text = format_message_history(await uow.chats.list_messages(tenant_id, session_id))
+
             await uow.chats.add_message(
                 Message(
                     session_id=session_id,
@@ -115,7 +120,7 @@ class AskChatbot:
         # isolate untrusted text in labelled blocks, and screen the answer for
         # system-prompt leakage. A high-risk verdict short-circuits to a refusal.
         context = _build_context(citations)
-        user_prompt = build_grounded_prompt(context, data.message)
+        user_prompt = build_grounded_prompt(context, data.message, history=history_text)
 
         input_verdict = scan_input(data.message)
         if not input_verdict.allowed:

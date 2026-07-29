@@ -8,6 +8,7 @@ again by Postgres RLS as a backstop.
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -45,6 +46,7 @@ class UserRepository(Protocol):
     async def add(self, user: User) -> None: ...
     async def get(self, user_id: UserId) -> User | None: ...
     async def get_by_email(self, email: str) -> User | None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[User]: ...
 
 
 @runtime_checkable
@@ -52,6 +54,38 @@ class ApiKeyRepository(Protocol):
     async def add(self, key: ApiKey) -> None: ...
     async def get_by_hash(self, key_hash: str) -> ApiKey | None: ...
     async def list_for_tenant(self, tenant_id: TenantId) -> list[ApiKey]: ...
+
+
+def generate_invite_token() -> str:
+    """An unguessable invite token — safe to embed in an emailed link,
+    analogous to an interview's access_token or a chatbot's publishable key."""
+    return secrets.token_urlsafe(24)
+
+
+@dataclass
+class TenantInvite:
+    """An Owner/Admin's invitation for a teammate to join their tenant with a
+    chosen role. The teammate has no account yet — `token` is emailed as a
+    link; possessing it is what lets them set their own password and create
+    their User row. `expires_at` is set by the inviting use case (a fixed
+    window from creation), not defaulted here."""
+
+    tenant_id: TenantId
+    email: str
+    role: str  # Role value ("admin" | "member" | "viewer") chosen by the inviter
+    expires_at: datetime
+    id: uuid.UUID = field(default_factory=new_id)
+    token: str = field(default_factory=generate_invite_token)
+    status: str = "pending"  # "pending" | "accepted"
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@runtime_checkable
+class TenantInviteRepository(Protocol):
+    async def add(self, invite: TenantInvite) -> None: ...
+    async def get_by_token(self, token: str) -> TenantInvite | None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[TenantInvite]: ...
+    async def mark_accepted(self, invite: TenantInvite) -> None: ...
 
 
 @runtime_checkable
@@ -334,6 +368,7 @@ class UnitOfWork(Protocol):
     interviews: InterviewRepository
     interview_batches: InterviewBatchRepository
     batch_candidates: BatchCandidateRepository
+    tenant_invites: TenantInviteRepository
     google_connections: GoogleConnectionRepository
     whatsapp_channels: WhatsAppChannelRepository
     whatsapp_conversations: WhatsAppConversationRepository

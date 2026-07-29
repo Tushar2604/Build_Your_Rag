@@ -24,6 +24,7 @@ class AuthOutput(BaseModel):
     refresh_token: str
     tenant_id: uuid.UUID
     user_id: uuid.UUID
+    role: str
 
 
 class CreateUploadInput(BaseModel):

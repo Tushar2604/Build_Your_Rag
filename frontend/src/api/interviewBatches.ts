@@ -19,6 +19,7 @@ export interface InterviewBatch {
   job_document_id: string;
   window_opens_at: string;
   window_closes_at: string | null;
+  custom_questions: string[];
   status: BatchStatus;
   total_count: number;
   sent_count: number;
@@ -31,6 +32,7 @@ export interface CreateBatchInput {
   job_document_id: string;
   window_opens_at: string;
   window_closes_at?: string | null;
+  custom_questions?: string[];
 }
 
 export function createInterviewBatch(input: CreateBatchInput): Promise<InterviewBatch> {

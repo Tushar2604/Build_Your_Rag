@@ -35,6 +35,50 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     tenant_id: uuid.UUID
     user_id: uuid.UUID
+    role: str
+
+
+# --- Team (per-tenant admin panel: roles + teammate invites) ---
+TeamRole = Literal["admin", "member", "viewer"]
+
+
+class InviteTeammateRequest(BaseModel):
+    email: EmailStr
+    role: TeamRole = "member"
+
+
+class TenantInviteResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    role: str
+    status: str
+    expires_at: datetime
+    invite_url: str
+    email_sent: bool = False
+
+
+class TeamMemberResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+
+class TeamResponse(BaseModel):
+    members: list[TeamMemberResponse]
+    pending_invites: list[TenantInviteResponse]
+
+
+class InviteBootstrapResponse(BaseModel):
+    tenant_name: str
+    email: str
+    role: str
+    valid: bool
+
+
+class AcceptInviteRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
 
 
 # --- Documents ---
@@ -42,6 +86,11 @@ class CreateUploadRequest(BaseModel):
     filename: str
     content_type: str = "application/octet-stream"
     size_bytes: int = Field(gt=0)
+
+
+class CreateTextDocumentRequest(BaseModel):
+    filename: str = Field(default="", max_length=255)
+    text: str = Field(min_length=1, max_length=2_000_000)
 
 
 class CreateUploadResponse(BaseModel):
@@ -221,6 +270,7 @@ class ScheduleInterviewRequest(BaseModel):
     job_document_id: uuid.UUID
     resume_document_id: uuid.UUID
     scheduled_at: datetime
+    custom_questions: list[str] = Field(default_factory=list)
 
 
 class QuestionScoreResponse(BaseModel):
@@ -274,6 +324,7 @@ class CreateBatchRequest(BaseModel):
     job_document_id: uuid.UUID
     window_opens_at: datetime
     window_closes_at: datetime | None = None
+    custom_questions: list[str] = Field(default_factory=list)
 
 
 class AttachBatchResumeRequest(BaseModel):
@@ -303,6 +354,7 @@ class InterviewBatchResponse(BaseModel):
     job_document_id: uuid.UUID
     window_opens_at: datetime
     window_closes_at: datetime | None
+    custom_questions: list[str] = Field(default_factory=list)
     status: BatchStatus
     total_count: int
     sent_count: int

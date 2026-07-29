@@ -19,6 +19,7 @@ from src.application.ports.repositories import (
     GoogleOAuthConnection,
     ProviderStat,
     RequestLog,
+    TenantInvite,
     WhatsAppChannel,
     WhatsAppConversation,
 )
@@ -98,6 +99,16 @@ class UserRepositoryImpl:
         ).scalar_one_or_none()
         return map_.user_to_domain(row) if row else None
 
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[User]:
+        rows = (
+            await self._s.execute(
+                select(m.UserModel)
+                .where(m.UserModel.tenant_id == tenant_id)
+                .order_by(m.UserModel.created_at.asc())
+            )
+        ).scalars().all()
+        return [map_.user_to_domain(r) for r in rows]
+
 
 class ApiKeyRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:
@@ -133,6 +144,48 @@ class ApiKeyRepositoryImpl:
             )
         ).scalars()
         return [map_.apikey_to_domain(r) for r in rows]
+
+
+class TenantInviteRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, invite: TenantInvite) -> None:
+        self._s.add(
+            m.TenantInviteModel(
+                id=invite.id,
+                tenant_id=invite.tenant_id,
+                email=invite.email,
+                role=invite.role,
+                token=invite.token,
+                status=invite.status,
+                created_at=invite.created_at,
+                expires_at=invite.expires_at,
+            )
+        )
+
+    async def get_by_token(self, token: str) -> TenantInvite | None:
+        row = (
+            await self._s.execute(
+                select(m.TenantInviteModel).where(m.TenantInviteModel.token == token)
+            )
+        ).scalar_one_or_none()
+        return map_.tenant_invite_to_domain(row) if row else None
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[TenantInvite]:
+        rows = (
+            await self._s.execute(
+                select(m.TenantInviteModel)
+                .where(m.TenantInviteModel.tenant_id == tenant_id)
+                .order_by(m.TenantInviteModel.created_at.desc())
+            )
+        ).scalars().all()
+        return [map_.tenant_invite_to_domain(r) for r in rows]
+
+    async def mark_accepted(self, invite: TenantInvite) -> None:
+        row = await self._s.get(m.TenantInviteModel, invite.id)
+        if row is not None:
+            row.status = "accepted"
 
 
 class DocumentRepositoryImpl:
@@ -739,6 +792,7 @@ class InterviewBatchRepositoryImpl:
                 job_document_id=batch.job_document_id,
                 window_opens_at=batch.window_opens_at,
                 window_closes_at=batch.window_closes_at,
+                custom_questions=list(batch.custom_questions),
                 status=batch.status,
                 total_count=batch.total_count,
                 sent_count=batch.sent_count,

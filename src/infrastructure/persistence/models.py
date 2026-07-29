@@ -75,6 +75,21 @@ class ApiKeyModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class TenantInviteModel(Base):
+    __tablename__ = "tenant_invites"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    role: Mapped[str] = mapped_column(String(20), default="member")
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class DocumentModel(Base):
     __tablename__ = "documents"
 
@@ -261,6 +276,7 @@ class InterviewBatchModel(Base):
     )
     window_opens_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     window_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    custom_questions: Mapped[list] = mapped_column(JSONB, default=list)
     status: Mapped[str] = mapped_column(String(20), default="collecting", index=True)
     total_count: Mapped[int] = mapped_column(Integer, default=0)
     sent_count: Mapped[int] = mapped_column(Integer, default=0)

@@ -62,3 +62,20 @@ async def current_principal(
 
 
 PrincipalDep = Annotated[Principal, Depends(current_principal)]
+
+
+_MANAGE_ROLES = ("owner", "admin")
+
+
+async def require_admin(principal: PrincipalDep) -> Principal:
+    """Gate for the "admin panel" surfaces (interviews, bulk invites, hiring
+    agent, channels, team management) — only an Owner or Admin may proceed.
+    Mirrors `User.can_manage()` (`src/domain/tenant/entities.py`), applied at
+    the API boundary since `Principal` (built from JWT claims / API key) is
+    what routers actually see, not the `User` row itself."""
+    if principal.role not in _MANAGE_ROLES:
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return principal
+
+
+AdminPrincipalDep = Annotated[Principal, Depends(require_admin)]

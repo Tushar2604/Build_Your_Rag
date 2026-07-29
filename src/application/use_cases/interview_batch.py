@@ -21,8 +21,8 @@ from src.application.ports.repositories import UnitOfWork
 from src.application.ports.services import LLMProvider
 from src.application.use_cases._interview_shared import (
     build_invite_html,
+    build_question_set,
     extract_candidate_identity,
-    generate_interview_questions,
 )
 from src.domain.document.entities import IngestionStatus
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
@@ -54,6 +54,7 @@ class CreateInterviewBatch:
         job_document_id: DocumentId,
         window_opens_at: datetime,
         window_closes_at: datetime | None,
+        custom_questions: list[str] | None = None,
     ) -> InterviewBatch:
         async with self._uow as uow:
             uow.set_tenant_scope(tenant_id)
@@ -68,6 +69,7 @@ class CreateInterviewBatch:
                 job_document_id=job_document_id,
                 window_opens_at=window_opens_at,
                 window_closes_at=window_closes_at,
+                custom_questions=[q.strip() for q in (custom_questions or []) if q.strip()],
             )
             await uow.interview_batches.add(batch)
             await uow.commit()
@@ -250,7 +252,7 @@ class SendInterviewBatch:
                 uow.set_tenant_scope(tenant_id)
                 resume_chunks = await uow.chunks.list_for_document(tenant_id, candidate.resume_document_id)
             resume_text = "\n\n".join(c.text for c in resume_chunks)
-            questions = await generate_interview_questions(self._llm, job_text, resume_text)
+            questions = await build_question_set(self._llm, job_text, resume_text, batch.custom_questions)
 
             interview = Interview(
                 tenant_id=tenant_id,

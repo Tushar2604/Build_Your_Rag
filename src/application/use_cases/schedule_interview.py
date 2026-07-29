@@ -14,7 +14,7 @@ import structlog
 
 from src.application.ports.repositories import UnitOfWork
 from src.application.ports.services import LLMProvider
-from src.application.use_cases._interview_shared import build_invite_html, generate_interview_questions
+from src.application.use_cases._interview_shared import build_invite_html, build_question_set
 from src.domain.document.entities import IngestionStatus
 from src.domain.interview.entities import Interview
 from src.domain.shared.errors import InvalidStateError, NotFoundError
@@ -50,6 +50,7 @@ class ScheduleInterview:
         job_document_id: DocumentId,
         resume_document_id: DocumentId,
         scheduled_at: datetime,
+        custom_questions: list[str] | None = None,
     ) -> tuple[Interview, bool, bool]:
         """Returns (interview, calendar_created, email_sent)."""
         async with self._uow as uow:
@@ -58,7 +59,7 @@ class ScheduleInterview:
             resume_text = await self._full_text(uow, tenant_id, resume_document_id)
 
         name = candidate_name.strip() or await self._extract_name(resume_text)
-        questions = await generate_interview_questions(self._llm, job_text, resume_text)
+        questions = await build_question_set(self._llm, job_text, resume_text, custom_questions)
 
         interview = Interview(
             tenant_id=tenant_id,

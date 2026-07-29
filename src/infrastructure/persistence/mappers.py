@@ -10,6 +10,7 @@ import uuid
 
 from src.application.ports.repositories import (
     GoogleOAuthConnection,
+    TenantInvite,
     WhatsAppChannel,
     WhatsAppConversation,
 )
@@ -66,6 +67,19 @@ def apikey_to_domain(row: m.ApiKeyModel) -> ApiKey:
         prefix=row.prefix,
         is_active=row.is_active,
         created_at=row.created_at,
+    )
+
+
+def tenant_invite_to_domain(row: m.TenantInviteModel) -> TenantInvite:
+    return TenantInvite(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        email=row.email,
+        role=row.role,
+        token=row.token,
+        status=row.status,
+        created_at=row.created_at,
+        expires_at=row.expires_at,
     )
 
 
@@ -228,6 +242,7 @@ def interview_batch_to_domain(row: m.InterviewBatchModel) -> InterviewBatch:
         job_document_id=DocumentId(row.job_document_id),
         window_opens_at=row.window_opens_at,
         window_closes_at=row.window_closes_at,
+        custom_questions=list(row.custom_questions or []),
         status=row.status,  # type: ignore[arg-type]
         total_count=row.total_count,
         sent_count=row.sent_count,

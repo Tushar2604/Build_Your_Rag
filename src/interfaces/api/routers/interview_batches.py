@@ -20,7 +20,7 @@ from src.config.container import get_container
 from src.config.settings import get_settings
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.shared.identifiers import BatchCandidateId, DocumentId, InterviewBatchId, TenantId
-from src.interfaces.api.deps import ContainerDep, PrincipalDep
+from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.schemas import (
     AttachBatchResumeRequest,
     BatchCandidateResponse,
@@ -53,6 +53,7 @@ def _batch_response(
         job_document_id=batch.job_document_id,
         window_opens_at=batch.window_opens_at,
         window_closes_at=batch.window_closes_at,
+        custom_questions=list(batch.custom_questions),
         status=batch.status,  # type: ignore[arg-type]
         total_count=batch.total_count,
         sent_count=batch.sent_count,
@@ -79,7 +80,7 @@ async def _run_send(tenant_id: TenantId, batch_id: InterviewBatchId) -> None:
 
 @router.post("", response_model=InterviewBatchResponse, status_code=201)
 async def create_batch(
-    body: CreateBatchRequest, principal: PrincipalDep, container: ContainerDep
+    body: CreateBatchRequest, principal: AdminPrincipalDep, container: ContainerDep
 ) -> InterviewBatchResponse:
     use_case = CreateInterviewBatch(container.unit_of_work())
     batch = await use_case.execute(
@@ -88,12 +89,13 @@ async def create_batch(
         job_document_id=DocumentId(body.job_document_id),
         window_opens_at=body.window_opens_at,
         window_closes_at=body.window_closes_at,
+        custom_questions=body.custom_questions,
     )
     return _batch_response(batch)
 
 
 @router.get("", response_model=list[InterviewBatchResponse])
-async def list_batches(principal: PrincipalDep, container: ContainerDep) -> list[InterviewBatchResponse]:
+async def list_batches(principal: AdminPrincipalDep, container: ContainerDep) -> list[InterviewBatchResponse]:
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         batches = await uow.interview_batches.list_for_tenant(principal.tenant_id)
@@ -102,7 +104,7 @@ async def list_batches(principal: PrincipalDep, container: ContainerDep) -> list
 
 @router.get("/{batch_id}", response_model=InterviewBatchResponse)
 async def get_batch(
-    batch_id: uuid.UUID, principal: PrincipalDep, container: ContainerDep
+    batch_id: uuid.UUID, principal: AdminPrincipalDep, container: ContainerDep
 ) -> InterviewBatchResponse:
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
@@ -115,7 +117,7 @@ async def get_batch(
 
 @router.post("/{batch_id}/resumes", response_model=BatchCandidateResponse, status_code=201)
 async def attach_resume(
-    batch_id: uuid.UUID, body: AttachBatchResumeRequest, principal: PrincipalDep, container: ContainerDep
+    batch_id: uuid.UUID, body: AttachBatchResumeRequest, principal: AdminPrincipalDep, container: ContainerDep
 ) -> BatchCandidateResponse:
     use_case = AttachBatchResume(container.unit_of_work())
     candidate = await use_case.execute(
@@ -129,7 +131,7 @@ async def attach_resume(
 
 @router.post("/{batch_id}/extract", status_code=202)
 async def extract_candidates(
-    batch_id: uuid.UUID, principal: PrincipalDep, background: BackgroundTasks
+    batch_id: uuid.UUID, principal: AdminPrincipalDep, background: BackgroundTasks
 ) -> dict[str, str]:
     background.add_task(_run_extraction, principal.tenant_id, InterviewBatchId(batch_id))
     return {"status": "extraction_scheduled"}
@@ -140,7 +142,7 @@ async def update_candidate(
     batch_id: uuid.UUID,
     candidate_id: uuid.UUID,
     body: PatchBatchCandidateRequest,
-    principal: PrincipalDep,
+    principal: AdminPrincipalDep,
     container: ContainerDep,
 ) -> BatchCandidateResponse:
     use_case = UpdateBatchCandidate(container.unit_of_work())
@@ -156,7 +158,7 @@ async def update_candidate(
 
 @router.post("/{batch_id}/send", status_code=202)
 async def send_batch(
-    batch_id: uuid.UUID, principal: PrincipalDep, background: BackgroundTasks
+    batch_id: uuid.UUID, principal: AdminPrincipalDep, background: BackgroundTasks
 ) -> dict[str, str]:
     background.add_task(_run_send, principal.tenant_id, InterviewBatchId(batch_id))
     return {"status": "send_scheduled"}

@@ -41,7 +41,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "regional or industry project exposure; ask their current or last company and "
     "designation; ask their notice period / availability and salary expectation; "
     "then, if things align, explain the next steps and thank them. Skip anything "
-    "the candidate has already answered — never re-ask it. "
+    "the candidate has already answered — never re-ask it. The conversation so "
+    "far (if any) is provided in a <conversation_history> block below the "
+    "reference material — check it before asking anything, so you don't repeat "
+    "a question the candidate already answered. "
     # --- Salary negotiation ---
     "When discussing salary, use ONLY the budget range from the reference "
     "material. State the range clearly and ask whether the candidate is open to "
