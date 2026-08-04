@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { motion, useSpring } from "framer-motion";
 import { listChatbots, Chatbot } from "../api/chatbots";
 import {
   getChatbotAnalytics,
@@ -19,16 +20,33 @@ function score(x: number | null): string {
   return x === null ? "—" : x.toFixed(3);
 }
 
-/** Inline bar chart (no chart lib). values are 0..1; color keyed per bar. */
+/** Animates a numeric display from 0 to its target value on mount/change. */
+function CountUp({ value, format }: { value: number; format?: (n: number) => string }) {
+  const spring = useSpring(0, { stiffness: 90, damping: 20 });
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    spring.set(value);
+  }, [value, spring]);
+
+  useEffect(() => {
+    const unsub = spring.on("change", (v) => setDisplay(v));
+    return unsub;
+  }, [spring]);
+
+  return <>{format ? format(display) : Math.round(display).toLocaleString()}</>;
+}
+
+/** Bar chart with rounded ends, gradient fill, animated grow-on-load. No chart lib. */
 function MiniBars({
   days,
   value,
-  color,
+  colorClass,
   title,
 }: {
   days: AnalyticsDay[];
   value: (d: AnalyticsDay) => number | null;
-  color: (v: number) => string;
+  colorClass: (v: number) => string;
   title: string;
 }) {
   if (days.length === 0) {
@@ -36,16 +54,18 @@ function MiniBars({
   }
   return (
     <div>
-      <p className="text-xs font-medium text-gray-500 mb-2">{title}</p>
-      <div className="flex items-end gap-0.5 h-24" role="img" aria-label={title}>
-        {days.map((d) => {
+      <p className="text-xs font-medium text-gray-500 mb-3">{title}</p>
+      <div className="flex items-end gap-1 h-24" role="img" aria-label={title}>
+        {days.map((d, i) => {
           const v = value(d);
-          const h = v === null ? 0 : Math.max(2, Math.round(v * 100));
+          const h = v === null ? 3 : Math.max(3, Math.round(v * 100));
           return (
-            <div
+            <motion.div
               key={d.day}
-              className="flex-1 rounded-t-sm transition-all"
-              style={{ height: `${h}%`, backgroundColor: v === null ? "#e5e7eb" : color(v) }}
+              initial={{ height: 0 }}
+              animate={{ height: `${h}%` }}
+              transition={{ duration: 0.5, delay: i * 0.015, ease: "easeOut" }}
+              className={`flex-1 rounded-full ${v === null ? "bg-gray-200" : colorClass(v)}`}
               title={`${d.day}: ${v === null ? "no data" : v.toFixed(3)} (${d.answers} answers)`}
             />
           );
@@ -60,20 +80,72 @@ function StatCard({
   value,
   hint,
   tone = "neutral",
+  index,
 }: {
   label: string;
-  value: string;
+  value: number;
+  format?: (n: number) => string;
   hint?: string;
   tone?: "neutral" | "good" | "warn";
+  index: number;
 }) {
   const toneClass =
     tone === "good" ? "text-emerald-700" : tone === "warn" ? "text-amber-700" : "text-gray-900";
   return (
-    <div className="metric-card">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.05, ease: "easeOut" }}
+      className="metric-card"
+    >
       <p className="metric-card-label">{label}</p>
-      <p className={`metric-card-value ${toneClass}`}>{value}</p>
+      <p className={`metric-card-value ${toneClass}`}>
+        <CountUp value={value} />
+      </p>
       {hint && <p className="metric-card-hint">{hint}</p>}
-    </div>
+    </motion.div>
+  );
+}
+
+function PctStatCard({
+  label, value, hint, tone, index,
+}: { label: string; value: number; hint?: string; tone: "neutral" | "good" | "warn"; index: number }) {
+  const toneClass =
+    tone === "good" ? "text-emerald-700" : tone === "warn" ? "text-amber-700" : "text-gray-900";
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.05, ease: "easeOut" }}
+      className="metric-card"
+    >
+      <p className="metric-card-label">{label}</p>
+      <p className={`metric-card-value ${toneClass}`}>
+        <CountUp value={Math.round(value * 100)} format={(n) => `${Math.round(n)}%`} />
+      </p>
+      {hint && <p className="metric-card-hint">{hint}</p>}
+    </motion.div>
+  );
+}
+
+function ScoreStatCard({
+  label, value, hint, tone, index,
+}: { label: string; value: number | null; hint?: string; tone: "neutral" | "good" | "warn"; index: number }) {
+  const toneClass =
+    tone === "good" ? "text-emerald-700" : tone === "warn" ? "text-amber-700" : "text-gray-900";
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.05, ease: "easeOut" }}
+      className="metric-card"
+    >
+      <p className="metric-card-label">{label}</p>
+      <p className={`metric-card-value ${toneClass}`}>
+        {value === null ? "—" : <CountUp value={value * 1000} format={(n) => (n / 1000).toFixed(3)} />}
+      </p>
+      {hint && <p className="metric-card-hint">{hint}</p>}
+    </motion.div>
   );
 }
 
@@ -193,53 +265,56 @@ export default function AnalyticsPage() {
           <>
           {/* Summary */}
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
-            <StatCard label="Answers" value={String(totalAnswers)} hint={`last ${days} days`} />
-            <StatCard
+            <StatCard index={0} label="Answers" value={totalAnswers} hint={`last ${days} days`} />
+            <ScoreStatCard
+              index={1}
               label="Avg top score"
-              value={score(weightedScore)}
+              value={weightedScore}
               hint="retrieval strength"
               tone={weightedScore !== null && weightedScore >= 0.7 ? "good" : "warn"}
             />
-            <StatCard
+            <PctStatCard
+              index={2}
               label="No-context rate"
-              value={pct(noContext)}
+              value={noContext}
               hint="retrieval misses"
               tone={noContext > 0.2 ? "warn" : "neutral"}
             />
-            <StatCard
+            <PctStatCard
+              index={3}
               label="Refusal rate"
-              value={pct(refusal)}
+              value={refusal}
               hint="answered 'not in docs'"
               tone={refusal > 0.3 ? "warn" : "neutral"}
             />
           </div>
 
           {/* Trends */}
-          <div className="card p-5 grid gap-6 sm:grid-cols-2">
+          <div className="card card-hover p-5 grid gap-6 sm:grid-cols-2">
             <MiniBars
               days={data.daily}
               title="Avg top citation score per day (higher = better retrieval)"
               value={(d) => d.avg_top_score}
-              color={(v) => (v >= 0.7 ? "#16a34a" : v >= 0.55 ? "#d97706" : "#dc2626")}
+              colorClass={(v) => (v >= 0.7 ? "bg-gradient-to-t from-emerald-600 to-emerald-400" : v >= 0.55 ? "bg-gradient-to-t from-amber-600 to-amber-400" : "bg-gradient-to-t from-red-600 to-red-400")}
             />
             <MiniBars
               days={data.daily}
               title="No-context rate per day (higher = more retrieval misses)"
               value={(d) => d.no_context_rate}
-              color={(v) => (v > 0.2 ? "#dc2626" : v > 0.1 ? "#d97706" : "#9ca3af")}
+              colorClass={(v) => (v > 0.2 ? "bg-gradient-to-t from-red-600 to-red-400" : v > 0.1 ? "bg-gradient-to-t from-amber-600 to-amber-400" : "bg-gradient-to-t from-gray-400 to-gray-300")}
             />
           </div>
 
           {/* Provider mix */}
-          <div className="card p-5">
+          <div className="card card-hover p-5">
             <p className="text-sm font-medium text-gray-700 mb-3">
               Provider mix
               <span className="font-normal text-gray-400"> — a spike in the fallback often explains a bad day</span>
             </p>
             <div className="flex flex-wrap gap-3">
               {data.providers.map((p) => (
-                <div key={p.provider ?? "unknown"} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2">
-                  <span className="badge bg-gray-100 text-gray-700">{p.provider ?? "unknown"}</span>
+                <div key={p.provider ?? "unknown"} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 transition-colors hover:border-brand-200 hover:bg-brand-50/30">
+                  <span className="badge bg-brand-50 text-brand-700">{p.provider ?? "unknown"}</span>
                   <span className="text-sm text-gray-600">{p.answers} answers</span>
                   <span className="text-xs text-gray-400">top score {score(p.avg_top_score)}</span>
                 </div>
@@ -248,7 +323,7 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Daily table */}
-          <div className="card overflow-hidden">
+          <div className="card card-hover overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
                 <tr>
@@ -263,7 +338,7 @@ export default function AnalyticsPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {[...data.daily].reverse().map((d) => (
-                  <tr key={d.day} className="hover:bg-gray-50">
+                  <tr key={d.day} className="hover:bg-brand-50/40 transition-colors">
                     <td className="px-4 py-2.5 text-gray-700">{d.day}</td>
                     <td className="px-4 py-2.5 text-right text-gray-700">{d.answers}</td>
                     <td className="px-4 py-2.5 text-right text-gray-700">{score(d.avg_top_score)}</td>
@@ -280,7 +355,7 @@ export default function AnalyticsPage() {
           )}
 
           {/* Recent requests — one row per ask, success OR failure */}
-          <div className="card overflow-hidden">
+          <div className="card card-hover overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
               <p className="text-sm font-medium text-gray-700">Recent requests</p>
               <span className="text-xs text-gray-400">{requests.length} logged</span>
@@ -304,7 +379,7 @@ export default function AnalyticsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {requests.map((r) => (
-                      <tr key={r.id} className="hover:bg-gray-50">
+                      <tr key={r.id} className="hover:bg-brand-50/40 transition-colors">
                         <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">
                           {new Date(r.created_at).toLocaleString()}
                         </td>

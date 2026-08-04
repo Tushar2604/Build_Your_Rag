@@ -34,15 +34,18 @@
 @layer components {
   /* ── Buttons ── */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium
            leading-none transition-all duration-150 select-none
-           disabled:pointer-events-none disabled:opacity-50;
+           hover:-translate-y-px active:translate-y-0
+           disabled:pointer-events-none disabled:opacity-50 disabled:translate-y-0;
   }
   .btn-primary   { @apply btn bg-ink-900 text-white shadow-xs hover:bg-ink-800 active:bg-ink-950; }
   .btn-accent    { @apply btn bg-brand-600 text-white shadow-xs hover:bg-brand-700 active:bg-brand-800; }
+  /* CTA — warm orange, reserved for primary conversion actions only. */
+  .btn-cta       { @apply btn bg-cta-500 text-white shadow-glow-cta hover:bg-cta-600 active:bg-cta-700; }
   .btn-secondary { @apply btn border border-gray-200 bg-white text-gray-700 shadow-xs hover:bg-gray-50 hover:border-gray-300 active:bg-gray-100; }
   .btn-danger    { @apply btn bg-red-600 text-white shadow-xs hover:bg-red-700 active:bg-red-800; }
-  .btn-ghost     { @apply btn text-gray-600 hover:bg-gray-100 hover:text-gray-900; }
+  .btn-ghost     { @apply btn text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:translate-y-0; }
   .btn-sm        { @apply px-2.5 py-1.5 text-xs gap-1.5 rounded-md; }
   .btn-lg        { @apply px-5 py-2.5 text-[15px] rounded-lg; }
 
@@ -78,9 +81,20 @@
   .switch[data-on="true"] .switch-thumb { @apply translate-x-[18px]; }
 
   /* ── Surfaces ── */
-  .card       { @apply rounded-xl border border-gray-200/80 bg-white shadow-card; }
-  .card-hover { @apply transition-shadow hover:shadow-pop; }
+  .card       { @apply rounded-2xl border border-gray-200/80 bg-white shadow-card; }
+  .card-hover { @apply transition-all duration-200 hover:shadow-lift hover:-translate-y-0.5 hover:border-brand-200/60; }
   .divider    { @apply border-t border-gray-100; }
+
+  /* Gradient mesh — soft multi-tone background for marketing-ish moments
+     (login, empty states, headers). Very low saturation, near-white, slow drift. */
+  .mesh-bg {
+    @apply bg-mesh-light bg-canvas animate-mesh-drift;
+    background-size: 140% 140%, 140% 140%, 160% 160%;
+  }
+  .mesh-bg-navy {
+    @apply bg-mesh-navy bg-ink-950 animate-mesh-drift;
+    background-size: 160% 160%, 160% 160%;
+  }
 
   /* ── Badges / Pills ── */
   .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium; }
@@ -162,17 +176,32 @@
   .data-table thead { @apply border-b border-gray-100; }
   .data-table th    { @apply text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400 px-4 py-2.5; }
   .data-table td    { @apply px-4 py-3 text-gray-700 align-middle; }
-  .data-table tbody tr { @apply border-b border-gray-50 hover:bg-gray-50/70 transition-colors; }
+  .data-table tbody tr { @apply border-b border-gray-50 hover:bg-brand-50/40 transition-colors; }
   .data-table tbody tr:last-child { @apply border-b-0; }
 
   /* ── Metric card ── */
-  .metric-card       { @apply card p-5; }
+  /* Elevated stat card with a soft gradient top-border accent, lifts on hover. */
+  .metric-card {
+    @apply card card-hover relative overflow-hidden p-5;
+  }
+  .metric-card::before {
+    content: "";
+    @apply absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-brand-400 via-brand-500 to-brand-600;
+  }
   .metric-card-value { @apply text-[26px] leading-none font-semibold text-gray-900 mt-2 tabular-nums; }
   .metric-card-label { @apply text-[11px] font-semibold text-gray-400 uppercase tracking-wider; }
   .metric-card-hint  { @apply text-xs text-gray-400 mt-1.5; }
+  .metric-card-icon  {
+    @apply absolute top-4 right-4 w-8 h-8 rounded-lg bg-brand-50 text-brand-600
+           flex items-center justify-center;
+  }
 
-  /* ── Empty state ── */
+  /* ── Empty state / marketing moment ── */
   .empty-state       { @apply flex flex-col items-center justify-center py-16 text-center; }
   .empty-state-title { @apply text-[15px] font-semibold text-gray-800 mt-4; }
   .empty-state-desc  { @apply text-sm text-gray-500 mt-1.5 max-w-sm leading-relaxed; }
+
+  /* Big oversized headline for hero / marketing-style empty states. */
+  .hero-title    { @apply text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900 leading-[1.05]; }
+  .hero-subtitle { @apply text-base text-gray-500 mt-3 max-w-lg leading-relaxed; }
 }

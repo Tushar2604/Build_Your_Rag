@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
+import { Plus, MessagesSquare, Bot, Database, Sparkles, ArrowRight } from "lucide-react";
 import { listChatbots, Chatbot } from "../api/chatbots";
 import { listDocuments } from "../api/documents";
 import { getChatbotAnalytics, getChatbotRequests, RequestLog, ChatbotAnalytics } from "../api/analytics";
@@ -10,13 +12,23 @@ function StatusDot({ live }: { live: boolean }) {
   );
 }
 
-function MetricCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+function MetricCard({
+  label, value, sub, icon: Icon, index,
+}: { label: string; value: string; sub?: string; icon: typeof MessagesSquare; index: number }) {
   return (
-    <div className="metric-card">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.06, ease: "easeOut" }}
+      className="metric-card"
+    >
+      <div className="metric-card-icon">
+        <Icon className="w-4 h-4" strokeWidth={1.75} />
+      </div>
       <p className="metric-card-label">{label}</p>
-      <p className={`metric-card-value ${accent ? "text-brand-700" : ""}`}>{value}</p>
+      <p className="metric-card-value">{value}</p>
       {sub && <p className="metric-card-hint">{sub}</p>}
-    </div>
+    </motion.div>
   );
 }
 
@@ -93,7 +105,7 @@ export default function HomePage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900 tracking-tight">{greeting}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{greeting}</h1>
           <p className="text-sm text-gray-500 mt-1">
             {loading
               ? "Loading platform status…"
@@ -101,10 +113,8 @@ export default function HomePage() {
             }
           </p>
         </div>
-        <Link to="/assistants" className="btn-primary">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
+        <Link to="/assistants" className="btn-cta">
+          <Plus className="w-4 h-4" strokeWidth={2.25} />
           New assistant
         </Link>
       </div>
@@ -112,17 +122,22 @@ export default function HomePage() {
       {/* Metric cards */}
       <div className="grid grid-cols-3 gap-4 mb-8">
         <MetricCard
+          index={0}
+          icon={MessagesSquare}
           label="Queries (7 days)"
           value={loading ? "—" : totalQueries.toLocaleString()}
           sub="across all assistants"
-          accent
         />
         <MetricCard
+          index={1}
+          icon={Bot}
           label="Assistants live"
           value={loading ? "—" : `${liveCount} / ${rows.length}`}
           sub="deployed to production"
         />
         <MetricCard
+          index={2}
+          icon={Database}
           label="Knowledge sources"
           value={loading || !docStats ? "—" : `${docStats.ready} / ${docStats.total}`}
           sub={docStats && docStats.total > 0 ? "indexed / total" : "connect via Knowledge tab"}
@@ -130,11 +145,11 @@ export default function HomePage() {
       </div>
 
       {/* Assistants table */}
-      <div className="card mb-6 overflow-hidden">
+      <div className="card card-hover mb-6 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="section-title">Assistants</h2>
-          <Link to="/assistants" className="text-xs text-brand-600 hover:text-brand-700 font-medium">
-            View all →
+          <Link to="/assistants" className="text-xs text-brand-600 hover:text-brand-700 font-medium inline-flex items-center gap-1 group">
+            View all <ArrowRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
           </Link>
         </div>
         {loading ? (
@@ -146,7 +161,7 @@ export default function HomePage() {
         ) : rows.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <p className="text-sm text-gray-500">No assistants yet.</p>
-            <Link to="/assistants" className="btn-primary mt-4 inline-flex">
+            <Link to="/assistants" className="btn-cta mt-4 inline-flex">
               Create your first assistant
             </Link>
           </div>
@@ -195,11 +210,11 @@ export default function HomePage() {
 
       {/* Recent activity */}
       {recentLogs.length > 0 && (
-        <div className="card overflow-hidden">
+        <div className="card card-hover overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 className="section-title">Recent queries</h2>
-            <Link to="/analytics" className="text-xs text-brand-600 hover:text-brand-700 font-medium">
-              View analytics →
+            <Link to="/analytics" className="text-xs text-brand-600 hover:text-brand-700 font-medium inline-flex items-center gap-1 group">
+              View analytics <ArrowRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
             </Link>
           </div>
           <table className="data-table">
@@ -240,21 +255,21 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Empty home when nothing is set up */}
+      {/* Empty home when nothing is set up — treated as a mini marketing moment */}
       {!loading && rows.length === 0 && recentLogs.length === 0 && (
-        <div className="card p-12 text-center">
-          <div className="w-12 h-12 rounded-xl bg-brand-50 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-6 h-6 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-            </svg>
-          </div>
-          <h2 className="text-base font-semibold text-gray-900">Welcome to Kore AI</h2>
-          <p className="text-sm text-gray-500 mt-1 max-w-sm mx-auto">
-            Deploy production-ready AI assistants powered by your knowledge. Start by connecting a knowledge source and creating your first assistant.
-          </p>
-          <div className="flex items-center gap-3 justify-center mt-6">
-            <Link to="/knowledge" className="btn-secondary">Connect knowledge</Link>
-            <Link to="/assistants" className="btn-primary">Create assistant</Link>
+        <div className="relative overflow-hidden rounded-2xl mesh-bg border border-gray-200/80 p-12 text-center">
+          <div className="relative">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center mx-auto mb-5 shadow-lift">
+              <Sparkles className="w-7 h-7 text-white" strokeWidth={1.75} />
+            </div>
+            <h2 className="hero-title text-2xl md:text-3xl">Welcome to Kore AI</h2>
+            <p className="hero-subtitle mx-auto">
+              Deploy production-ready AI assistants powered by your knowledge. Start by connecting a knowledge source and creating your first assistant.
+            </p>
+            <div className="flex items-center gap-3 justify-center mt-6">
+              <Link to="/knowledge" className="btn-secondary">Connect knowledge</Link>
+              <Link to="/assistants" className="btn-cta">Create assistant</Link>
+            </div>
           </div>
         </div>
       )}

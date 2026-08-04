@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { motion } from "framer-motion";
+import { Upload, UploadCloud, AlertTriangle, X, Trash2, Database } from "lucide-react";
 import {
   listDocuments, createUpload, uploadFile, completeUpload,
   retryDocument, deleteDocument, getDocument, Document,
@@ -155,10 +157,8 @@ export default function KnowledgePage() {
             {loading ? "Loading…" : `${docs.length} source${docs.length !== 1 ? "s" : ""} · ${readyCount} indexed · ${totalChunks.toLocaleString()} chunks`}
           </p>
         </div>
-        <label className={`btn-primary cursor-pointer ${uploading ? "opacity-60 pointer-events-none" : ""}`}>
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-          </svg>
+        <label className={`btn-cta cursor-pointer ${uploading ? "opacity-60 pointer-events-none" : ""}`}>
+          <Upload className="w-4 h-4" strokeWidth={2.25} />
           {uploading ? "Uploading…" : "Upload files"}
         </label>
         <input
@@ -174,14 +174,10 @@ export default function KnowledgePage() {
       {/* Error banner */}
       {uploadError && (
         <div role="alert" aria-live="polite" className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
-          <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-          </svg>
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" strokeWidth={2} />
           <span className="flex-1">{uploadError}</span>
           <button onClick={() => setUploadError(null)} className="text-red-500 hover:text-red-700 ml-auto">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X className="w-4 h-4" strokeWidth={2} />
           </button>
         </div>
       )}
@@ -191,18 +187,29 @@ export default function KnowledgePage() {
         onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
         onDragLeave={() => setDragActive(false)}
         onDrop={(e) => { e.preventDefault(); setDragActive(false); handleFiles(e.dataTransfer.files); }}
-        className={`mb-6 rounded-xl border-2 border-dashed px-8 py-10 text-center transition-colors ${
-          dragActive ? "border-brand-400 bg-brand-50" : "border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50"
+        className={`mb-6 rounded-2xl border-2 border-dashed px-8 py-12 text-center transition-all duration-200 ${
+          dragActive
+            ? "border-brand-400 bg-brand-50 scale-[1.01] shadow-lift"
+            : "border-gray-200 bg-white hover:border-brand-300 hover:bg-brand-50/30"
         }`}
         aria-label="Drop files here to upload"
       >
-        <svg className="mx-auto w-10 h-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.338-2.32 5.75 5.75 0 011.044 11.095" />
-        </svg>
-        <p className="text-sm text-gray-600 font-medium">Drop files here to upload</p>
+        <motion.div
+          animate={dragActive ? { y: -4, scale: 1.08 } : { y: 0, scale: 1 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+          className="inline-flex"
+        >
+          <UploadCloud
+            className={`mx-auto w-10 h-10 mb-3 transition-colors ${dragActive ? "text-brand-500" : "text-gray-300"}`}
+            strokeWidth={1.25}
+          />
+        </motion.div>
+        <p className="text-sm text-gray-600 font-medium">
+          {dragActive ? "Drop to upload" : "Drop files here to upload"}
+        </p>
         <p className="text-xs text-gray-400 mt-1">
           PDF, DOCX, TXT, MD, HTML · Max 100 MB per file ·{" "}
-          <label className="text-brand-600 hover:text-brand-700 cursor-pointer font-medium">
+          <label className="link cursor-pointer">
             browse
             <input type="file" multiple accept=".pdf,.docx,.txt,.md,.html" className="sr-only"
               onChange={(e) => handleFiles(e.target.files)} />
@@ -246,19 +253,17 @@ export default function KnowledgePage() {
           </table>
         </div>
       ) : docs.length === 0 ? (
-        <div className="card">
-          <div className="empty-state">
-            <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center">
-              <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 2.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125m16.5 5.625c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
-              </svg>
+        <div className="relative overflow-hidden rounded-2xl mesh-bg border border-gray-200/80">
+          <div className="empty-state relative">
+            <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center">
+              <Database className="w-6 h-6 text-gray-400" strokeWidth={1.5} />
             </div>
             <p className="empty-state-title">No knowledge sources</p>
             <p className="empty-state-desc">Upload documents to build your knowledge base. Assistants will answer only from these sources.</p>
           </div>
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="card card-hover overflow-hidden">
           <table className="data-table">
             <thead>
               <tr>
@@ -269,8 +274,13 @@ export default function KnowledgePage() {
               </tr>
             </thead>
             <tbody>
-              {docs.map((doc) => (
-                <tr key={doc.id}>
+              {docs.map((doc, i) => (
+                <motion.tr
+                  key={doc.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2, delay: i * 0.03, ease: "easeOut" }}
+                >
                   <td>
                     <div className="flex items-center gap-3">
                       <FileIcon filename={doc.filename} />
@@ -298,13 +308,11 @@ export default function KnowledgePage() {
                         aria-label={`Delete ${doc.filename}`}
                         className="p-1.5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 transition-colors"
                       >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                        </svg>
+                        <Trash2 className="w-4 h-4" strokeWidth={2} />
                       </button>
                     </div>
                   </td>
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>
