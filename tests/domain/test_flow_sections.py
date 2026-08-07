@@ -10,6 +10,7 @@ from src.domain.chatbot.entities import (
     compose_system_prompt,
     default_flow_sections,
 )
+from src.domain.safety.guardrails import scan_output
 from src.domain.shared.identifiers import TenantId, new_id
 
 
@@ -20,6 +21,30 @@ def _bot() -> Chatbot:
 def test_default_prompt_is_derived_from_default_sections() -> None:
     # The whole point of the refactor: the two can't drift apart.
     assert compose_system_prompt(default_flow_sections()) == DEFAULT_SYSTEM_PROMPT
+
+
+def test_leak_guardrail_still_matches_the_default_prompt_opener() -> None:
+    """The output guardrail hardcodes the prompt's opening sentence to catch a
+    verbatim leak. Rewording the Identity section without updating the regex
+    would silently disable that check, so the two are pinned together here."""
+    verdict = scan_output(DEFAULT_SYSTEM_PROMPT)
+    assert not verdict.allowed
+    assert "system_prompt_leak" in verdict.categories
+
+
+def test_style_section_forbids_markdown_and_images() -> None:
+    # The reported symptom was the assistant emitting formatted/image-y output
+    # instead of talking. These instructions are what prevent it.
+    style = next(s for s in default_flow_sections() if s.title == "Conversation Style")
+    body = style.body.lower()
+    for rule in ("plain text only", "markdown", "image", "bullet", "numbered list"):
+        assert rule in body, f"the style section no longer forbids {rule!r}"
+
+
+def test_style_section_states_a_hard_length_limit() -> None:
+    style = next(s for s in default_flow_sections() if s.title == "Conversation Style")
+    assert "hard length limit" in style.body.lower()
+    assert "1-2 short sentences" in style.body
 
 
 def test_default_sections_have_unique_ids_per_call() -> None:

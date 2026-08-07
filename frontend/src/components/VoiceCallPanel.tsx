@@ -47,9 +47,18 @@ const CHECK_IN_LINES = [
   "Hello? Let me know when you'd like to continue.",
 ];
 
-// After this many consecutive silent listening turns, stop nudging and end
-// the call gracefully instead of looping forever.
+// After this many check-ins, stop nudging and end the call gracefully instead
+// of looping forever.
 const MAX_CHECK_INS = 2;
+
+// How long the candidate must actually be silent before we check in.
+//
+// Speech recognition ends a turn after ~5s of quiet (SILENCE_TIMEOUT_MS in
+// useVoice), which is a "you stopped speaking" signal, NOT a "you've gone away"
+// signal. Nudging on the first such turn interrupted people who were simply
+// thinking. Silent turns are now accumulated until this much real time has
+// passed, so the mic keeps re-arming quietly in between.
+const SILENCE_BEFORE_CHECK_IN_MS = 45000;
 
 export default function VoiceCallPanel({
   adapter,
@@ -70,6 +79,10 @@ export default function VoiceCallPanel({
   const stateRef = useRef<CallState>("idle");
   stateRef.current = state;
   const silenceStreakRef = useRef(0);
+  // When the current uninterrupted silent stretch began. Reset on any real
+  // activity, so "45 seconds" means 45 seconds since the candidate last did
+  // something — not 45 seconds since the call started.
+  const silenceSinceRef = useRef(Date.now());
 
   const { sttSupported, ttsSupported, startListening, stopListening, speak } = useVoice(
     (transcript) => handleTranscript(transcript),
@@ -99,22 +112,25 @@ export default function VoiceCallPanel({
     setCaptions((c) => c.map((m) => (m.id === id ? { ...m, text: m.text + token } : m)));
   }
 
-  function afterReply(fullText: string) {
-    if (ttsSupported) {
-      setState("speaking");
-      speak(fullText, () => {
-        if (sttSupported) {
-          setState("listening");
-          startListening();
-        } else {
-          setState("idle");
-        }
-      });
-    } else if (sttSupported) {
+  /** Begin (or resume) waiting on the candidate, starting a fresh silence
+   * window. Speaking a long reply must not eat into their thinking time, so the
+   * clock starts here rather than when the reply was requested. */
+  function resumeListening() {
+    silenceSinceRef.current = Date.now();
+    if (sttSupported) {
       setState("listening");
       startListening();
     } else {
       setState("idle");
+    }
+  }
+
+  function afterReply(fullText: string) {
+    if (ttsSupported) {
+      setState("speaking");
+      speak(fullText, resumeListening);
+    } else {
+      resumeListening();
     }
   }
 
@@ -136,19 +152,23 @@ export default function VoiceCallPanel({
     // Only relevant while we were actively waiting on the user — ignore
     // stray onend firings from a mic that was stopped for another reason.
     if (stateRef.current !== "listening") return;
+
+    // The candidate hasn't been quiet long enough to be treated as gone. Re-arm
+    // the mic without saying anything — this is someone thinking, not someone
+    // who left.
+    if (Date.now() - silenceSinceRef.current < SILENCE_BEFORE_CHECK_IN_MS) {
+      if (sttSupported) startListening();
+      return;
+    }
+
     silenceStreakRef.current += 1;
     if (silenceStreakRef.current < MAX_CHECK_INS) {
       const line = CHECK_IN_LINES[Math.floor(Math.random() * CHECK_IN_LINES.length)];
       addCaption("assistant", line);
       setState("speaking");
-      speak(line, () => {
-        if (sttSupported) {
-          setState("listening");
-          startListening();
-        } else {
-          setState("idle");
-        }
-      });
+      // resumeListening restarts the clock, so the second check-in is another
+      // full wait away rather than firing on the very next silent turn.
+      speak(line, resumeListening);
     } else {
       const closing = "It looks like we've lost you — feel free to start the call again whenever you're ready.";
       addCaption("system", closing);
@@ -159,6 +179,7 @@ export default function VoiceCallPanel({
   function handleTranscript(text: string) {
     if (!sessionRef.current || stateRef.current === "thinking") return;
     silenceStreakRef.current = 0;
+    silenceSinceRef.current = Date.now();
     addCaption("user", text);
     setState("thinking");
     let full = "";
@@ -189,6 +210,7 @@ export default function VoiceCallPanel({
     setEnded(false);
     setCaptions([]);
     silenceStreakRef.current = 0;
+    silenceSinceRef.current = Date.now();
     try {
       const sid = await adapter.createSession();
       sessionRef.current = sid;
@@ -218,6 +240,7 @@ export default function VoiceCallPanel({
     window.speechSynthesis?.cancel();
     sessionRef.current = null;
     silenceStreakRef.current = 0;
+    silenceSinceRef.current = Date.now();
     setState("idle");
   }
 
@@ -227,10 +250,7 @@ export default function VoiceCallPanel({
     } else if (state === "speaking") {
       // barge-in: cut the reply short and start listening immediately
       window.speechSynthesis?.cancel();
-      if (sttSupported) {
-        setState("listening");
-        startListening();
-      }
+      resumeListening();
     }
   }
 

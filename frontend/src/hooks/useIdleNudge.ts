@@ -5,9 +5,10 @@
 
 import { useEffect, useRef } from "react";
 
-// Typing takes longer than speaking, so this is much more generous than the
-// voice check-in delay — confirmed with the user as the preferred value.
-const DEFAULT_DELAY_MS = 22000;
+// A candidate reads the question, thinks, and types an answer — 22s was firing
+// while people were still mid-reply and read as impatient. 45s is the value the
+// user asked for after watching real conversations.
+const DEFAULT_DELAY_MS = 45000;
 const DEFAULT_MAX_NUDGES = 2;
 
 export function useIdleNudge(

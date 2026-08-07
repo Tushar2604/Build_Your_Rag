@@ -26,10 +26,12 @@ NEW_TABLES = {
 }
 
 
-# Rendered from 0011 rather than <base>: migration 0004 backfills publishable
-# keys with a real SELECT, which can't run offline. Scoping to the revisions
-# under test keeps this a static check with no database.
+# Rendered as an explicit range rather than <base>:head, because data
+# migrations issue real SELECTs and can't run offline — 0004 (publishable-key
+# backfill) below, 0014 (prompt backfill) above. 0012 and 0013 are the two
+# revisions that carry the DDL this file checks.
 FIRST_NEW_REVISION = "0011_team_and_custom_questions"
+LAST_DDL_REVISION = "0013_broadcasts"
 
 
 @pytest.fixture(scope="module")
@@ -40,7 +42,7 @@ def migration_sql() -> str:
     config.attributes["configure_logger"] = False
     # `output_buffer` (not `stdout`) is what offline mode writes DDL to.
     config.output_buffer = buffer
-    command.upgrade(config, f"{FIRST_NEW_REVISION}:head", sql=True)
+    command.upgrade(config, f"{FIRST_NEW_REVISION}:{LAST_DDL_REVISION}", sql=True)
     sql = buffer.getvalue()
     assert sql.strip(), "offline migration render produced no SQL"
     return sql
