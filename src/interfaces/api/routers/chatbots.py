@@ -8,16 +8,18 @@ from fastapi import APIRouter, HTTPException
 
 from src.config.settings import get_settings
 from src.domain.chatbot.entities import (
-    DEFAULT_SYSTEM_PROMPT,
     Chatbot,
+    FlowSection,
     RetrievalConfig,
     WidgetConfig,
+    default_flow_sections,
 )
-from src.domain.shared.identifiers import ChatbotId, DocumentId
+from src.domain.shared.identifiers import ChatbotId, DocumentId, new_id
 from src.interfaces.api.deps import ContainerDep, PrincipalDep
 from src.interfaces.api.schemas import (
     ChatbotResponse,
     CreateChatbotRequest,
+    FlowSectionSchema,
     UpdateChatbotRequest,
     WidgetConfigSchema,
 )
@@ -40,6 +42,10 @@ def _to_response(bot: Chatbot) -> ChatbotResponse:
         name=bot.name,
         channel=bot.channel,
         system_prompt=bot.system_prompt,
+        flow_sections=[
+            FlowSectionSchema(id=s.id, title=s.title, body=s.body, enabled=s.enabled)
+            for s in bot.flow_sections
+        ],
         top_k=bot.retrieval.top_k,
         is_public=bot.is_public,
         public_key=bot.public_key,
@@ -63,12 +69,15 @@ async def create_chatbot(
         tenant_id=principal.tenant_id,
         name=body.name,
         channel=body.channel,
-        system_prompt=body.system_prompt or DEFAULT_SYSTEM_PROMPT,
         retrieval=RetrievalConfig(top_k=body.top_k),
         allowed_document_ids=[DocumentId(d) for d in body.allowed_document_ids],
         is_public=body.is_public,
         widget=WidgetConfig(display_name=body.name),
     )
+    # A caller-supplied prompt is taken as the raw form (it has no sections to
+    # show); otherwise the bot starts on the stock, editable flow.
+    if body.system_prompt:
+        bot.set_raw_prompt(body.system_prompt)
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         await uow.chatbots.add(bot)
@@ -105,8 +114,14 @@ async def update_chatbot(
     principal: PrincipalDep,
     container: ContainerDep,
 ) -> ChatbotResponse:
-    """Edit name, prompt, retrieval, publish state, embed allowlist, and widget
-    appearance. Only fields present in the body are changed."""
+    """Edit name, prompt/flow, retrieval, publish state, embed allowlist, and
+    widget appearance. Only fields present in the body are changed."""
+    if body.system_prompt is not None and body.flow_sections is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Send either system_prompt or flow_sections, not both — they are "
+            "two views of the same prompt.",
+        )
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         bot = await uow.chatbots.get(principal.tenant_id, ChatbotId(chatbot_id))
@@ -118,7 +133,16 @@ async def update_chatbot(
         if body.channel is not None:
             bot.channel = body.channel
         if body.system_prompt is not None:
-            bot.system_prompt = body.system_prompt
+            bot.set_raw_prompt(body.system_prompt)
+        if body.flow_sections is not None:
+            bot.apply_flow_sections(
+                [
+                    FlowSection(
+                        id=s.id or new_id(), title=s.title, body=s.body, enabled=s.enabled
+                    )
+                    for s in body.flow_sections
+                ]
+            )
         if body.top_k is not None:
             bot.retrieval.top_k = body.top_k
         if body.is_public is not None:
@@ -133,6 +157,28 @@ async def update_chatbot(
                 launcher_position=body.widget.launcher_position,
             ).normalized()
 
+        await uow.chatbots.update(bot)
+        await uow.commit()
+    return _to_response(bot)
+
+
+@router.post("/{chatbot_id}/flow/reset", response_model=ChatbotResponse)
+async def reset_flow(
+    chatbot_id: uuid.UUID, principal: PrincipalDep, container: ContainerDep
+) -> ChatbotResponse:
+    """Replace the prompt with the stock section set.
+
+    Two uses: recovering a flow that was edited into a corner, and giving a bot
+    authored as a raw prompt something to edit in the flow builder — which is
+    why this discards the current prompt rather than trying to parse it back
+    into sections (a parse would guess at boundaries and usually guess wrong).
+    """
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        bot = await uow.chatbots.get(principal.tenant_id, ChatbotId(chatbot_id))
+        if bot is None:
+            raise HTTPException(status_code=404, detail="Chatbot not found")
+        bot.apply_flow_sections(default_flow_sections())
         await uow.chatbots.update(bot)
         await uow.commit()
     return _to_response(bot)

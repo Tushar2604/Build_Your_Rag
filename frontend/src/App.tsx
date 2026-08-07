@@ -16,6 +16,8 @@ import InterviewsPage     from "./pages/InterviewsPage";
 import BulkInterviewPage  from "./pages/BulkInterviewPage";
 import InterviewDetailPage from "./pages/InterviewDetailPage";
 import ChannelsPage       from "./pages/ChannelsPage";
+import BroadcastsPage     from "./pages/BroadcastsPage";
+import BroadcastDetailPage from "./pages/BroadcastDetailPage";
 import AnalyticsPage      from "./pages/AnalyticsPage";
 import SettingsPage       from "./pages/SettingsPage";
 import HiringAgentPage    from "./pages/HiringAgentPage";
@@ -58,6 +60,8 @@ export default function App() {
                 <Route path="/interviews/bulk" element={<BulkInterviewPage />} />
                 <Route path="/interviews/:id" element={<InterviewDetailPage />} />
                 <Route path="/channels"  element={<ChannelsPage />}      />
+                <Route path="/broadcasts"     element={<BroadcastsPage />}      />
+                <Route path="/broadcasts/:id" element={<BroadcastDetailPage />} />
                 <Route path="/hiring-agent" element={<HiringAgentPage />}  />
                 <Route path="/team"       element={<TeamPage />}           />
                 <Route path="/settings"   element={<SettingsPage />}       />

@@ -2,11 +2,16 @@ import {
   useState, useEffect, useRef, useCallback, KeyboardEvent,
 } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { getChatbot, updateChatbot, rotateChatbotKey, Chatbot, Channel } from "../api/chatbots";
+import {
+  getChatbot, updateChatbot, rotateChatbotKey, resetChatbotFlow,
+  Chatbot, Channel, FlowSection,
+} from "../api/chatbots";
 import { createSession, askStream, greetStream } from "../api/chat";
 import { getChatbotAnalytics, getChatbotRequests, ChatbotAnalytics, RequestLog } from "../api/analytics";
 import { CitationPayload, ApiError } from "../api/client";
 import VoiceCallPanel from "../components/VoiceCallPanel";
+import FlowSectionsEditor from "../components/FlowSectionsEditor";
+import PostCallSettings from "../components/PostCallSettings";
 import { useIdleNudge } from "../hooks/useIdleNudge";
 
 const NUDGE_LINES = [
@@ -16,7 +21,7 @@ const NUDGE_LINES = [
 ];
 
 /* ── shared types ── */
-type Tab = "overview" | "config" | "playground" | "deployments" | "analytics";
+type Tab = "overview" | "config" | "playground" | "post-call" | "deployments" | "analytics";
 
 /* ── helpers ── */
 function CopyButton({ value, label }: { value: string; label?: string }) {
@@ -169,6 +174,8 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
   const [name,          setName]          = useState(bot.name);
   const [channel,       setChannel]       = useState<Channel>(bot.channel);
   const [systemPrompt,  setSystemPrompt]  = useState(bot.system_prompt);
+  const [sections,      setSections]      = useState<FlowSection[]>(bot.flow_sections);
+  const [flowBusy,      setFlowBusy]      = useState(false);
   const [topK,          setTopK]          = useState(bot.top_k);
   const [isPublic,      setIsPublic]      = useState(bot.is_public);
   const [originsText,   setOriginsText]   = useState(bot.allowed_origins.join("\n"));
@@ -183,16 +190,39 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
 
   function mark() { setDirty(true); setSaved(false); }
 
+  /** Adopt the stock flow (server-side), then mirror the result locally. */
+  async function useSections() {
+    setFlowBusy(true); setError(null);
+    try {
+      const updated = await resetChatbotFlow(bot.id);
+      onUpdate(updated);
+      setSections(updated.flow_sections);
+      setSystemPrompt(updated.system_prompt);
+      setDirty(false);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to load the stock flow.");
+    } finally { setFlowBusy(false); }
+  }
+
   async function save() {
     setSaving(true); setError(null); setSaved(false);
     try {
       const origins = originsText.split("\n").map((o) => o.trim()).filter(Boolean);
       const updated = await updateChatbot(bot.id, {
-        name, channel, system_prompt: systemPrompt, top_k: topK, is_public: isPublic,
+        name, channel, top_k: topK, is_public: isPublic,
+        // The API rejects both prompt forms together, so send whichever one
+        // this assistant is actually authored in.
+        ...(sections.length > 0
+          ? { flow_sections: sections }
+          : { system_prompt: systemPrompt }),
         allowed_origins: origins,
         widget: { display_name: displayName, theme_color: themeColor, welcome_message: welcome, launcher_position: position },
       });
       onUpdate(updated);
+      // The server recomposes and may substitute the stock flow, so take its
+      // answer rather than trusting the local draft.
+      setSections(updated.flow_sections);
+      setSystemPrompt(updated.system_prompt);
       setSaved(true); setDirty(false);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -209,18 +239,24 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
             <label className="label">Name</label>
             <input className="input" value={name} onChange={(e) => { setName(e.target.value); mark(); }} maxLength={120} />
           </div>
-          <div>
-            <label className="label">System instructions</label>
-            <textarea
-              className="input resize-none text-xs leading-relaxed"
-              rows={6}
-              value={systemPrompt}
-              onChange={(e) => { setSystemPrompt(e.target.value); mark(); }}
-              maxLength={4000}
-            />
-            <p className="text-xs text-gray-400 text-right mt-1">{systemPrompt.length}/4000</p>
-          </div>
         </div>
+      </SectionCard>
+
+      {/* Conversational Flow */}
+      <SectionCard title="Conversational Flow">
+        <p className="text-xs text-gray-500 mb-4">
+          The assistant's instructions, as ordered sections. Reorder them, switch
+          one off to test a behaviour, or add a branch for a specific role — no
+          redeploy needed.
+        </p>
+        <FlowSectionsEditor
+          sections={sections}
+          onChange={(next) => { setSections(next); mark(); }}
+          rawPrompt={systemPrompt}
+          onRawPromptChange={(p) => { setSystemPrompt(p); mark(); }}
+          onUseSections={useSections}
+          busy={flowBusy}
+        />
       </SectionCard>
 
       {/* Channel */}
@@ -1132,6 +1168,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "overview",    label: "Overview"      },
   { id: "config",      label: "Configuration" },
   { id: "playground",  label: "Playground"    },
+  { id: "post-call",   label: "Post-Call"     },
   { id: "deployments", label: "Deployments"   },
   { id: "analytics",   label: "Analytics"     },
 ];
@@ -1218,6 +1255,7 @@ export default function AssistantDetailPage() {
       {activeTab === "overview"    && <OverviewTab    bot={bot} />}
       {activeTab === "config"      && <ConfigTab      bot={bot} onUpdate={setBot} />}
       {activeTab === "playground"  && <PlaygroundTab  bot={bot} />}
+      {activeTab === "post-call"   && <PostCallSettings chatbotId={bot.id} />}
       {activeTab === "deployments" && <DeploymentsTab bot={bot} onUpdate={setBot} />}
       {activeTab === "analytics"   && <AnalyticsTab   bot={bot} />}
     </div>

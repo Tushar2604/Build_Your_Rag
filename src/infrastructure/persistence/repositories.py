@@ -23,11 +23,13 @@ from src.application.ports.repositories import (
     WhatsAppChannel,
     WhatsAppConversation,
 )
+from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Message
 from src.domain.chatbot.entities import Chatbot
 from src.domain.document.entities import Chunk, Document, IngestionStatus
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
+from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
 from src.domain.shared.identifiers import (
     BatchCandidateId,
     ChatbotId,
@@ -417,6 +419,7 @@ class ChatbotRepositoryImpl:
         row.name = chatbot.name
         row.channel = chatbot.channel
         row.system_prompt = chatbot.system_prompt
+        row.flow_sections = map_.flow_sections_to_jsonb(chatbot.flow_sections)
         row.retrieval = map_.chatbot_retrieval_to_jsonb(chatbot.retrieval)
         row.allowed_document_ids = [str(d) for d in chatbot.allowed_document_ids]
         row.is_public = chatbot.is_public
@@ -440,6 +443,7 @@ def _chatbot_to_row(chatbot: Chatbot) -> m.ChatbotModel:
         name=chatbot.name,
         channel=chatbot.channel,
         system_prompt=chatbot.system_prompt,
+        flow_sections=map_.flow_sections_to_jsonb(chatbot.flow_sections),
         retrieval=map_.chatbot_retrieval_to_jsonb(chatbot.retrieval),
         allowed_document_ids=[str(d) for d in chatbot.allowed_document_ids],
         is_public=chatbot.is_public,
@@ -1059,3 +1063,407 @@ class WhatsAppConversationRepositoryImpl:
                 updated_at=conversation.updated_at,
             )
         )
+
+
+class PostCallConfigRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, config: PostCallConfig) -> None:
+        self._s.add(_post_call_config_to_row(config))
+
+    async def get(self, tenant_id: TenantId, config_id: uuid.UUID) -> PostCallConfig | None:
+        row = (
+            await self._s.execute(
+                select(m.PostCallConfigModel).where(
+                    m.PostCallConfigModel.id == config_id,
+                    m.PostCallConfigModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.post_call_config_to_domain(row) if row else None
+
+    async def list_for_chatbot(
+        self, tenant_id: TenantId, chatbot_id: ChatbotId
+    ) -> list[PostCallConfig]:
+        rows = (
+            await self._s.execute(
+                select(m.PostCallConfigModel)
+                .where(
+                    m.PostCallConfigModel.tenant_id == tenant_id,
+                    m.PostCallConfigModel.chatbot_id == chatbot_id,
+                )
+                .order_by(m.PostCallConfigModel.created_at)
+            )
+        ).scalars()
+        return [map_.post_call_config_to_domain(r) for r in rows]
+
+    async def update(self, config: PostCallConfig) -> None:
+        row = await self._s.get(m.PostCallConfigModel, config.id)
+        if row is None:
+            return
+        row.delivery_method = config.delivery_method
+        row.webhook_url = config.webhook_url
+        row.email_to = config.email_to
+        row.trigger_statuses = list(config.trigger_statuses)
+        row.include_summary = config.include_summary
+        row.include_transcript = config.include_transcript
+        row.include_sentiment = config.include_sentiment
+        row.include_extracted = config.include_extracted
+        row.enabled = config.enabled
+
+    async def delete(self, tenant_id: TenantId, config_id: uuid.UUID) -> None:
+        row = (
+            await self._s.execute(
+                select(m.PostCallConfigModel).where(
+                    m.PostCallConfigModel.id == config_id,
+                    m.PostCallConfigModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is not None:
+            await self._s.delete(row)
+
+
+def _post_call_config_to_row(c: PostCallConfig) -> m.PostCallConfigModel:
+    return m.PostCallConfigModel(
+        id=c.id,
+        tenant_id=c.tenant_id,
+        chatbot_id=c.chatbot_id,
+        delivery_method=c.delivery_method,
+        webhook_url=c.webhook_url,
+        email_to=c.email_to,
+        trigger_statuses=list(c.trigger_statuses),
+        include_summary=c.include_summary,
+        include_transcript=c.include_transcript,
+        include_sentiment=c.include_sentiment,
+        include_extracted=c.include_extracted,
+        enabled=c.enabled,
+        created_at=c.created_at,
+    )
+
+
+class PostCallDeliveryRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def claim(self, delivery: PostCallDelivery) -> bool:
+        """Insert the delivery row, returning False when this (config, session)
+        pair was already dispatched.
+
+        This is the idempotency gate, enforced by the unique constraint rather
+        than a read-then-write check — two concurrent "session ended" calls
+        would both pass a read check and double-post to the customer's ATS.
+        """
+        stmt = (
+            pg_insert(m.PostCallDeliveryModel)
+            .values(
+                id=delivery.id,
+                tenant_id=delivery.tenant_id,
+                chatbot_id=delivery.chatbot_id,
+                config_id=delivery.config_id,
+                session_id=delivery.session_id,
+                call_status=delivery.call_status,
+                delivery_method=delivery.delivery_method,
+                destination=delivery.destination,
+                status=delivery.status,
+                error=delivery.error,
+                payload=delivery.payload,
+                created_at=delivery.created_at,
+            )
+            .on_conflict_do_nothing(constraint="uq_post_call_delivery_config_session")
+            .returning(m.PostCallDeliveryModel.id)
+        )
+        return (await self._s.execute(stmt)).scalar_one_or_none() is not None
+
+    async def finish(self, delivery: PostCallDelivery) -> None:
+        row = await self._s.get(m.PostCallDeliveryModel, delivery.id)
+        if row is None:
+            return
+        row.status = delivery.status
+        row.error = delivery.error
+        row.payload = delivery.payload
+
+    async def list_for_chatbot(
+        self, tenant_id: TenantId, chatbot_id: ChatbotId, limit: int = 50
+    ) -> list[PostCallDelivery]:
+        rows = (
+            await self._s.execute(
+                select(m.PostCallDeliveryModel)
+                .where(
+                    m.PostCallDeliveryModel.tenant_id == tenant_id,
+                    m.PostCallDeliveryModel.chatbot_id == chatbot_id,
+                )
+                .order_by(m.PostCallDeliveryModel.created_at.desc())
+                .limit(limit)
+            )
+        ).scalars()
+        return [map_.post_call_delivery_to_domain(r) for r in rows]
+
+
+class BroadcastRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, broadcast: Broadcast) -> None:
+        self._s.add(
+            m.BroadcastModel(
+                id=broadcast.id,
+                tenant_id=broadcast.tenant_id,
+                chatbot_id=broadcast.chatbot_id,
+                whatsapp_channel_id=broadcast.whatsapp_channel_id,
+                name=broadcast.name,
+                message_template=broadcast.message_template,
+                status=broadcast.status,
+                total_count=broadcast.total_count,
+                sent_count=broadcast.sent_count,
+                delivered_count=broadcast.delivered_count,
+                read_count=broadcast.read_count,
+                replied_count=broadcast.replied_count,
+                failed_count=broadcast.failed_count,
+                created_at=broadcast.created_at,
+                updated_at=broadcast.updated_at,
+            )
+        )
+
+    async def get(self, tenant_id: TenantId, broadcast_id: uuid.UUID) -> Broadcast | None:
+        row = (
+            await self._s.execute(
+                select(m.BroadcastModel).where(
+                    m.BroadcastModel.id == broadcast_id,
+                    m.BroadcastModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.broadcast_to_domain(row) if row else None
+
+    async def get_unscoped(self, broadcast_id: uuid.UUID) -> Broadcast | None:
+        """Resolve without a tenant filter — used only by the Twilio status
+        callback, which carries no tenant context (mirrors
+        WhatsAppChannelRepository.get_by_phone_number)."""
+        row = await self._s.get(m.BroadcastModel, broadcast_id)
+        return map_.broadcast_to_domain(row) if row else None
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[Broadcast]:
+        rows = (
+            await self._s.execute(
+                select(m.BroadcastModel)
+                .where(m.BroadcastModel.tenant_id == tenant_id)
+                .order_by(m.BroadcastModel.created_at.desc())
+            )
+        ).scalars()
+        return [map_.broadcast_to_domain(r) for r in rows]
+
+    async def list_active(self) -> list[Broadcast]:
+        """Campaigns the send sweep should work on. Deliberately not
+        tenant-scoped: the sweep runs as a background job across all tenants."""
+        rows = (
+            await self._s.execute(
+                select(m.BroadcastModel).where(m.BroadcastModel.status == "sending")
+            )
+        ).scalars()
+        return [map_.broadcast_to_domain(r) for r in rows]
+
+    async def update(self, broadcast: Broadcast) -> None:
+        row = await self._s.get(m.BroadcastModel, broadcast.id)
+        if row is None:
+            return
+        row.name = broadcast.name
+        row.message_template = broadcast.message_template
+        row.status = broadcast.status
+        row.total_count = broadcast.total_count
+        row.sent_count = broadcast.sent_count
+        row.delivered_count = broadcast.delivered_count
+        row.read_count = broadcast.read_count
+        row.replied_count = broadcast.replied_count
+        row.failed_count = broadcast.failed_count
+        row.updated_at = broadcast.updated_at
+
+    async def delete(self, tenant_id: TenantId, broadcast_id: uuid.UUID) -> None:
+        row = (
+            await self._s.execute(
+                select(m.BroadcastModel).where(
+                    m.BroadcastModel.id == broadcast_id,
+                    m.BroadcastModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is not None:
+            await self._s.delete(row)
+
+
+class BroadcastRecipientRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add_many(self, recipients: list[BroadcastRecipient]) -> int:
+        """Bulk-insert, skipping numbers already on this campaign. Returns how
+        many rows were created so the UI can report the duplicate count."""
+        if not recipients:
+            return 0
+        stmt = (
+            pg_insert(m.BroadcastRecipientModel)
+            .values(
+                [
+                    {
+                        "id": r.id,
+                        "broadcast_id": r.broadcast_id,
+                        "tenant_id": r.tenant_id,
+                        "phone_number": r.phone_number,
+                        "display_name": r.display_name,
+                        "status": r.status,
+                        "error": r.error,
+                        "provider_message_id": r.provider_message_id,
+                        "session_id": r.session_id,
+                        "attempts": r.attempts,
+                        "created_at": r.created_at,
+                        "updated_at": r.updated_at,
+                    }
+                    for r in recipients
+                ]
+            )
+            .on_conflict_do_nothing(constraint="uq_broadcast_recipient_phone")
+            .returning(m.BroadcastRecipientModel.id)
+        )
+        return len((await self._s.execute(stmt)).scalars().all())
+
+    async def get(
+        self, tenant_id: TenantId, recipient_id: uuid.UUID
+    ) -> BroadcastRecipient | None:
+        row = (
+            await self._s.execute(
+                select(m.BroadcastRecipientModel).where(
+                    m.BroadcastRecipientModel.id == recipient_id,
+                    m.BroadcastRecipientModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.broadcast_recipient_to_domain(row) if row else None
+
+    async def get_by_provider_message_id(
+        self, provider_message_id: str
+    ) -> BroadcastRecipient | None:
+        """Twilio status callbacks identify the recipient only by message SID
+        and carry no tenant context — so this lookup is deliberately unscoped."""
+        if not provider_message_id:
+            return None
+        row = (
+            await self._s.execute(
+                select(m.BroadcastRecipientModel).where(
+                    m.BroadcastRecipientModel.provider_message_id == provider_message_id
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.broadcast_recipient_to_domain(row) if row else None
+
+    async def get_by_session(self, session_id: SessionId) -> BroadcastRecipient | None:
+        """Used by the inbound webhook to flip a recipient to `replied` — the
+        webhook knows the session it appended to, not the campaign."""
+        row = (
+            (
+                await self._s.execute(
+                    select(m.BroadcastRecipientModel).where(
+                        m.BroadcastRecipientModel.session_id == session_id
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        return map_.broadcast_recipient_to_domain(row) if row else None
+
+    async def list_for_broadcast(
+        self,
+        broadcast_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[BroadcastRecipient]:
+        stmt = select(m.BroadcastRecipientModel).where(
+            m.BroadcastRecipientModel.broadcast_id == broadcast_id
+        )
+        stmt = _recipient_filters(stmt, status, search)
+        stmt = stmt.order_by(m.BroadcastRecipientModel.created_at)
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(offset)
+        rows = (await self._s.execute(stmt)).scalars()
+        return [map_.broadcast_recipient_to_domain(r) for r in rows]
+
+    async def count_for_broadcast(
+        self, broadcast_id: uuid.UUID, *, status: str | None = None, search: str | None = None
+    ) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(m.BroadcastRecipientModel)
+            .where(m.BroadcastRecipientModel.broadcast_id == broadcast_id)
+        )
+        stmt = _recipient_filters(stmt, status, search)
+        return int((await self._s.execute(stmt)).scalar_one())
+
+    async def claim_pending(
+        self, broadcast_id: uuid.UUID, limit: int
+    ) -> list[BroadcastRecipient]:
+        """Take the next batch of unsent recipients, locking them for this worker.
+
+        SKIP LOCKED is what lets the sweep run on more than one process (or be
+        re-entered by a retried background task) without two workers messaging
+        the same person twice.
+        """
+        rows = (
+            await self._s.execute(
+                select(m.BroadcastRecipientModel)
+                .where(
+                    m.BroadcastRecipientModel.broadcast_id == broadcast_id,
+                    m.BroadcastRecipientModel.status == "pending",
+                )
+                .order_by(m.BroadcastRecipientModel.created_at)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).scalars()
+        return [map_.broadcast_recipient_to_domain(r) for r in rows]
+
+    async def update(self, recipient: BroadcastRecipient) -> None:
+        row = await self._s.get(m.BroadcastRecipientModel, recipient.id)
+        if row is None:
+            return
+        row.display_name = recipient.display_name
+        row.status = recipient.status
+        row.error = recipient.error
+        row.provider_message_id = recipient.provider_message_id
+        row.session_id = recipient.session_id
+        row.attempts = recipient.attempts
+        row.updated_at = recipient.updated_at
+
+    async def reset_failed(self, broadcast_id: uuid.UUID) -> int:
+        """Requeue every failed recipient; returns how many were requeued."""
+        result = await self._s.execute(
+            update(m.BroadcastRecipientModel)
+            .where(
+                m.BroadcastRecipientModel.broadcast_id == broadcast_id,
+                m.BroadcastRecipientModel.status == "failed",
+            )
+            .values(
+                status="pending",
+                error="",
+                provider_message_id="",
+                updated_at=datetime.now(UTC),
+            )
+        )
+        return int(result.rowcount or 0)
+
+
+def _recipient_filters(stmt, status: str | None, search: str | None):
+    """Shared WHERE clauses for the list/count pair, so a filtered page and its
+    total can never disagree about what they're filtering on."""
+    if status:
+        stmt = stmt.where(m.BroadcastRecipientModel.status == status)
+    if search and search.strip():
+        like = f"%{search.strip()}%"
+        stmt = stmt.where(
+            m.BroadcastRecipientModel.phone_number.ilike(like)
+            | m.BroadcastRecipientModel.display_name.ilike(like)
+        )
+    return stmt

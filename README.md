@@ -87,6 +87,70 @@ POST /api/v1/sessions/{id}/stream       { message } -> SSE token stream
 
 Ops: `GET /healthz` (liveness), `GET /readyz` (DB check), `GET /metrics` (Prometheus).
 
+## Conversational Flow
+
+An assistant's system prompt is authored as an **ordered list of named,
+individually toggleable sections** rather than one opaque blob — reorder them,
+switch one off to A/B a behaviour, or add a role-specific branch without a
+deploy.
+
+```
+PATCH /api/v1/chatbots/{id}   { flow_sections: [{ title, body, enabled }, ...] }
+POST  /api/v1/chatbots/{id}/flow/reset   -> restore the stock section set
+```
+
+The enabled sections are composed into `system_prompt` on write, so every
+generation path (chat, stream, widget, WhatsApp, interviews) reads one string
+and needs no knowledge of sections. `system_prompt` and `flow_sections` are two
+views of the same thing: sending both to `PATCH` is rejected, and writing
+`system_prompt` directly clears the sections (the raw-prompt escape hatch).
+A flow whose enabled sections are all empty falls back to the stock prompt —
+a blank system prompt would silently leave the assistant unguarded.
+
+## Post-call delivery
+
+When a conversation ends, matching configurations push it to a webhook or an
+inbox. Each block is optional and each of summary / sentiment / extraction costs
+one LLM call, so unchecked boxes are a real cost lever.
+
+```
+POST /api/v1/chatbots/{id}/post-call   { delivery_method, webhook_url|email_to,
+                                         trigger_statuses: ["completed", ...],
+                                         include_summary, include_transcript,
+                                         include_sentiment, include_extracted }
+POST /api/v1/chatbots/{id}/sessions/{sid}/end   { call_status } -> fires matches
+GET  /api/v1/chatbots/{id}/post-call-deliveries -> audit trail
+```
+
+Webhooks are signed like Stripe's: verify `X-Signature` as
+`HMAC-SHA256(jwt_secret, "{X-Signature-Timestamp}.{raw_body}")`. Dispatch runs
+as a background task and is idempotent — a `(config, session)` unique constraint
+means a repeated "end session" call can't double-post into a customer's ATS.
+
+## WhatsApp broadcast campaigns
+
+Outbound sends to a contact list, where every reply is then handled by the
+assistant's normal auto-reply pipeline (the campaign owns *delivery*; the
+conversation belongs to the existing WhatsApp session machinery).
+
+```
+POST /api/v1/broadcasts                     { chatbot_id, name, message_template,
+                                              recipients_text }
+POST /api/v1/broadcasts/{id}/start          -> background send sweep
+POST /api/v1/broadcasts/{id}/pause | /complete | /retry-failed
+GET  /api/v1/broadcasts/{id}/recipients?status=&search=&page=
+GET|POST /api/v1/broadcasts/{id}/recipients/{rid}/messages  -> chat log / takeover
+POST /api/v1/broadcasts/status-callback     (Twilio, signature-verified)
+```
+
+The sweep claims recipients with `FOR UPDATE SKIP LOCKED`, so it is safe to run
+on more than one process and resumes after a free host sleeps mid-campaign
+without re-messaging anyone. Delivery status (`sent → delivered → read →
+replied`) is rank-ordered, so out-of-order Twilio callbacks can't move a contact
+backwards. Requires the assistant to be connected to a WhatsApp number first
+(see *Channels*); message templates support `{{name}}`, `{{first_name}}`,
+and `{{phone}}`.
+
 ## Embed & integrate (the public widget)
 
 A chatbot can be **published** and dropped into any website — no account needed

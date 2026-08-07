@@ -118,6 +118,16 @@ class WidgetConfigSchema(BaseModel):
     launcher_position: Literal["bottom-right", "bottom-left"] = "bottom-right"
 
 
+class FlowSectionSchema(BaseModel):
+    """One block of the Conversational Flow. `id` is absent when the UI has just
+    added a section — the server mints one so reorder/toggle can address it."""
+
+    id: uuid.UUID | None = None
+    title: str = Field(min_length=1, max_length=120)
+    body: str = Field(default="", max_length=6000)
+    enabled: bool = True
+
+
 class CreateChatbotRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     channel: Literal["text", "voice"] = "text"
@@ -133,7 +143,11 @@ class UpdateChatbotRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
     channel: Literal["text", "voice"] | None = None
+    # `system_prompt` and `flow_sections` are two views of the same thing and
+    # are mutually exclusive — sending both is rejected rather than silently
+    # letting one win, which would make the editor lose the owner's edits.
     system_prompt: str | None = Field(default=None, min_length=1)
+    flow_sections: list[FlowSectionSchema] | None = Field(default=None, max_length=40)
     top_k: int | None = Field(default=None, ge=1, le=20)
     is_public: bool | None = None
     allowed_origins: list[str] | None = Field(default=None, max_length=50)
@@ -145,6 +159,9 @@ class ChatbotResponse(BaseModel):
     name: str
     channel: Literal["text", "voice"]
     system_prompt: str
+    # Empty when this bot was authored as a raw prompt; the editor then offers
+    # to convert it into the stock sections.
+    flow_sections: list[FlowSectionSchema]
     top_k: int
     is_public: bool
     public_key: str
@@ -388,3 +405,150 @@ class WhatsAppChannelResponse(BaseModel):
     status: str
     webhook_url: str
     created_at: datetime
+
+
+# --- Post-call delivery ---
+CallStatusLiteral = Literal["completed", "voicemail", "no_answer", "busy", "failed"]
+DeliveryMethodLiteral = Literal["webhook", "email"]
+
+
+class PostCallConfigBody(BaseModel):
+    """Create/update payload. `webhook_url` and `email_to` are both optional
+    here and validated against `delivery_method` in the domain, so the error the
+    UI shows is the same one the domain enforces."""
+
+    delivery_method: DeliveryMethodLiteral = "webhook"
+    webhook_url: str = Field(default="", max_length=2000)
+    email_to: str = Field(default="", max_length=320)
+    trigger_statuses: list[CallStatusLiteral] = Field(default_factory=lambda: ["completed"])
+    include_summary: bool = True
+    include_transcript: bool = True
+    include_sentiment: bool = False
+    include_extracted: bool = False
+    enabled: bool = True
+
+
+class PostCallConfigResponse(BaseModel):
+    id: uuid.UUID
+    chatbot_id: uuid.UUID
+    delivery_method: DeliveryMethodLiteral
+    webhook_url: str
+    email_to: str
+    trigger_statuses: list[CallStatusLiteral]
+    include_summary: bool
+    include_transcript: bool
+    include_sentiment: bool
+    include_extracted: bool
+    enabled: bool
+    created_at: datetime
+
+
+class PostCallDeliveryResponse(BaseModel):
+    id: uuid.UUID
+    config_id: uuid.UUID
+    session_id: uuid.UUID
+    call_status: CallStatusLiteral
+    delivery_method: DeliveryMethodLiteral
+    destination: str
+    status: str
+    error: str
+    created_at: datetime
+
+
+class EndSessionRequest(BaseModel):
+    """Closes a conversation and fires any matching post-call configs."""
+
+    call_status: CallStatusLiteral = "completed"
+
+
+class EndSessionResponse(BaseModel):
+    session_id: uuid.UUID
+    call_status: CallStatusLiteral
+    dispatched: int
+    skipped: int
+
+
+# --- Broadcast campaigns ---
+RecipientStatusLiteral = Literal["pending", "sent", "delivered", "read", "replied", "failed"]
+BroadcastStatusLiteral = Literal["queued", "sending", "paused", "completed"]
+
+
+class BroadcastRecipientInput(BaseModel):
+    phone_number: str = Field(min_length=5, max_length=32)
+    display_name: str = Field(default="", max_length=160)
+
+
+class CreateBroadcastRequest(BaseModel):
+    chatbot_id: uuid.UUID
+    name: str = Field(min_length=1, max_length=160)
+    message_template: str = Field(min_length=1, max_length=1600)
+    # Structured contacts, or a pasted CSV/newline blob — the UI offers both and
+    # the server normalizes either into recipients.
+    recipients: list[BroadcastRecipientInput] = Field(default_factory=list, max_length=5000)
+    recipients_text: str = Field(default="", max_length=500_000)
+
+
+class AddRecipientsRequest(BaseModel):
+    recipients: list[BroadcastRecipientInput] = Field(default_factory=list, max_length=5000)
+    recipients_text: str = Field(default="", max_length=500_000)
+
+
+class BroadcastRecipientResponse(BaseModel):
+    id: uuid.UUID
+    phone_number: str
+    display_name: str
+    status: RecipientStatusLiteral
+    error: str
+    session_id: uuid.UUID | None
+    attempts: int
+    updated_at: datetime
+
+
+class BroadcastResponse(BaseModel):
+    id: uuid.UUID
+    chatbot_id: uuid.UUID
+    chatbot_name: str
+    whatsapp_channel_id: uuid.UUID
+    from_number: str
+    name: str
+    message_template: str
+    status: BroadcastStatusLiteral
+    total_count: int
+    sent_count: int
+    delivered_count: int
+    read_count: int
+    replied_count: int
+    failed_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class RecipientPageResponse(BaseModel):
+    """One page of the contacts list, with the funnel counts the filter chips
+    render — returned together so the chips can't disagree with the rows."""
+
+    recipients: list[BroadcastRecipientResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class AddRecipientsResponse(BaseModel):
+    added: int
+    duplicates: int
+    invalid: list[str]
+
+
+class BroadcastMessageResponse(BaseModel):
+    """One turn of a recipient's conversation, for the Chat Log pane."""
+
+    id: uuid.UUID
+    role: Literal["user", "assistant", "system"]
+    content: str
+    created_at: datetime
+
+
+class SendManualMessageRequest(BaseModel):
+    """Human takeover — send as the assistant, bypassing the RAG pipeline."""
+
+    message: str = Field(min_length=1, max_length=1600)

@@ -24,6 +24,7 @@ from src.domain.chat.entities import ChatSession
 from src.domain.shared.identifiers import ChatbotId
 from src.infrastructure.messaging.twilio_signature import verify_twilio_signature
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
+from src.interfaces.api.routers.broadcasts import mark_replied
 from src.interfaces.api.schemas import ConnectWhatsAppRequest, WhatsAppChannelResponse
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
@@ -152,6 +153,10 @@ async def whatsapp_webhook(request: Request, container: ContainerDep) -> Respons
             await uow.whatsapp_conversations.add(conversation)
             await uow.commit()
         session_id = conversation.session_id
+
+    # If this number is on a broadcast, their reply advances the campaign funnel.
+    # No-op otherwise, so ordinary inbound contacts are unaffected.
+    await mark_replied(container, session_id)
 
     use_case = AskChatbot(container.unit_of_work(), container.embedder, container.llm)
     try:

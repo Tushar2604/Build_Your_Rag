@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Bot, BookOpen, LineChart, Settings, LogOut,
-  Users2, PhoneCall, Radio, Sparkles,
+  Users2, PhoneCall, Radio, Sparkles, Megaphone,
 } from "lucide-react";
 import { useAuth } from "../store/auth";
 
@@ -20,6 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/knowledge",    label: "Knowledge",    icon: BookOpen },
   { to: "/interviews",   label: "Interviews",   icon: PhoneCall, adminOnly: true },
   { to: "/channels",     label: "Channels",     icon: Radio,     adminOnly: true },
+  { to: "/broadcasts",   label: "Broadcast",    icon: Megaphone, adminOnly: true },
   { to: "/hiring-agent", label: "Hiring Agent", icon: Users2,    adminOnly: true },
   { to: "/team",         label: "Team",         icon: Users2,    adminOnly: true },
   { to: "/analytics",    label: "Analytics",    icon: LineChart },

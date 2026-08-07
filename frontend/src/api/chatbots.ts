@@ -9,11 +9,24 @@ export interface WidgetConfig {
 
 export type Channel = "text" | "voice";
 
+/** One named, toggleable block of the Conversational Flow. `id` is absent only
+ * for a section the UI has just added — the server mints one on save. */
+export interface FlowSection {
+  id?: string;
+  title: string;
+  body: string;
+  enabled: boolean;
+}
+
 export interface Chatbot {
   id: string;
   name: string;
   channel: Channel;
+  /** The composed prompt the model actually receives (read-only when the bot
+   * is authored as sections). */
   system_prompt: string;
+  /** Empty when this bot was authored as a raw prompt instead. */
+  flow_sections: FlowSection[];
   top_k: number;
   is_public: boolean;
   public_key: string;
@@ -35,7 +48,9 @@ export interface CreateChatbotInput {
 export interface UpdateChatbotInput {
   name?: string;
   channel?: Channel;
+  /** Mutually exclusive with `flow_sections` — the API rejects both together. */
   system_prompt?: string;
+  flow_sections?: FlowSection[];
   top_k?: number;
   is_public?: boolean;
   allowed_origins?: string[];
@@ -63,4 +78,10 @@ export function updateChatbot(
 
 export function rotateChatbotKey(id: string): Promise<Chatbot> {
   return api.post<Chatbot>(`/chatbots/${id}/rotate-key`);
+}
+
+/** Replace the prompt with the stock section set — used both to recover a flow
+ * and to give a raw-prompt bot something to edit in the flow builder. */
+export function resetChatbotFlow(id: string): Promise<Chatbot> {
+  return api.post<Chatbot>(`/chatbots/${id}/flow/reset`);
 }

@@ -14,11 +14,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Protocol, runtime_checkable
 
+from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Message
 from src.domain.chatbot.entities import Chatbot
 from src.domain.document.entities import Chunk, Document
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
+from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
 from src.domain.shared.identifiers import (
     BatchCandidateId,
     ChatbotId,
@@ -350,6 +352,71 @@ class WhatsAppConversationRepository(Protocol):
 
 
 @runtime_checkable
+class PostCallConfigRepository(Protocol):
+    async def add(self, config: PostCallConfig) -> None: ...
+    async def get(
+        self, tenant_id: TenantId, config_id: uuid.UUID
+    ) -> PostCallConfig | None: ...
+    async def list_for_chatbot(
+        self, tenant_id: TenantId, chatbot_id: ChatbotId
+    ) -> list[PostCallConfig]: ...
+    async def update(self, config: PostCallConfig) -> None: ...
+    async def delete(self, tenant_id: TenantId, config_id: uuid.UUID) -> None: ...
+
+
+@runtime_checkable
+class PostCallDeliveryRepository(Protocol):
+    async def claim(self, delivery: PostCallDelivery) -> bool:
+        """Reserve (config, session); False if already dispatched. See impl."""
+        ...
+
+    async def finish(self, delivery: PostCallDelivery) -> None: ...
+    async def list_for_chatbot(
+        self, tenant_id: TenantId, chatbot_id: ChatbotId, limit: int = 50
+    ) -> list[PostCallDelivery]: ...
+
+
+@runtime_checkable
+class BroadcastRepository(Protocol):
+    async def add(self, broadcast: Broadcast) -> None: ...
+    async def get(self, tenant_id: TenantId, broadcast_id: uuid.UUID) -> Broadcast | None: ...
+    async def get_unscoped(self, broadcast_id: uuid.UUID) -> Broadcast | None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[Broadcast]: ...
+    async def list_active(self) -> list[Broadcast]: ...
+    async def update(self, broadcast: Broadcast) -> None: ...
+    async def delete(self, tenant_id: TenantId, broadcast_id: uuid.UUID) -> None: ...
+
+
+@runtime_checkable
+class BroadcastRecipientRepository(Protocol):
+    async def add_many(self, recipients: list[BroadcastRecipient]) -> int: ...
+    async def get(
+        self, tenant_id: TenantId, recipient_id: uuid.UUID
+    ) -> BroadcastRecipient | None: ...
+    async def get_by_provider_message_id(
+        self, provider_message_id: str
+    ) -> BroadcastRecipient | None: ...
+    async def get_by_session(self, session_id: SessionId) -> BroadcastRecipient | None: ...
+    async def list_for_broadcast(
+        self,
+        broadcast_id: uuid.UUID,
+        *,
+        status: str | None = None,
+        search: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[BroadcastRecipient]: ...
+    async def count_for_broadcast(
+        self, broadcast_id: uuid.UUID, *, status: str | None = None, search: str | None = None
+    ) -> int: ...
+    async def claim_pending(
+        self, broadcast_id: uuid.UUID, limit: int
+    ) -> list[BroadcastRecipient]: ...
+    async def update(self, recipient: BroadcastRecipient) -> None: ...
+    async def reset_failed(self, broadcast_id: uuid.UUID) -> int: ...
+
+
+@runtime_checkable
 class UnitOfWork(Protocol):
     """Transaction boundary. A use case opens one UoW, does its work through the
     repositories, then commits. Collected domain events are dispatched on commit.
@@ -372,6 +439,10 @@ class UnitOfWork(Protocol):
     google_connections: GoogleConnectionRepository
     whatsapp_channels: WhatsAppChannelRepository
     whatsapp_conversations: WhatsAppConversationRepository
+    post_call_configs: PostCallConfigRepository
+    post_call_deliveries: PostCallDeliveryRepository
+    broadcasts: BroadcastRepository
+    broadcast_recipients: BroadcastRecipientRepository
 
     async def __aenter__(self) -> UnitOfWork: ...
     async def __aexit__(self, *args: object) -> None: ...

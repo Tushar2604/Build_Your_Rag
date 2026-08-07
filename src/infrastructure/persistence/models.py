@@ -141,6 +141,9 @@ class ChatbotModel(Base):
     name: Mapped[str] = mapped_column(String(120))
     channel: Mapped[str] = mapped_column(String(16), default="text")
     system_prompt: Mapped[str] = mapped_column(Text)
+    # Ordered [{id, title, body, enabled}] — the authored form of system_prompt.
+    # Empty list = the owner wrote a raw prompt instead of using the flow editor.
+    flow_sections: Mapped[list] = mapped_column(JSONB, default=list)
     retrieval: Mapped[dict] = mapped_column(JSONB, default=dict)
     allowed_document_ids: Mapped[list] = mapped_column(JSONB, default=list)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -379,3 +382,106 @@ class AuditEventModel(Base):
     name: Mapped[str] = mapped_column(String(80), index=True)
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class PostCallConfigModel(Base):
+    __tablename__ = "post_call_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    chatbot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="CASCADE"), index=True
+    )
+    delivery_method: Mapped[str] = mapped_column(String(20), default="webhook")
+    webhook_url: Mapped[str] = mapped_column(Text, default="")
+    email_to: Mapped[str] = mapped_column(String(320), default="")
+    trigger_statuses: Mapped[list] = mapped_column(JSONB, default=list)
+    include_summary: Mapped[bool] = mapped_column(Boolean, default=True)
+    include_transcript: Mapped[bool] = mapped_column(Boolean, default=True)
+    include_sentiment: Mapped[bool] = mapped_column(Boolean, default=False)
+    include_extracted: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class PostCallDeliveryModel(Base):
+    __tablename__ = "post_call_deliveries"
+    __table_args__ = (
+        UniqueConstraint("config_id", "session_id", name="uq_post_call_delivery_config_session"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    chatbot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="CASCADE"), index=True
+    )
+    # Intentionally not a FK — the audit row outlives the config it ran under.
+    config_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    call_status: Mapped[str] = mapped_column(String(20))
+    delivery_method: Mapped[str] = mapped_column(String(20))
+    destination: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    error: Mapped[str] = mapped_column(Text, default="")
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class BroadcastModel(Base):
+    __tablename__ = "broadcasts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    chatbot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="CASCADE"), index=True
+    )
+    whatsapp_channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("whatsapp_channels.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(String(160))
+    message_template: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    total_count: Mapped[int] = mapped_column(Integer, default=0)
+    sent_count: Mapped[int] = mapped_column(Integer, default=0)
+    delivered_count: Mapped[int] = mapped_column(Integer, default=0)
+    read_count: Mapped[int] = mapped_column(Integer, default=0)
+    replied_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class BroadcastRecipientModel(Base):
+    __tablename__ = "broadcast_recipients"
+    __table_args__ = (
+        UniqueConstraint("broadcast_id", "phone_number", name="uq_broadcast_recipient_phone"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    broadcast_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("broadcasts.id", ondelete="CASCADE"), index=True
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    phone_number: Mapped[str] = mapped_column(String(32))
+    display_name: Mapped[str] = mapped_column(String(160), default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    error: Mapped[str] = mapped_column(Text, default="")
+    provider_message_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

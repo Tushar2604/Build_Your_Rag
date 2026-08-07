@@ -27,6 +27,7 @@ from src.interfaces.api.routers import (
     agent,
     analytics,
     auth,
+    broadcasts,
     chat,
     chatbots,
     documents,
@@ -34,6 +35,7 @@ from src.interfaces.api.routers import (
     integrations,
     interview_batches,
     interviews,
+    post_call,
     public,
     team,
     uploads,
@@ -175,6 +177,10 @@ def create_app() -> FastAPI:
     app.include_router(team.router, prefix=api_prefix)
     app.include_router(integrations.router, prefix=api_prefix)
     app.include_router(whatsapp.router, prefix=api_prefix)
+    # Shares the /chatbots prefix with `chatbots` — registered after it so the
+    # generic /{chatbot_id} route can't shadow /{chatbot_id}/post-call.
+    app.include_router(post_call.router, prefix=api_prefix)
+    app.include_router(broadcasts.router, prefix=api_prefix)
 
     if settings.hiring_agent_enabled:
         app.include_router(hiring_router, prefix=api_prefix)

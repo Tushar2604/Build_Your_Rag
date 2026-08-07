@@ -18,6 +18,8 @@ from src.infrastructure.email.resend import ResendEmailSender
 from src.infrastructure.llm.embeddings import GeminiEmbedder
 from src.infrastructure.llm.providers import FailoverLLM, build_llm
 from src.infrastructure.messaging.event_bus import InProcessEventBus
+from src.infrastructure.messaging.twilio_whatsapp import TwilioWhatsAppSender
+from src.infrastructure.messaging.webhook import WebhookSender
 from src.infrastructure.observability.tracing import build_tracer
 from src.infrastructure.parsing.chunker import RecursiveChunker
 from src.infrastructure.parsing.parser import MultiFormatParser
@@ -50,6 +52,12 @@ class Container:
         # hard-depends on either.
         self.calendar = GoogleCalendarClient(settings)
         self.email = ResendEmailSender(settings)
+        # Post-call delivery. The webhook signature is keyed on the JWT secret
+        # so operators have one secret to rotate, not two.
+        self.webhook = WebhookSender(settings.jwt_secret)
+        # Outbound WhatsApp for broadcasts. Stateless — per-send Twilio
+        # credentials come from the channel row, not from .env.
+        self.whatsapp_sender = TwilioWhatsAppSender()
         # Best-effort burst guard for anonymous public-widget traffic.
         self.anon_rate_limiter = SlidingWindowRateLimiter(
             max_events=settings.public_anon_max_messages,

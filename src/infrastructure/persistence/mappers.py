@@ -14,11 +14,13 @@ from src.application.ports.repositories import (
     WhatsAppChannel,
     WhatsAppConversation,
 )
+from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Citation, Message, MessageRole
-from src.domain.chatbot.entities import Chatbot, RetrievalConfig, WidgetConfig
+from src.domain.chatbot.entities import Chatbot, FlowSection, RetrievalConfig, WidgetConfig
 from src.domain.document.entities import Document, IngestionStatus
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview, QuestionScore, TranscriptTurn
+from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
 from src.domain.shared.identifiers import (
     BatchCandidateId,
     ChatbotId,
@@ -29,6 +31,7 @@ from src.domain.shared.identifiers import (
     SessionId,
     TenantId,
     UserId,
+    new_id,
 )
 from src.domain.tenant.entities import ApiKey, Role, Tenant, User
 from src.infrastructure.persistence import models as m
@@ -110,6 +113,15 @@ def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
         name=row.name,
         channel=row.channel or "text",  # type: ignore[arg-type]
         system_prompt=row.system_prompt,
+        flow_sections=[
+            FlowSection(
+                id=uuid.UUID(str(s["id"])) if s.get("id") else new_id(),
+                title=s.get("title", ""),
+                body=s.get("body", ""),
+                enabled=bool(s.get("enabled", True)),
+            )
+            for s in (row.flow_sections or [])
+        ],
         retrieval=RetrievalConfig(
             top_k=rc.get("top_k", 5),
             min_score=rc.get("min_score", 0.0),
@@ -131,6 +143,14 @@ def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
 
 def chatbot_retrieval_to_jsonb(rc: RetrievalConfig) -> dict:
     return {"top_k": rc.top_k, "min_score": rc.min_score, "rerank": rc.rerank}
+
+
+def flow_sections_to_jsonb(sections: list[FlowSection]) -> list[dict]:
+    """List order IS section order — preserved by JSONB arrays."""
+    return [
+        {"id": str(s.id), "title": s.title, "body": s.body, "enabled": s.enabled}
+        for s in sections
+    ]
 
 
 def widget_config_to_jsonb(wc: WidgetConfig) -> dict:
@@ -302,6 +322,84 @@ def whatsapp_conversation_to_domain(row: m.WhatsAppConversationModel) -> WhatsAp
         whatsapp_channel_id=row.whatsapp_channel_id,
         phone_number=row.phone_number,
         session_id=SessionId(row.session_id),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+# --- Post-call delivery ---
+
+
+def post_call_config_to_domain(row: m.PostCallConfigModel) -> PostCallConfig:
+    return PostCallConfig(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        chatbot_id=ChatbotId(row.chatbot_id),
+        delivery_method=row.delivery_method,  # type: ignore[arg-type]
+        webhook_url=row.webhook_url or "",
+        email_to=row.email_to or "",
+        trigger_statuses=list(row.trigger_statuses or []),
+        include_summary=row.include_summary,
+        include_transcript=row.include_transcript,
+        include_sentiment=row.include_sentiment,
+        include_extracted=row.include_extracted,
+        enabled=row.enabled,
+        created_at=row.created_at,
+    )
+
+
+def post_call_delivery_to_domain(row: m.PostCallDeliveryModel) -> PostCallDelivery:
+    return PostCallDelivery(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        chatbot_id=ChatbotId(row.chatbot_id),
+        config_id=row.config_id,
+        session_id=row.session_id,
+        call_status=row.call_status,  # type: ignore[arg-type]
+        delivery_method=row.delivery_method,  # type: ignore[arg-type]
+        destination=row.destination or "",
+        status=row.status,
+        error=row.error or "",
+        payload=dict(row.payload or {}),
+        created_at=row.created_at,
+    )
+
+
+# --- Broadcast ---
+
+
+def broadcast_to_domain(row: m.BroadcastModel) -> Broadcast:
+    return Broadcast(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        chatbot_id=ChatbotId(row.chatbot_id),
+        whatsapp_channel_id=row.whatsapp_channel_id,
+        name=row.name,
+        message_template=row.message_template,
+        status=row.status,  # type: ignore[arg-type]
+        total_count=row.total_count,
+        sent_count=row.sent_count,
+        delivered_count=row.delivered_count,
+        read_count=row.read_count,
+        replied_count=row.replied_count,
+        failed_count=row.failed_count,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def broadcast_recipient_to_domain(row: m.BroadcastRecipientModel) -> BroadcastRecipient:
+    return BroadcastRecipient(
+        id=row.id,
+        broadcast_id=row.broadcast_id,
+        tenant_id=TenantId(row.tenant_id),
+        phone_number=row.phone_number,
+        display_name=row.display_name or "",
+        status=row.status,  # type: ignore[arg-type]
+        error=row.error or "",
+        provider_message_id=row.provider_message_id or "",
+        session_id=SessionId(row.session_id) if row.session_id else None,
+        attempts=row.attempts,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
