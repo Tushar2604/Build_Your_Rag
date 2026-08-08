@@ -22,7 +22,9 @@ from src.domain.shared.identifiers import ChatbotId, TenantId, new_id
 CallStatus = Literal["completed", "voicemail", "no_answer", "busy", "failed"]
 ALL_CALL_STATUSES: tuple[CallStatus, ...] = get_args(CallStatus)
 
-DeliveryMethod = Literal["webhook", "email"]
+# `slack` posts to whichever channel the tenant's Slack integration is wired to,
+# so it needs no destination of its own — see `requires_destination`.
+DeliveryMethod = Literal["webhook", "email", "slack"]
 ALL_DELIVERY_METHODS: tuple[DeliveryMethod, ...] = get_args(DeliveryMethod)
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -52,7 +54,14 @@ class PostCallConfig:
     def triggers_on(self, status: CallStatus) -> bool:
         return self.enabled and status in self.trigger_statuses
 
+    def requires_destination(self) -> bool:
+        """Slack reuses the tenant-level integration's webhook, so this config
+        carries no destination of its own to validate."""
+        return self.delivery_method != "slack"
+
     def destination(self) -> str:
+        if self.delivery_method == "slack":
+            return "Slack (connected channel)"
         return self.webhook_url if self.delivery_method == "webhook" else self.email_to
 
     def validation_error(self) -> str | None:
@@ -69,9 +78,8 @@ class PostCallConfig:
                 return "A webhook URL is required."
             if not url.startswith(("http://", "https://")):
                 return "The webhook URL must start with http:// or https://."
-        else:
-            if not _EMAIL_RE.match(self.email_to.strip()):
-                return "A valid destination email address is required."
+        elif self.delivery_method == "email" and not _EMAIL_RE.match(self.email_to.strip()):
+            return "A valid destination email address is required."
         if not self.trigger_statuses:
             return "Select at least one call status to trigger on."
         unknown = [s for s in self.trigger_statuses if s not in ALL_CALL_STATUSES]

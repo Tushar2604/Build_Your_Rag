@@ -46,6 +46,7 @@ def _to_response(bot: Chatbot) -> ChatbotResponse:
             FlowSectionSchema(id=s.id, title=s.title, body=s.body, enabled=s.enabled)
             for s in bot.flow_sections
         ],
+        voice_profile_id=bot.voice_profile_id,
         top_k=bot.retrieval.top_k,
         is_public=bot.is_public,
         public_key=bot.public_key,
@@ -143,6 +144,18 @@ async def update_chatbot(
                     for s in body.flow_sections
                 ]
             )
+        if body.voice_profile_id_set:
+            # Explicit opt-in so an omitted field can't silently unset the voice.
+            if body.voice_profile_id is not None:
+                voice = await uow.voice_profiles.get(principal.tenant_id, body.voice_profile_id)
+                if voice is None:
+                    raise HTTPException(status_code=404, detail="Voice not found")
+                if not voice.is_usable():
+                    raise HTTPException(
+                        status_code=400,
+                        detail="That voice isn't ready yet — finish cloning it first.",
+                    )
+            bot.voice_profile_id = body.voice_profile_id
         if body.top_k is not None:
             bot.retrieval.top_k = body.top_k
         if body.is_public is not None:

@@ -33,13 +33,17 @@ from src.interfaces.api.routers import (
     documents,
     health,
     integrations,
+    integrations_catalogue,
     interview_batches,
     interviews,
     post_call,
     public,
+    support,
     team,
     uploads,
+    voices,
     whatsapp,
+    whatsapp_web,
 )
 from src.hiring_agent.routes import router as hiring_router
 
@@ -181,6 +185,10 @@ def create_app() -> FastAPI:
     # generic /{chatbot_id} route can't shadow /{chatbot_id}/post-call.
     app.include_router(post_call.router, prefix=api_prefix)
     app.include_router(broadcasts.router, prefix=api_prefix)
+    app.include_router(integrations_catalogue.router, prefix=api_prefix)
+    app.include_router(support.router, prefix=api_prefix)
+    app.include_router(voices.router, prefix=api_prefix)
+    app.include_router(whatsapp_web.router, prefix=api_prefix)
 
     if settings.hiring_agent_enabled:
         app.include_router(hiring_router, prefix=api_prefix)

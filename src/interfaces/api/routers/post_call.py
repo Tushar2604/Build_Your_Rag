@@ -67,7 +67,11 @@ async def _run_dispatch(
     """Background entrypoint — builds its own container (no request scope)."""
     container = get_container()
     use_case = DispatchPostCall(
-        container.unit_of_work(), container.llm, container.webhook, container.email
+        container.unit_of_work(),
+        container.llm,
+        container.webhook,
+        container.email,
+        container.slack,
     )
     await use_case.execute(
         tenant_id,

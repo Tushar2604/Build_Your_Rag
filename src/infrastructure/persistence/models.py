@@ -151,6 +151,12 @@ class ChatbotModel(Base):
     public_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     allowed_origins: Mapped[list] = mapped_column(JSONB, default=list)
     widget_config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Cloned voice used for spoken replies. NULL = fall back to the browser's
+    # built-in speech synthesis. SET NULL on delete so removing a voice degrades
+    # the assistant to the default voice instead of deleting the assistant.
+    voice_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("voice_profiles.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -481,6 +487,99 @@ class BroadcastRecipientModel(Base):
         UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True
     )
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class TenantIntegrationModel(Base):
+    __tablename__ = "tenant_integrations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "integration_id", name="uq_tenant_integration"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    # Catalogue key (e.g. "slack"), not a FK — the catalogue ships with the code.
+    integration_id: Mapped[str] = mapped_column(String(64), index=True)
+    config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class IssueReportModel(Base):
+    __tablename__ = "issue_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(160))
+    email: Mapped[str] = mapped_column(String(320))
+    phone: Mapped[str] = mapped_column(String(32), default="")
+    report_type: Mapped[str] = mapped_column(String(32), index=True)
+    priority: Mapped[str] = mapped_column(String(16), default="medium", index=True)
+    subject: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    page_url: Mapped[str] = mapped_column(String(500), default="")
+    user_agent: Mapped[str] = mapped_column(String(500), default="")
+    email_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class VoiceProfileModel(Base):
+    __tablename__ = "voice_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(80))
+    gender: Mapped[str] = mapped_column(String(16), default="female")
+    language: Mapped[str] = mapped_column(String(8), default="en")
+    description: Mapped[str] = mapped_column(String(500), default="")
+    sample_storage_key: Mapped[str] = mapped_column(String(512), default="")
+    sample_content_type: Mapped[str] = mapped_column(String(120), default="")
+    sample_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    provider: Mapped[str] = mapped_column(String(32), default="")
+    provider_voice_id: Mapped[str] = mapped_column(String(128), default="", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class WhatsAppWebSessionModel(Base):
+    __tablename__ = "whatsapp_web_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    # SET NULL: deleting an assistant must not unlink the user's WhatsApp.
+    chatbot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    phone_number: Mapped[str] = mapped_column(String(32), default="", index=True)
+    display_name: Mapped[str] = mapped_column(String(160), default="")
+    qr_data_url: Mapped[str] = mapped_column(Text, default="")
+    qr_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

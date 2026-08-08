@@ -27,6 +27,8 @@ export interface Chatbot {
   system_prompt: string;
   /** Empty when this bot was authored as a raw prompt instead. */
   flow_sections: FlowSection[];
+  /** Cloned voice for spoken replies; null = the browser's default voice. */
+  voice_profile_id: string | null;
   top_k: number;
   is_public: boolean;
   public_key: string;
@@ -55,6 +57,10 @@ export interface UpdateChatbotInput {
   is_public?: boolean;
   allowed_origins?: string[];
   widget?: WidgetConfig;
+  /** Requires `voice_profile_id_set: true` — otherwise an omitted field
+   * would be indistinguishable from an intentional clear. */
+  voice_profile_id?: string | null;
+  voice_profile_id_set?: boolean;
 }
 
 export function listChatbots(): Promise<Chatbot[]> {

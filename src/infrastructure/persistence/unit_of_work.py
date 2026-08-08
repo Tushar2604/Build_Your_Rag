@@ -29,15 +29,19 @@ from src.infrastructure.persistence.repositories import (
     GoogleConnectionRepositoryImpl,
     InterviewBatchRepositoryImpl,
     InterviewRepositoryImpl,
+    IssueReportRepositoryImpl,
     PostCallConfigRepositoryImpl,
     PostCallDeliveryRepositoryImpl,
     RequestLogRepositoryImpl,
+    TenantIntegrationRepositoryImpl,
     TenantInviteRepositoryImpl,
     TenantRepositoryImpl,
     UsageRepositoryImpl,
     UserRepositoryImpl,
+    VoiceProfileRepositoryImpl,
     WhatsAppChannelRepositoryImpl,
     WhatsAppConversationRepositoryImpl,
+    WhatsAppWebSessionRepositoryImpl,
 )
 
 
@@ -91,6 +95,10 @@ class SqlAlchemyUnitOfWork:
         self.post_call_deliveries = PostCallDeliveryRepositoryImpl(s)
         self.broadcasts = BroadcastRepositoryImpl(s)
         self.broadcast_recipients = BroadcastRecipientRepositoryImpl(s)
+        self.tenant_integrations = TenantIntegrationRepositoryImpl(s)
+        self.issue_reports = IssueReportRepositoryImpl(s)
+        self.voice_profiles = VoiceProfileRepositoryImpl(s)
+        self.whatsapp_web_sessions = WhatsAppWebSessionRepositoryImpl(s)
 
     async def _bind_scope(self) -> None:
         if self._session is None or self._tenant_id is None:

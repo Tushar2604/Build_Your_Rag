@@ -27,9 +27,13 @@ from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Message
 from src.domain.chatbot.entities import Chatbot
 from src.domain.document.entities import Chunk, Document, IngestionStatus
+from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
 from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
+from src.domain.support.entities import IssueReport
+from src.domain.voice.entities import VoiceProfile
+from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.domain.shared.identifiers import (
     BatchCandidateId,
     ChatbotId,
@@ -420,6 +424,7 @@ class ChatbotRepositoryImpl:
         row.channel = chatbot.channel
         row.system_prompt = chatbot.system_prompt
         row.flow_sections = map_.flow_sections_to_jsonb(chatbot.flow_sections)
+        row.voice_profile_id = chatbot.voice_profile_id
         row.retrieval = map_.chatbot_retrieval_to_jsonb(chatbot.retrieval)
         row.allowed_document_ids = [str(d) for d in chatbot.allowed_document_ids]
         row.is_public = chatbot.is_public
@@ -444,6 +449,7 @@ def _chatbot_to_row(chatbot: Chatbot) -> m.ChatbotModel:
         channel=chatbot.channel,
         system_prompt=chatbot.system_prompt,
         flow_sections=map_.flow_sections_to_jsonb(chatbot.flow_sections),
+        voice_profile_id=chatbot.voice_profile_id,
         retrieval=map_.chatbot_retrieval_to_jsonb(chatbot.retrieval),
         allowed_document_ids=[str(d) for d in chatbot.allowed_document_ids],
         is_public=chatbot.is_public,
@@ -1467,3 +1473,262 @@ def _recipient_filters(stmt, status: str | None, search: str | None):
             | m.BroadcastRecipientModel.display_name.ilike(like)
         )
     return stmt
+
+
+class TenantIntegrationRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def upsert(self, integration: TenantIntegration) -> None:
+        """Connect or re-connect in one statement.
+
+        Re-connecting is how a tenant rotates a leaked webhook URL, so this
+        overwrites config rather than erroring on the (tenant, integration)
+        unique constraint.
+        """
+        stmt = (
+            pg_insert(m.TenantIntegrationModel)
+            .values(
+                id=integration.id,
+                tenant_id=integration.tenant_id,
+                integration_id=integration.integration_id,
+                config=integration.config,
+                enabled=integration.enabled,
+                created_at=integration.created_at,
+                updated_at=integration.updated_at,
+            )
+            .on_conflict_do_update(
+                constraint="uq_tenant_integration",
+                set_={
+                    "config": integration.config,
+                    "enabled": integration.enabled,
+                    "updated_at": integration.updated_at,
+                },
+            )
+        )
+        await self._s.execute(stmt)
+
+    async def get(self, tenant_id: TenantId, integration_id: str) -> TenantIntegration | None:
+        row = (
+            await self._s.execute(
+                select(m.TenantIntegrationModel).where(
+                    m.TenantIntegrationModel.tenant_id == tenant_id,
+                    m.TenantIntegrationModel.integration_id == integration_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.tenant_integration_to_domain(row) if row else None
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[TenantIntegration]:
+        rows = (
+            await self._s.execute(
+                select(m.TenantIntegrationModel)
+                .where(m.TenantIntegrationModel.tenant_id == tenant_id)
+                .order_by(m.TenantIntegrationModel.created_at)
+            )
+        ).scalars()
+        return [map_.tenant_integration_to_domain(r) for r in rows]
+
+    async def delete(self, tenant_id: TenantId, integration_id: str) -> None:
+        await self._s.execute(
+            delete(m.TenantIntegrationModel).where(
+                m.TenantIntegrationModel.tenant_id == tenant_id,
+                m.TenantIntegrationModel.integration_id == integration_id,
+            )
+        )
+
+
+class IssueReportRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, report: IssueReport) -> None:
+        self._s.add(
+            m.IssueReportModel(
+                id=report.id,
+                tenant_id=report.tenant_id,
+                name=report.name,
+                email=report.email,
+                phone=report.phone,
+                report_type=report.report_type,
+                priority=report.priority,
+                subject=report.subject,
+                description=report.description,
+                status=report.status,
+                page_url=report.page_url,
+                user_agent=report.user_agent,
+                email_sent=report.email_sent,
+                created_at=report.created_at,
+            )
+        )
+
+    async def get(self, tenant_id: TenantId, report_id: uuid.UUID) -> IssueReport | None:
+        row = (
+            await self._s.execute(
+                select(m.IssueReportModel).where(
+                    m.IssueReportModel.id == report_id,
+                    m.IssueReportModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.issue_report_to_domain(row) if row else None
+
+    async def list_for_tenant(self, tenant_id: TenantId, limit: int = 100) -> list[IssueReport]:
+        rows = (
+            await self._s.execute(
+                select(m.IssueReportModel)
+                .where(m.IssueReportModel.tenant_id == tenant_id)
+                .order_by(m.IssueReportModel.created_at.desc())
+                .limit(limit)
+            )
+        ).scalars()
+        return [map_.issue_report_to_domain(r) for r in rows]
+
+    async def mark_email_sent(self, report_id: uuid.UUID, sent: bool) -> None:
+        row = await self._s.get(m.IssueReportModel, report_id)
+        if row is not None:
+            row.email_sent = sent
+
+
+class VoiceProfileRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, profile: VoiceProfile) -> None:
+        self._s.add(
+            m.VoiceProfileModel(
+                id=profile.id,
+                tenant_id=profile.tenant_id,
+                name=profile.name,
+                gender=profile.gender,
+                language=profile.language,
+                description=profile.description,
+                sample_storage_key=profile.sample_storage_key,
+                sample_content_type=profile.sample_content_type,
+                sample_bytes=profile.sample_bytes,
+                duration_seconds=profile.duration_seconds,
+                provider=profile.provider,
+                provider_voice_id=profile.provider_voice_id,
+                status=profile.status,
+                error=profile.error,
+                created_at=profile.created_at,
+                updated_at=profile.updated_at,
+            )
+        )
+
+    async def get(self, tenant_id: TenantId, profile_id: uuid.UUID) -> VoiceProfile | None:
+        row = (
+            await self._s.execute(
+                select(m.VoiceProfileModel).where(
+                    m.VoiceProfileModel.id == profile_id,
+                    m.VoiceProfileModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.voice_profile_to_domain(row) if row else None
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[VoiceProfile]:
+        rows = (
+            await self._s.execute(
+                select(m.VoiceProfileModel)
+                .where(m.VoiceProfileModel.tenant_id == tenant_id)
+                .order_by(m.VoiceProfileModel.created_at.desc())
+            )
+        ).scalars()
+        return [map_.voice_profile_to_domain(r) for r in rows]
+
+    async def update(self, profile: VoiceProfile) -> None:
+        row = await self._s.get(m.VoiceProfileModel, profile.id)
+        if row is None:
+            return
+        row.name = profile.name
+        row.gender = profile.gender
+        row.language = profile.language
+        row.description = profile.description
+        row.provider = profile.provider
+        row.provider_voice_id = profile.provider_voice_id
+        row.status = profile.status
+        row.error = profile.error
+        row.updated_at = profile.updated_at
+
+    async def delete(self, tenant_id: TenantId, profile_id: uuid.UUID) -> None:
+        await self._s.execute(
+            delete(m.VoiceProfileModel).where(
+                m.VoiceProfileModel.id == profile_id,
+                m.VoiceProfileModel.tenant_id == tenant_id,
+            )
+        )
+
+
+class WhatsAppWebSessionRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, ws: WhatsAppWebSession) -> None:
+        self._s.add(
+            m.WhatsAppWebSessionModel(
+                id=ws.id,
+                tenant_id=ws.tenant_id,
+                chatbot_id=ws.chatbot_id,
+                status=ws.status,
+                phone_number=ws.phone_number,
+                display_name=ws.display_name,
+                qr_data_url=ws.qr_data_url,
+                qr_expires_at=ws.qr_expires_at,
+                last_error=ws.last_error,
+                linked_at=ws.linked_at,
+                last_seen_at=ws.last_seen_at,
+                created_at=ws.created_at,
+                updated_at=ws.updated_at,
+            )
+        )
+
+    async def get(self, tenant_id: TenantId, session_id: uuid.UUID) -> WhatsAppWebSession | None:
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppWebSessionModel).where(
+                    m.WhatsAppWebSessionModel.id == session_id,
+                    m.WhatsAppWebSessionModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.whatsapp_web_session_to_domain(row) if row else None
+
+    async def get_unscoped(self, session_id: uuid.UUID) -> WhatsAppWebSession | None:
+        """Resolve without a tenant filter — only the bridge webhook uses this,
+        and it carries no tenant context (mirrors the Twilio callbacks)."""
+        row = await self._s.get(m.WhatsAppWebSessionModel, session_id)
+        return map_.whatsapp_web_session_to_domain(row) if row else None
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[WhatsAppWebSession]:
+        rows = (
+            await self._s.execute(
+                select(m.WhatsAppWebSessionModel)
+                .where(m.WhatsAppWebSessionModel.tenant_id == tenant_id)
+                .order_by(m.WhatsAppWebSessionModel.created_at.desc())
+            )
+        ).scalars()
+        return [map_.whatsapp_web_session_to_domain(r) for r in rows]
+
+    async def update(self, ws: WhatsAppWebSession) -> None:
+        row = await self._s.get(m.WhatsAppWebSessionModel, ws.id)
+        if row is None:
+            return
+        row.chatbot_id = ws.chatbot_id
+        row.status = ws.status
+        row.phone_number = ws.phone_number
+        row.display_name = ws.display_name
+        row.qr_data_url = ws.qr_data_url
+        row.qr_expires_at = ws.qr_expires_at
+        row.last_error = ws.last_error
+        row.linked_at = ws.linked_at
+        row.last_seen_at = ws.last_seen_at
+        row.updated_at = ws.updated_at
+
+    async def delete(self, tenant_id: TenantId, session_id: uuid.UUID) -> None:
+        await self._s.execute(
+            delete(m.WhatsAppWebSessionModel).where(
+                m.WhatsAppWebSessionModel.id == session_id,
+                m.WhatsAppWebSessionModel.tenant_id == tenant_id,
+            )
+        )

@@ -17,33 +17,42 @@ from alembic import command
 from alembic.config import Config
 from src.infrastructure.persistence import models as m
 
-# Tables introduced by 0012/0013, plus the column added to an existing table.
+# Tables introduced by 0012/0013/0015, plus the columns added to `chatbots`.
 NEW_TABLES = {
     "post_call_configs": m.PostCallConfigModel,
     "post_call_deliveries": m.PostCallDeliveryModel,
     "broadcasts": m.BroadcastModel,
     "broadcast_recipients": m.BroadcastRecipientModel,
+    "tenant_integrations": m.TenantIntegrationModel,
+    "issue_reports": m.IssueReportModel,
+    "voice_profiles": m.VoiceProfileModel,
+    "whatsapp_web_sessions": m.WhatsAppWebSessionModel,
 }
 
 
-# Rendered as an explicit range rather than <base>:head, because data
-# migrations issue real SELECTs and can't run offline — 0004 (publishable-key
-# backfill) below, 0014 (prompt backfill) above. 0012 and 0013 are the two
-# revisions that carry the DDL this file checks.
-FIRST_NEW_REVISION = "0011_team_and_custom_questions"
-LAST_DDL_REVISION = "0013_broadcasts"
+# Rendered as explicit ranges rather than <base>:head, because data migrations
+# issue real SELECTs and can't run offline (0004 backfills publishable keys,
+# 0014 backfills the prompt). These are the ranges carrying the DDL this file
+# checks, skipping 0014 in between.
+DDL_RANGES = (
+    ("0011_team_and_custom_questions", "0013_broadcasts"),
+    ("0014_tighten_default_prompt", "0016_whatsapp_web_sessions"),
+)
 
 
 @pytest.fixture(scope="module")
 def migration_sql() -> str:
     """Offline DDL for revisions 0012 and 0013 — no database required."""
-    buffer = io.StringIO()
-    config = Config("alembic.ini")
-    config.attributes["configure_logger"] = False
-    # `output_buffer` (not `stdout`) is what offline mode writes DDL to.
-    config.output_buffer = buffer
-    command.upgrade(config, f"{FIRST_NEW_REVISION}:{LAST_DDL_REVISION}", sql=True)
-    sql = buffer.getvalue()
+    parts = []
+    for start, end in DDL_RANGES:
+        buffer = io.StringIO()
+        config = Config("alembic.ini")
+        config.attributes["configure_logger"] = False
+        # `output_buffer` (not `stdout`) is what offline mode writes DDL to.
+        config.output_buffer = buffer
+        command.upgrade(config, f"{start}:{end}", sql=True)
+        parts.append(buffer.getvalue())
+    sql = "\n".join(parts)
     assert sql.strip(), "offline migration render produced no SQL"
     return sql
 
@@ -113,3 +122,47 @@ def test_status_callback_lookup_column_is_indexed(migration_sql: str) -> None:
 
 def test_send_sweep_query_is_indexed(migration_sql: str) -> None:
     assert "ix_broadcast_recipients_broadcast_status" in migration_sql
+
+
+def test_one_integration_connection_per_tenant(migration_sql: str) -> None:
+    # Also the ON CONFLICT target that makes re-connecting an upsert instead of
+    # a duplicate-key error.
+    assert "uq_tenant_integration UNIQUE (tenant_id, integration_id)" in migration_sql
+
+
+def test_voice_column_is_added_to_chatbots(migration_sql: str) -> None:
+    assert "voice_profile_id" in {c.name for c in m.ChatbotModel.__table__.columns}
+    assert re.search(r"ALTER TABLE chatbots ADD COLUMN voice_profile_id", migration_sql)
+
+
+def test_deleting_a_voice_does_not_delete_the_assistant(migration_sql: str) -> None:
+    # ON DELETE SET NULL: removing a voice must degrade the assistant to the
+    # default voice, never cascade into deleting the assistant itself.
+    match = re.search(
+        r"ALTER TABLE chatbots ADD COLUMN voice_profile_id.*?voice_profiles \(id\)([^;]*);",
+        migration_sql,
+        re.S,
+    )
+    assert match, "the voice_profile_id FK is missing"
+    assert "ON DELETE SET NULL" in match.group(1)
+
+
+def test_whatsapp_auth_state_is_persisted_in_postgres(migration_sql: str) -> None:
+    # Baileys defaults to on-disk auth. The container filesystem is ephemeral on
+    # free hosts, so keys must live in Postgres or every sleep would force the
+    # user to re-scan a QR.
+    assert "CREATE TABLE whatsapp_web_auth" in migration_sql
+    assert re.search(r"PRIMARY KEY \(session_id, key\)", migration_sql)
+
+
+def test_deleting_an_assistant_does_not_unlink_whatsapp(migration_sql: str) -> None:
+    # SET NULL, not CASCADE: removing an assistant must leave the user's linked
+    # WhatsApp account intact, just no longer auto-replying.
+    match = re.search(
+        r"CREATE TABLE whatsapp_web_sessions \((.*?)\n\);", migration_sql, re.S
+    )
+    assert match, "whatsapp_web_sessions is never created"
+    fk = re.search(
+        r"FOREIGN KEY\(chatbot_id\) REFERENCES chatbots \(id\)([^,\n]*)", match.group(1)
+    )
+    assert fk and "ON DELETE SET NULL" in fk.group(1)

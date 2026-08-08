@@ -13,6 +13,7 @@ import VoiceCallPanel from "../components/VoiceCallPanel";
 import FlowSectionsEditor from "../components/FlowSectionsEditor";
 import PostCallSettings from "../components/PostCallSettings";
 import { useIdleNudge } from "../hooks/useIdleNudge";
+import { VoiceProfile, listVoices } from "../api/voices";
 
 const NUDGE_LINES = [
   "Just checking in — are you still there?",
@@ -176,6 +177,8 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
   const [systemPrompt,  setSystemPrompt]  = useState(bot.system_prompt);
   const [sections,      setSections]      = useState<FlowSection[]>(bot.flow_sections);
   const [flowBusy,      setFlowBusy]      = useState(false);
+  const [voiceId,       setVoiceId]       = useState<string | null>(bot.voice_profile_id);
+  const [voices,        setVoices]        = useState<VoiceProfile[]>([]);
   const [topK,          setTopK]          = useState(bot.top_k);
   const [isPublic,      setIsPublic]      = useState(bot.is_public);
   const [originsText,   setOriginsText]   = useState(bot.allowed_origins.join("\n"));
@@ -189,6 +192,14 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
   const [dirty,         setDirty]         = useState(false);
 
   function mark() { setDirty(true); setSaved(false); }
+
+  // Only `ready` voices can be assigned — the API rejects the rest, so
+  // offering them would just produce a confusing save error.
+  useEffect(() => {
+    listVoices()
+      .then((all) => setVoices(all.filter((v) => v.status === "ready")))
+      .catch(() => setVoices([]));
+  }, []);
 
   /** Adopt the stock flow (server-side), then mirror the result locally. */
   async function useSections() {
@@ -216,6 +227,8 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
           ? { flow_sections: sections }
           : { system_prompt: systemPrompt }),
         allowed_origins: origins,
+        voice_profile_id: voiceId,
+        voice_profile_id_set: true,
         widget: { display_name: displayName, theme_color: themeColor, welcome_message: welcome, launcher_position: position },
       });
       onUpdate(updated);
@@ -223,6 +236,7 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
       // answer rather than trusting the local draft.
       setSections(updated.flow_sections);
       setSystemPrompt(updated.system_prompt);
+      setVoiceId(updated.voice_profile_id);
       setSaved(true); setDirty(false);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -278,6 +292,29 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
             ? "A standard text chat. Available in the Playground, share link, and embeds."
             : "A phone-call-style experience — continuous listen, auto-reply, auto-speak. Replaces the chat window everywhere this assistant is used."}
         </p>
+
+        {channel === "voice" && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <label className="label">Voice</label>
+            <select
+              className="input"
+              value={voiceId ?? ""}
+              onChange={(e) => { setVoiceId(e.target.value || null); mark(); }}
+            >
+              <option value="">Browser default voice</option>
+              {voices.map((v) => (
+                <option key={v.id} value={v.id}>{v.name} ({v.language})</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              {voices.length === 0 ? (
+                <>No cloned voices yet — <Link to="/clone-voice" className="text-brand-600 hover:underline">create one</Link>.</>
+              ) : (
+                <>Only voices that finished cloning are listed. <Link to="/clone-voice" className="text-brand-600 hover:underline">Manage voices</Link>.</>
+              )}
+            </p>
+          </div>
+        )}
       </SectionCard>
 
       {/* Retrieval */}

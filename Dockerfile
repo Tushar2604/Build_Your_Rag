@@ -19,6 +19,15 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 
+# --- WhatsApp bridge deps: Baileys sidecar for personal-account QR linking ---
+FROM node:20-slim AS bridge
+WORKDIR /bridge
+COPY whatsapp-bridge/package.json ./
+# No lockfile committed for the bridge; `install` resolves within the semver
+# ranges pinned in package.json.
+RUN npm install --omit=dev --no-audit --no-fund
+COPY whatsapp-bridge/src ./src
+
 # --- Runtime: slim image with the venv, app, and built SPA ---
 FROM python:3.11-slim AS runtime
 
@@ -28,7 +37,15 @@ WORKDIR /app
 # Non-root user for safety.
 RUN useradd --create-home --uid 1000 appuser
 
+# Node runtime for the WhatsApp bridge, lifted from the stage that already
+# built its dependencies — so the binary and the native modules are guaranteed
+# to be the same Node version. Both images are Debian bookworm, so the shared
+# libraries line up. ~50MB, versus a full toolchain from apt.
+COPY --from=bridge /usr/local/bin/node /usr/local/bin/node
+COPY --from=bridge /usr/local/lib/node_modules /usr/local/lib/node_modules
+
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=bridge /bridge ./whatsapp-bridge
 COPY src ./src
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini

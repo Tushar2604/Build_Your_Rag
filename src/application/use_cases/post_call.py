@@ -209,11 +209,13 @@ class DispatchPostCall:
         llm: LLMProvider,
         webhook_sender,
         email_sender,
+        slack_sender=None,
     ) -> None:
         self._uow = uow
         self._llm = llm
         self._webhook = webhook_sender
         self._email = email_sender
+        self._slack = slack_sender
 
     async def execute(
         self,
@@ -280,6 +282,8 @@ class DispatchPostCall:
 
             if config.delivery_method == "webhook":
                 ok, error = await self._webhook.send(config.webhook_url, payload)
+            elif config.delivery_method == "slack":
+                ok, error = await self._send_slack(tenant_id, payload)
             else:
                 ok, error = await self._send_email(config, chatbot_name, payload)
 
@@ -295,6 +299,21 @@ class DispatchPostCall:
                 await uow.commit()
 
         return DispatchResult(dispatched=dispatched, skipped=len(configs) - len(matching))
+
+    async def _send_slack(self, tenant_id: TenantId, payload: dict) -> tuple[bool, str]:
+        """Deliver through whichever channel the tenant's Slack integration is
+        wired to — the destination lives on the integration, not on this rule,
+        so rotating the webhook fixes every post-call config at once."""
+        if self._slack is None:
+            return False, "Slack delivery isn't available on this server."
+        async with self._uow as uow:
+            uow.set_tenant_scope(tenant_id)
+            connection = await uow.tenant_integrations.get(tenant_id, "slack")
+        if connection is None or not connection.enabled or not connection.webhook_url():
+            return False, "Slack isn't connected. Connect it on the Integrations page."
+        # Block rendering belongs to the adapter — Slack's message format is an
+        # infrastructure detail this layer shouldn't import.
+        return await self._slack.send_post_call(connection.webhook_url(), payload)
 
     async def _send_email(
         self, config: PostCallConfig, chatbot_name: str, payload: dict

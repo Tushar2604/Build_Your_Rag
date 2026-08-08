@@ -18,9 +18,13 @@ from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Message
 from src.domain.chatbot.entities import Chatbot
 from src.domain.document.entities import Chunk, Document
+from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
 from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
+from src.domain.support.entities import IssueReport
+from src.domain.voice.entities import VoiceProfile
+from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.domain.shared.identifiers import (
     BatchCandidateId,
     ChatbotId,
@@ -417,6 +421,47 @@ class BroadcastRecipientRepository(Protocol):
 
 
 @runtime_checkable
+class TenantIntegrationRepository(Protocol):
+    async def upsert(self, integration: TenantIntegration) -> None: ...
+    async def get(
+        self, tenant_id: TenantId, integration_id: str
+    ) -> TenantIntegration | None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[TenantIntegration]: ...
+    async def delete(self, tenant_id: TenantId, integration_id: str) -> None: ...
+
+
+@runtime_checkable
+class IssueReportRepository(Protocol):
+    async def add(self, report: IssueReport) -> None: ...
+    async def get(self, tenant_id: TenantId, report_id: uuid.UUID) -> IssueReport | None: ...
+    async def list_for_tenant(
+        self, tenant_id: TenantId, limit: int = 100
+    ) -> list[IssueReport]: ...
+    async def mark_email_sent(self, report_id: uuid.UUID, sent: bool) -> None: ...
+
+
+@runtime_checkable
+class VoiceProfileRepository(Protocol):
+    async def add(self, profile: VoiceProfile) -> None: ...
+    async def get(self, tenant_id: TenantId, profile_id: uuid.UUID) -> VoiceProfile | None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[VoiceProfile]: ...
+    async def update(self, profile: VoiceProfile) -> None: ...
+    async def delete(self, tenant_id: TenantId, profile_id: uuid.UUID) -> None: ...
+
+
+@runtime_checkable
+class WhatsAppWebSessionRepository(Protocol):
+    async def add(self, ws: WhatsAppWebSession) -> None: ...
+    async def get(
+        self, tenant_id: TenantId, session_id: uuid.UUID
+    ) -> WhatsAppWebSession | None: ...
+    async def get_unscoped(self, session_id: uuid.UUID) -> WhatsAppWebSession | None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[WhatsAppWebSession]: ...
+    async def update(self, ws: WhatsAppWebSession) -> None: ...
+    async def delete(self, tenant_id: TenantId, session_id: uuid.UUID) -> None: ...
+
+
+@runtime_checkable
 class UnitOfWork(Protocol):
     """Transaction boundary. A use case opens one UoW, does its work through the
     repositories, then commits. Collected domain events are dispatched on commit.
@@ -443,6 +488,10 @@ class UnitOfWork(Protocol):
     post_call_deliveries: PostCallDeliveryRepository
     broadcasts: BroadcastRepository
     broadcast_recipients: BroadcastRecipientRepository
+    tenant_integrations: TenantIntegrationRepository
+    issue_reports: IssueReportRepository
+    voice_profiles: VoiceProfileRepository
+    whatsapp_web_sessions: WhatsAppWebSessionRepository
 
     async def __aenter__(self) -> UnitOfWork: ...
     async def __aexit__(self, *args: object) -> None: ...

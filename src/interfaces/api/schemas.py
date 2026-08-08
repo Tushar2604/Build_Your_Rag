@@ -152,6 +152,11 @@ class UpdateChatbotRequest(BaseModel):
     is_public: bool | None = None
     allowed_origins: list[str] | None = Field(default=None, max_length=50)
     widget: WidgetConfigSchema | None = None
+    # Cloned voice for spoken replies. Explicit null clears it back to the
+    # browser default, so `None` here means "unchanged" and requires the caller
+    # to opt in via `voice_profile_id_set`.
+    voice_profile_id: uuid.UUID | None = None
+    voice_profile_id_set: bool = False
 
 
 class ChatbotResponse(BaseModel):
@@ -162,6 +167,7 @@ class ChatbotResponse(BaseModel):
     # Empty when this bot was authored as a raw prompt; the editor then offers
     # to convert it into the stock sections.
     flow_sections: list[FlowSectionSchema]
+    voice_profile_id: uuid.UUID | None = None
     top_k: int
     is_public: bool
     public_key: str
@@ -552,3 +558,188 @@ class SendManualMessageRequest(BaseModel):
     """Human takeover — send as the assistant, bypassing the RAG pipeline."""
 
     message: str = Field(min_length=1, max_length=1600)
+
+
+# --- Integrations catalogue ---
+IntegrationCategory = Literal["calendar_crm", "messaging", "data_sheets", "custom_tools"]
+IntegrationTiming = Literal["during_call", "post_call"]
+
+
+class CredentialFieldSchema(BaseModel):
+    key: str
+    label: str
+    placeholder: str = ""
+    secret: bool = False
+    required: bool = True
+    help_text: str = ""
+
+
+class IntegrationCardResponse(BaseModel):
+    """One catalogue card, merged with this tenant's connection state."""
+
+    id: str
+    name: str
+    description: str
+    category: IntegrationCategory
+    category_label: str
+    timing: IntegrationTiming
+    auth: Literal["oauth", "fields"]
+    credential_fields: list[CredentialFieldSchema]
+    # False = the card renders but Connect is disabled; `unavailable_reason` says why.
+    wired: bool
+    unavailable_reason: str = ""
+    oauth_start_path: str = ""
+    connected: bool = False
+    enabled: bool = True
+    # Secret values are masked — the browser never receives a stored credential.
+    config: dict[str, str] = Field(default_factory=dict)
+    connected_at: datetime | None = None
+
+
+class IntegrationCatalogueResponse(BaseModel):
+    integrations: list[IntegrationCardResponse]
+    # Chip counts, keyed by category plus "all".
+    counts: dict[str, int]
+    connected_count: int
+
+
+class ConnectIntegrationRequest(BaseModel):
+    # Free-form because each integration declares its own fields; the server
+    # keeps only keys the spec names and drops the rest.
+    config: dict[str, str] = Field(default_factory=dict)
+
+
+class IntegrationTestResponse(BaseModel):
+    ok: bool
+    message: str
+
+
+# --- Report an issue ---
+ReportTypeLiteral = Literal["bug", "feature_request", "question", "billing", "other"]
+PriorityLiteral = Literal["low", "medium", "high", "critical"]
+IssueStatusLiteral = Literal["open", "in_progress", "resolved", "closed"]
+
+
+class CreateIssueReportRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    email: EmailStr
+    phone: str = Field(default="", max_length=32)
+    report_type: ReportTypeLiteral
+    priority: PriorityLiteral = "medium"
+    subject: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=5000)
+    page_url: str = Field(default="", max_length=500)
+
+
+class IssueReportResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+    phone: str
+    report_type: ReportTypeLiteral
+    priority: PriorityLiteral
+    subject: str
+    description: str
+    status: IssueStatusLiteral
+    page_url: str
+    email_sent: bool
+    created_at: datetime
+
+
+class IssueOptionsResponse(BaseModel):
+    """Drives the form's dropdowns so the labels live in one place."""
+
+    report_types: list[dict[str, str]]
+    priorities: list[dict[str, str]]
+    support_email_configured: bool
+
+
+# --- Cloned voices ---
+VoiceGenderLiteral = Literal["female", "male", "neutral"]
+VoiceStatusLiteral = Literal["pending", "ready", "failed"]
+
+
+class VoiceProfileResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    gender: VoiceGenderLiteral
+    language: str
+    description: str
+    duration_seconds: float
+    sample_bytes: int
+    provider: str
+    status: VoiceStatusLiteral
+    error: str
+    created_at: datetime
+
+
+class VoiceOptionsResponse(BaseModel):
+    languages: list[dict[str, str]]
+    genders: list[dict[str, str]]
+    min_seconds: int
+    max_seconds: int
+    max_mb: int
+    # False = samples are still recorded, stored, and listed, but cloning is
+    # unavailable. The UI says so rather than failing at submit time.
+    cloning_enabled: bool
+    provider: str
+
+
+class SpeakRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+# --- Personal WhatsApp (QR / multi-device) ---
+WhatsAppWebStatusLiteral = Literal[
+    "pending", "awaiting_scan", "linked", "disconnected", "logged_out", "failed"
+]
+
+
+class WhatsAppWebSessionResponse(BaseModel):
+    id: uuid.UUID
+    chatbot_id: uuid.UUID | None
+    chatbot_name: str = ""
+    status: WhatsAppWebStatusLiteral
+    phone_number: str
+    display_name: str
+    # Only populated while a scan is pending and the code is still valid.
+    qr_data_url: str = ""
+    qr_seconds_remaining: int = 0
+    last_error: str = ""
+    health: str
+    linked_at: datetime | None = None
+    created_at: datetime
+
+
+class WhatsAppWebOptionsResponse(BaseModel):
+    """Whether the bridge is configured and reachable, so the Channels page can
+    disable the method instead of failing at scan time."""
+
+    enabled: bool
+    bridge_healthy: bool
+    message: str = ""
+
+
+class AttachAssistantRequest(BaseModel):
+    # Null detaches: messages keep arriving and are stored, nothing replies.
+    chatbot_id: uuid.UUID | None = None
+
+
+class BridgeEventRequest(BaseModel):
+    """Posted by the Node bridge. Authenticated by a shared secret header, not
+    a JWT — the bridge acts for no particular user."""
+
+    session_id: uuid.UUID
+    event: Literal["qr", "linked", "disconnected", "logged_out", "failed", "message"]
+    qr_data_url: str = ""
+    phone_number: str = ""
+    display_name: str = ""
+    error: str = ""
+    # message events. `from` is a Python keyword, so it arrives via an alias.
+    from_: str = Field(default="", alias="from")
+    jid: str = ""
+    text: str = ""
+    message_id: str = ""
+    pushname: str = ""
+
+    model_config = {"populate_by_name": True}

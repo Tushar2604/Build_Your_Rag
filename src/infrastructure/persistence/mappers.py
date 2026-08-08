@@ -18,9 +18,13 @@ from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Citation, Message, MessageRole
 from src.domain.chatbot.entities import Chatbot, FlowSection, RetrievalConfig, WidgetConfig
 from src.domain.document.entities import Document, IngestionStatus
+from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview, QuestionScore, TranscriptTurn
 from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
+from src.domain.support.entities import IssueReport
+from src.domain.voice.entities import VoiceProfile
+from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.domain.shared.identifiers import (
     BatchCandidateId,
     ChatbotId,
@@ -127,6 +131,7 @@ def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
             min_score=rc.get("min_score", 0.0),
             rerank=rc.get("rerank", False),
         ),
+        voice_profile_id=row.voice_profile_id,
         allowed_document_ids=[DocumentId(uuid.UUID(d)) for d in (row.allowed_document_ids or [])],
         is_public=row.is_public,
         public_key=row.public_key,
@@ -400,6 +405,79 @@ def broadcast_recipient_to_domain(row: m.BroadcastRecipientModel) -> BroadcastRe
         provider_message_id=row.provider_message_id or "",
         session_id=SessionId(row.session_id) if row.session_id else None,
         attempts=row.attempts,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+# --- Integrations / support / voice ---
+
+
+def tenant_integration_to_domain(row: m.TenantIntegrationModel) -> TenantIntegration:
+    return TenantIntegration(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        integration_id=row.integration_id,
+        config=dict(row.config or {}),
+        enabled=row.enabled,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def issue_report_to_domain(row: m.IssueReportModel) -> IssueReport:
+    return IssueReport(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        name=row.name,
+        email=row.email,
+        phone=row.phone or "",
+        report_type=row.report_type,  # type: ignore[arg-type]
+        priority=row.priority,  # type: ignore[arg-type]
+        subject=row.subject,
+        description=row.description,
+        status=row.status,  # type: ignore[arg-type]
+        page_url=row.page_url or "",
+        user_agent=row.user_agent or "",
+        email_sent=row.email_sent,
+        created_at=row.created_at,
+    )
+
+
+def voice_profile_to_domain(row: m.VoiceProfileModel) -> VoiceProfile:
+    return VoiceProfile(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        name=row.name,
+        gender=row.gender,  # type: ignore[arg-type]
+        language=row.language,
+        description=row.description or "",
+        sample_storage_key=row.sample_storage_key or "",
+        sample_content_type=row.sample_content_type or "",
+        sample_bytes=row.sample_bytes,
+        duration_seconds=row.duration_seconds,
+        provider=row.provider or "",
+        provider_voice_id=row.provider_voice_id or "",
+        status=row.status,  # type: ignore[arg-type]
+        error=row.error or "",
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def whatsapp_web_session_to_domain(row: m.WhatsAppWebSessionModel) -> WhatsAppWebSession:
+    return WhatsAppWebSession(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        chatbot_id=ChatbotId(row.chatbot_id) if row.chatbot_id else None,
+        status=row.status,  # type: ignore[arg-type]
+        phone_number=row.phone_number or "",
+        display_name=row.display_name or "",
+        qr_data_url=row.qr_data_url or "",
+        qr_expires_at=row.qr_expires_at,
+        last_error=row.last_error or "",
+        linked_at=row.linked_at,
+        last_seen_at=row.last_seen_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

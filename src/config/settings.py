@@ -121,6 +121,30 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     resend_from_email: str = "interviews@example.com"
 
+    # --- Voice cloning (ElevenLabs) ---
+    # Blank = the Clone Voice page still records, stores, and manages samples,
+    # but cloning stays in "provider not configured" and no synthesis happens.
+    # Same opt-in shape as Google Calendar and Resend.
+    elevenlabs_api_key: str = ""
+    elevenlabs_model: str = "eleven_multilingual_v2"
+    # Guardrails on uploaded samples. The 20s floor is what the UI promises;
+    # the ceiling keeps one bad upload from eating the storage bucket.
+    voice_sample_min_seconds: int = 20
+    voice_sample_max_seconds: int = 300
+    voice_sample_max_mb: int = 25
+
+    # --- WhatsApp bridge (personal-account QR linking) ---
+    # The Node sidecar that owns the WhatsApp multi-device sockets. Blank token
+    # = the feature is off and the Channels page says so; the bridge itself
+    # refuses to start without one.
+    bridge_token: str = ""
+    bridge_base_url: str = "http://127.0.0.1:8081"
+
+    # --- Issue reports ---
+    # Where "Report Issue" submissions are emailed. Blank = reports are still
+    # persisted and visible in the admin list, they just aren't emailed out.
+    support_email: str = ""
+
     # --- Hiring Agent ---
     # Set HIRING_AGENT_ENABLED=true to mount the /api/v1/hiring/* routes.
     # Off by default so the module is invisible to existing chatbot traffic.
@@ -158,6 +182,14 @@ class Settings(BaseSettings):
     @property
     def resend_enabled(self) -> bool:
         return bool(self.resend_api_key)
+
+    @property
+    def voice_cloning_enabled(self) -> bool:
+        return bool(self.elevenlabs_api_key)
+
+    @property
+    def whatsapp_bridge_enabled(self) -> bool:
+        return bool(self.bridge_token)
 
     @field_validator("database_url")
     @classmethod

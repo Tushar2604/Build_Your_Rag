@@ -266,6 +266,8 @@ class Chatbot:
     # that's the "raw prompt" escape hatch, and it clears the sections.
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     flow_sections: list[FlowSection] = field(default_factory=default_flow_sections)
+    # Cloned voice for spoken replies; None = the browser's default voice.
+    voice_profile_id: uuid.UUID | None = None
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     # Empty list = search across ALL ready documents in the tenant.
     allowed_document_ids: list[DocumentId] = field(default_factory=list)

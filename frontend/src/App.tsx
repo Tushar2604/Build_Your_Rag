@@ -18,6 +18,9 @@ import InterviewDetailPage from "./pages/InterviewDetailPage";
 import ChannelsPage       from "./pages/ChannelsPage";
 import BroadcastsPage     from "./pages/BroadcastsPage";
 import BroadcastDetailPage from "./pages/BroadcastDetailPage";
+import IntegrationsPage   from "./pages/IntegrationsPage";
+import CloneVoicePage     from "./pages/CloneVoicePage";
+import ReportIssuePage    from "./pages/ReportIssuePage";
 import AnalyticsPage      from "./pages/AnalyticsPage";
 import SettingsPage       from "./pages/SettingsPage";
 import HiringAgentPage    from "./pages/HiringAgentPage";
@@ -53,6 +56,8 @@ export default function App() {
               <Route path="/assistants/:id" element={<AssistantDetailPage />} />
               <Route path="/knowledge"  element={<KnowledgePage />}      />
               <Route path="/analytics"  element={<AnalyticsPage />}      />
+              <Route path="/clone-voice" element={<CloneVoicePage />}   />
+              <Route path="/report-issue" element={<ReportIssuePage />} />
 
               {/* Admin panel: Owner/Admin roles only */}
               <Route element={<ProtectedRoute requireAdmin />}>
@@ -60,6 +65,7 @@ export default function App() {
                 <Route path="/interviews/bulk" element={<BulkInterviewPage />} />
                 <Route path="/interviews/:id" element={<InterviewDetailPage />} />
                 <Route path="/channels"  element={<ChannelsPage />}      />
+                <Route path="/integrations"   element={<IntegrationsPage />}    />
                 <Route path="/broadcasts"     element={<BroadcastsPage />}      />
                 <Route path="/broadcasts/:id" element={<BroadcastDetailPage />} />
                 <Route path="/hiring-agent" element={<HiringAgentPage />}  />

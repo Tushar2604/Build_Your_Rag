@@ -18,8 +18,10 @@ from src.infrastructure.email.resend import ResendEmailSender
 from src.infrastructure.llm.embeddings import GeminiEmbedder
 from src.infrastructure.llm.providers import FailoverLLM, build_llm
 from src.infrastructure.messaging.event_bus import InProcessEventBus
+from src.infrastructure.messaging.slack import SlackSender
 from src.infrastructure.messaging.twilio_whatsapp import TwilioWhatsAppSender
 from src.infrastructure.messaging.webhook import WebhookSender
+from src.infrastructure.messaging.whatsapp_bridge import WhatsAppBridgeClient
 from src.infrastructure.observability.tracing import build_tracer
 from src.infrastructure.parsing.chunker import RecursiveChunker
 from src.infrastructure.parsing.parser import MultiFormatParser
@@ -29,6 +31,7 @@ from src.infrastructure.ratelimit.anon import SlidingWindowRateLimiter
 from src.infrastructure.security.hashing import Argon2PasswordHasher
 from src.infrastructure.security.tokens import JwtTokenService
 from src.infrastructure.storage.object_storage import build_storage
+from src.infrastructure.voice.elevenlabs import ElevenLabsVoiceCloner
 
 
 class Container:
@@ -58,6 +61,15 @@ class Container:
         # Outbound WhatsApp for broadcasts. Stateless — per-send Twilio
         # credentials come from the channel row, not from .env.
         self.whatsapp_sender = TwilioWhatsAppSender()
+        # Slack incoming-webhook delivery. Stateless for the same reason: the
+        # webhook URL comes from the tenant's integration row.
+        self.slack = SlackSender()
+        # Voice cloning. A no-op (`.enabled is False`) until ELEVENLABS_API_KEY
+        # is set; the Clone Voice page still records and stores samples.
+        self.voice_cloner = ElevenLabsVoiceCloner(settings)
+        # Node sidecar owning the personal-WhatsApp sockets. Disabled
+        # (`.enabled is False`) until BRIDGE_TOKEN is set.
+        self.whatsapp_bridge = WhatsAppBridgeClient(settings)
         # Best-effort burst guard for anonymous public-widget traffic.
         self.anon_rate_limiter = SlidingWindowRateLimiter(
             max_events=settings.public_anon_max_messages,

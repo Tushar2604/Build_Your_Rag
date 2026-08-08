@@ -151,6 +151,133 @@ backwards. Requires the assistant to be connected to a WhatsApp number first
 (see *Channels*); message templates support `{{name}}`, `{{first_name}}`,
 and `{{phone}}`.
 
+## Integrations
+
+A catalogue of 14 connectable services, filtered by category (Calendar & CRM,
+Messaging, Data & Sheets, Custom & Tools) with per-tenant credentials.
+
+```
+GET    /api/v1/integrations-catalogue                  -> cards + connection state
+POST   /api/v1/integrations-catalogue/{id}/connect     { config: {...} }
+POST   /api/v1/integrations-catalogue/{id}/test        -> sends a real message
+DELETE /api/v1/integrations-catalogue/{id}
+```
+
+The catalogue is a code-level registry (`src/domain/integration/catalogue.py`),
+so adding an integration is a deploy rather than a migration; only the
+*connections* are tenant data. Each spec declares its own credential fields, and
+`connect` persists **only** the keys the spec names — an arbitrary JSON blob
+can't be stored under an integration. Secret fields are write-only: responses go
+through `redact()`, so a stored credential never travels back to the browser.
+
+**Three transact today**, and each spec carries a `wired` flag:
+
+| Integration | What it does |
+|---|---|
+| **Slack** | Incoming webhook. Adds `slack` as a Post-Call delivery method — connect it once and post-call reports land in your channel as formatted blocks. |
+| **Custom API** | HMAC-signed POST to any HTTPS endpoint you control. |
+| **Google Calendar** | Reuses the existing per-tenant OAuth flow. |
+
+The other 11 cards render with their Connect button **disabled** and an explicit
+reason (they need a vendor OAuth app plus an adapter). That is deliberate: a
+card that appears to connect and then silently does nothing is worse than one
+that says it isn't ready.
+
+## Personal WhatsApp linking ("Phone WhatsApp")
+
+Scan a QR from **WhatsApp → Settings → Linked Devices** and your personal
+number becomes an inbound channel: whoever messages it gets answered by the
+assistant you attach.
+
+> **Read this before enabling it.** This uses WhatsApp's *unofficial*
+> multi-device protocol via [Baileys](https://github.com/WhiskeySockets/Baileys).
+> It violates Meta's terms of service and the linked number **can be banned**.
+> Use a number you can afford to lose. Official Business numbers go through the
+> Twilio path instead, which is supported and unaffected.
+
+```
+GET    /api/v1/whatsapp-web/options                     -> is the bridge configured/healthy
+POST   /api/v1/whatsapp-web/sessions                    -> create + begin pairing
+GET    /api/v1/whatsapp-web/sessions/{id}               -> QR + countdown + status (polled)
+POST   /api/v1/whatsapp-web/sessions/{id}/refresh       -> new QR after the window lapsed
+PATCH  /api/v1/whatsapp-web/sessions/{id}/assistant     { chatbot_id }  (null = receive only)
+DELETE /api/v1/whatsapp-web/sessions/{id}               -> unlink at WhatsApp, wipe keys
+```
+
+### Architecture
+
+WhatsApp sockets live in a **Node sidecar** (`whatsapp-bridge/`), not in the
+Python process. Baileys is the mature implementation of this protocol and it is
+Node-only; running it out-of-process also means a WhatsApp reconnect storm can't
+take down the API. The two talk over localhost HTTP with a shared secret
+(`BRIDGE_TOKEN`), and the bridge binds to `127.0.0.1` — it has no per-tenant
+authorization of its own, so nothing outside the container should reach it.
+
+Three decisions worth knowing about:
+
+- **Auth state lives in Postgres**, not on disk. Baileys ships an on-disk store,
+  but the container filesystem is ephemeral on free hosts — keys there would be
+  wiped by every sleep or redeploy and force a re-scan. Persisting them means a
+  link survives a restart, and the bridge re-attaches linked sessions on boot.
+- **Inbound only.** Bulk outbound from a linked personal account is what
+  actually triggers bans, so Broadcast stays on the Twilio path where recipients
+  opted in.
+- **Groups, status broadcasts, own echoes, and captionless media are dropped**
+  before they reach the API. Auto-replying into a group chat gets a number
+  reported fast.
+
+Enable it by setting `BRIDGE_TOKEN`; `scripts/start.sh` launches the sidecar
+alongside the API when it's present. Leave it blank and the feature reports
+itself unconfigured and everything else runs unchanged.
+
+## Report Issue
+
+An in-app bug report / feature request form, reachable from the sidebar by any
+signed-in user.
+
+```
+GET  /api/v1/issues/options   -> report types, priorities, whether email is configured
+POST /api/v1/issues           { name, email, phone, report_type, priority, subject, description }
+GET  /api/v1/issues           -> this tenant's reports (admin)
+```
+
+The report is **persisted first and emailed second**. Email is the part that can
+fail (no `SUPPORT_EMAIL`, no `RESEND_API_KEY`, provider outage), and losing what
+a frustrated user just typed because of that would be the worst outcome — a
+report whose email didn't send still appears in the list with `email_sent=false`,
+and the UI says so. User input is HTML-escaped before it reaches the email body.
+
+## Clone Voice
+
+Build a custom AI voice from a microphone recording or an uploaded file, then
+assign it to a voice-channel assistant.
+
+```
+GET    /api/v1/voices/options        -> languages, genders, limits, cloning_enabled
+POST   /api/v1/voices                (multipart: sample + name/gender/language/duration)
+POST   /api/v1/voices/{id}/retry     -> re-send the stored sample to the provider
+POST   /api/v1/voices/{id}/speak     { text } -> audio/mpeg
+GET    /api/v1/voices/{id}/sample    -> the original recording
+DELETE /api/v1/voices/{id}
+```
+
+Recording uses `MediaRecorder` with a wall-clock timer rather than the Blob's
+duration header — a fresh webm/opus blob reports `Infinity` until fully decoded,
+so the timer is what the 20-second gate and the server both rely on. Duration is
+treated as untrusted: the server range-checks it *and* cross-checks it against
+the actual byte count, so a client claiming 30 seconds while sending 2KB is
+rejected.
+
+Cloning uses **ElevenLabs**, opt-in via `ELEVENLABS_API_KEY` in the same shape as
+Google Calendar and Resend. Without a key the page still records, validates,
+stores, lists, and plays back samples — profiles simply land as `failed` with a
+Retry button that works the moment a key is set. The source sample is kept in
+object storage precisely so that retry never asks the user to record again.
+
+Assigning a voice sets `chatbots.voice_profile_id`; the FK is `ON DELETE SET
+NULL`, so deleting a voice degrades that assistant to the browser's default
+voice rather than deleting the assistant.
+
 ## Embed & integrate (the public widget)
 
 A chatbot can be **published** and dropped into any website — no account needed

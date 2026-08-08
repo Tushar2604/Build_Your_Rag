@@ -4,6 +4,11 @@ import {
 } from "../api/whatsapp";
 import { listChatbots, Chatbot } from "../api/chatbots";
 import { ApiError } from "../api/client";
+import WhatsAppQrModal from "../components/WhatsAppQrModal";
+import {
+  WhatsAppWebSession, WhatsAppWebOptions, attachAssistant, createWebSession,
+  getWhatsAppWebOptions, listWebSessions, unlinkWebSession,
+} from "../api/whatsappWeb";
 
 function ConnectModal({
   chatbots,
@@ -139,17 +144,214 @@ function ConnectModal({
   );
 }
 
+/* ── Connection method picker ── */
+
+interface Method {
+  id: string;
+  icon: string;
+  title: string;
+  description: string;
+  available: boolean;
+  badge?: string;
+  note?: string;
+}
+
+const METHODS: Method[] = [
+  {
+    id: "twilio",
+    icon: "🔴",
+    title: "Import from Twilio WhatsApp",
+    description: "Connect your existing Twilio WhatsApp Business number.",
+    available: true,
+  },
+  {
+    id: "phone",
+    icon: "💬",
+    title: "Phone WhatsApp",
+    description: "Scan a QR with your phone. Links your personal account.",
+    available: true,
+    badge: "Try now",
+  },
+  {
+    id: "cloud",
+    icon: "🔵",
+    title: "WhatsApp Cloud Business",
+    description: "Import via Meta Cloud API. WABA ID + token required.",
+    available: false,
+    note: "Needs a Meta app and an adapter for the Cloud API.",
+  },
+  {
+    id: "interakt",
+    icon: "🟢",
+    title: "Import WhatsApp with Interakt",
+    description: "Connect via Interakt API key.",
+    available: false,
+    note: "Needs an Interakt adapter.",
+  },
+];
+
+function MethodCard({ method, onPick }: { method: Method; onPick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      disabled={!method.available}
+      title={method.available ? undefined : method.note}
+      className={`card p-5 text-left flex flex-col relative transition ${
+        method.available
+          ? "hover:border-brand-300 hover:shadow-sm cursor-pointer"
+          : "opacity-60 cursor-not-allowed"
+      }`}
+    >
+      {method.badge && (
+        <span className="absolute top-3 right-3 rounded-full bg-brand-50 text-brand-700 px-2 py-0.5 text-[10px] font-semibold">
+          {method.badge}
+        </span>
+      )}
+      <span className="text-3xl" aria-hidden="true">{method.icon}</span>
+      <h3 className="text-sm font-semibold text-gray-900 mt-3">{method.title}</h3>
+      <p className="text-xs text-gray-500 mt-1 flex-1">{method.description}</p>
+      {!method.available && (
+        <p className="text-[10px] text-amber-700 mt-2">Setup required</p>
+      )}
+    </button>
+  );
+}
+
+/* ── Linked personal (QR) numbers ── */
+
+const WEB_STATUS_STYLES: Record<WhatsAppWebSession["status"], string> = {
+  linked: "bg-emerald-100 text-emerald-700",
+  awaiting_scan: "bg-amber-100 text-amber-700",
+  disconnected: "bg-amber-100 text-amber-700",
+  pending: "bg-gray-100 text-gray-600",
+  logged_out: "bg-red-100 text-red-700",
+  failed: "bg-red-100 text-red-700",
+};
+
+function WebSessionRow({
+  session,
+  chatbots,
+  onChanged,
+  onResume,
+}: {
+  session: WhatsAppWebSession;
+  chatbots: Chatbot[];
+  onChanged: () => void;
+  onResume: (s: WhatsAppWebSession) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function pickAssistant(chatbotId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await attachAssistant(session.id, chatbotId || null);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not attach the assistant.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlink() {
+    setBusy(true);
+    setError(null);
+    try {
+      await unlinkWebSession(session.id);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not unlink.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <li className="py-4 first:pt-0 last:pb-0">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-gray-900">
+              {session.phone_number || "Not linked yet"}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${WEB_STATUS_STYLES[session.status]}`}
+            >
+              {session.status.replace("_", " ")}
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5">{session.health}</p>
+          {session.last_error && (
+            <p className="text-xs text-red-600 mt-1">{session.last_error}</p>
+          )}
+          {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            className="input h-8 text-xs max-w-[14rem]"
+            value={session.chatbot_id ?? ""}
+            disabled={busy || session.status !== "linked"}
+            onChange={(e) => pickAssistant(e.target.value)}
+          >
+            <option value="">No assistant — receive only</option>
+            {chatbots.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+
+          {session.status !== "linked" && (
+            <button
+              type="button"
+              onClick={() => onResume(session)}
+              disabled={busy}
+              className="btn-secondary text-xs px-3 py-1.5 h-auto"
+            >
+              Show QR
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={unlink}
+            disabled={busy}
+            className="text-xs text-gray-400 hover:text-red-600 px-2"
+          >
+            Unlink
+          </button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 export default function ChannelsPage() {
   const [channels, setChannels] = useState<WhatsAppChannel[]>([]);
   const [chatbots, setChatbots] = useState<Chatbot[]>([]);
+  const [webSessions, setWebSessions] = useState<WhatsAppWebSession[]>([]);
+  const [webOptions, setWebOptions] = useState<WhatsAppWebOptions | null>(null);
+  const [qrSession, setQrSession] = useState<WhatsAppWebSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [showConnect, setShowConnect] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  async function loadWeb() {
+    try {
+      setWebSessions(await listWebSessions());
+    } catch {
+      setWebSessions([]);
+    }
+  }
 
   useEffect(() => {
     Promise.all([listWhatsAppChannels(), listChatbots()])
       .then(([c, b]) => { setChannels(c); setChatbots(b); })
       .finally(() => setLoading(false));
+    getWhatsAppWebOptions().then(setWebOptions).catch(() => setWebOptions(null));
+    void loadWeb();
   }, []);
 
   function handleCreated(channel: WhatsAppChannel) {
@@ -165,105 +367,147 @@ export default function ChannelsPage() {
     }
   }
 
+  async function startPhoneLink() {
+    if (webOptions && !webOptions.enabled) {
+      setError(webOptions.message);
+      return;
+    }
+    setStarting(true);
+    setError(null);
+    try {
+      const session = await createWebSession();
+      setQrSession(session);
+      await loadWeb();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not start the pairing session.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  function pickMethod(id: string) {
+    if (id === "twilio") setShowConnect(true);
+    if (id === "phone") void startPhoneLink();
+  }
+
   return (
     <div className="page">
       {showConnect && (
         <ConnectModal chatbots={chatbots} onCreate={handleCreated} onClose={() => setShowConnect(false)} />
       )}
+      {qrSession && (
+        <WhatsAppQrModal
+          session={qrSession}
+          onClose={() => { setQrSession(null); void loadWeb(); }}
+          onLinked={() => { setQrSession(null); void loadWeb(); }}
+        />
+      )}
 
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="page-title">Channels</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {loading ? "Loading…" : `${channels.length} channel${channels.length !== 1 ? "s" : ""} connected`}
-          </p>
-        </div>
-        <button onClick={() => setShowConnect(true)} className="btn-primary">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          Connect WhatsApp
-        </button>
+      <div className="mb-6">
+        <h1 className="page-title">WhatsApp</h1>
+        <p className="text-sm text-gray-500 mt-1">Connect and manage your WhatsApp numbers.</p>
       </div>
 
       {error && (
         <div role="alert" className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
-      {loading ? (
-        <div className="card overflow-hidden">
-          <table className="data-table">
-            <thead><tr><th>Assistant</th><th>Number</th><th>Status</th><th /></tr></thead>
-            <tbody>
-              {[...Array(2)].map((_, i) => (
-                <tr key={i}><td colSpan={4}><div className="skeleton h-5 w-full" /></td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : channels.length === 0 ? (
-        <div className="card">
-          <div className="empty-state">
-            <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center">
-              <svg className="w-6 h-6 text-emerald-600" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
-                <path d="M12.001 2C6.478 2 2 6.478 2 12c0 1.85.505 3.583 1.383 5.07L2.06 22l4.955-1.301C8.464 21.518 10.174 22 12.001 22c5.522 0 10-4.478 10-10S17.523 2 12.001 2zm5.85 15.85a8.313 8.313 0 01-5.85 2.415 8.31 8.31 0 01-4.229-1.152l-.303-.18-3.153.828.842-3.075-.198-.316A8.31 8.31 0 013.69 12c0-4.588 3.723-8.311 8.311-8.311 2.22 0 4.307.865 5.877 2.436a8.257 8.257 0 012.434 5.876c0 2.223-.867 4.31-2.461 5.85z" />
-              </svg>
-            </div>
-            <p className="empty-state-title">No channels connected</p>
-            <p className="empty-state-desc">
-              Deploy any assistant directly into WhatsApp — connect a Twilio WhatsApp number and it
-              answers real conversations, grounded in the same knowledge base as everywhere else.
-            </p>
-            <button onClick={() => setShowConnect(true)} className="btn-primary mt-5">
-              Connect your first number
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="card overflow-hidden">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Assistant</th>
-                <th>Number</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {channels.map((c) => (
-                <tr key={c.id}>
-                  <td className="font-medium text-gray-900">{c.chatbot_name}</td>
-                  <td className="font-mono text-xs text-gray-600">{c.phone_number}</td>
-                  <td>
-                    <span className={`badge ${c.status === "active" ? "badge-live" : "badge-draft"}`}>
-                      {c.status === "active" ? "Active" : c.status}
-                    </span>
-                  </td>
-                  <td className="text-right">
-                    <button
-                      onClick={() => handleDisconnect(c.id)}
-                      className="text-xs text-red-600 hover:text-red-700 font-medium"
-                    >
-                      Disconnect
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="text-center mb-6">
+        <h2 className="text-lg font-semibold text-gray-900">Connect WhatsApp</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          Pick a method below, attach your assistant, and let it handle replies.
+        </p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 mb-8">
+        {METHODS.map((method) => (
+          <MethodCard
+            key={method.id}
+            method={
+              method.id === "phone" && webOptions && !webOptions.enabled
+                ? { ...method, available: false, note: webOptions.message }
+                : method
+            }
+            onPick={() => pickMethod(method.id)}
+          />
+        ))}
+      </div>
+
+      {starting && (
+        <p className="text-sm text-gray-500 mb-4">Starting a pairing session…</p>
+      )}
+
+      {webOptions?.enabled && !webOptions.bridge_healthy && (
+        <div className="mb-6 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
+          The WhatsApp bridge isn't responding right now. {webOptions.message}
         </div>
       )}
 
-      <div className="mt-6 rounded-xl bg-blue-50 border border-blue-100 px-5 py-4 text-sm text-blue-900">
-        <p className="font-semibold mb-1">Don't have a Twilio number yet?</p>
-        <p className="text-blue-800/80 text-xs leading-relaxed">
-          Twilio's WhatsApp Sandbox is free for development — create a Twilio account, activate the
-          Sandbox under Messaging → Try it out → Send a WhatsApp message, and join it by sending the
-          given code from your own phone. Use that Sandbox number and your Account SID / Auth Token
-          (both on your Twilio Console dashboard) above.
-        </p>
+      {webSessions.length > 0 && (
+        <div className="card p-5 mb-6">
+          <h2 className="section-title mb-1">Linked personal numbers</h2>
+          <p className="text-xs text-gray-500 mb-4">
+            Inbound only — these answer people who message them. Broadcasts run on
+            Twilio numbers, where recipients opted in.
+          </p>
+          <ul className="divide-y divide-gray-100">
+            {webSessions.map((s) => (
+              <WebSessionRow
+                key={s.id}
+                session={s}
+                chatbots={chatbots}
+                onChanged={loadWeb}
+                onResume={setQrSession}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="section-title">Twilio Business numbers</h2>
+          <span className="text-xs text-gray-400">
+            {loading ? "Loading…" : `${channels.length} connected`}
+          </span>
+        </div>
+
+        {channels.length === 0 ? (
+          <p className="text-sm text-gray-400 py-4">
+            No Twilio numbers connected. Twilio's WhatsApp Sandbox is free for
+            development — activate it under Messaging → Try it out, then use that
+            number with your Account SID and Auth Token.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr><th>Assistant</th><th>Number</th><th>Status</th><th /></tr>
+              </thead>
+              <tbody>
+                {channels.map((c) => (
+                  <tr key={c.id}>
+                    <td className="font-medium text-gray-900">{c.chatbot_name}</td>
+                    <td className="font-mono text-xs text-gray-600">{c.phone_number}</td>
+                    <td>
+                      <span className={`badge ${c.status === "active" ? "badge-live" : "badge-draft"}`}>
+                        {c.status === "active" ? "Active" : c.status}
+                      </span>
+                    </td>
+                    <td className="text-right">
+                      <button
+                        onClick={() => handleDisconnect(c.id)}
+                        className="text-xs text-red-600 hover:text-red-700 font-medium"
+                      >
+                        Disconnect
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
