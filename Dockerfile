@@ -22,10 +22,26 @@ RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 # --- WhatsApp bridge deps: Baileys sidecar for personal-account QR linking ---
 FROM node:20-slim AS bridge
 WORKDIR /bridge
-COPY whatsapp-bridge/package.json ./
-# No lockfile committed for the bridge; `install` resolves within the semver
-# ranges pinned in package.json.
-RUN npm install --omit=dev --no-audit --no-fund
+
+# Baileys depends on `libsignal` via a git URL (git+https://github.com/
+# whiskeysockets/libsignal-node), and node:20-slim ships no git -- npm fails
+# with a bare "unknown git error". Build-stage only: the runtime image copies
+# the resolved node_modules and never needs git.
+#
+# The git config rewrite is insurance: npm records git deps in the lockfile as
+# git+ssh://git@github.com/..., which needs SSH keys the builder doesn't have.
+# The committed lockfile is already rewritten to https, so this only matters if
+# someone regenerates it -- at which point the build keeps working instead of
+# failing the same way again.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+
+COPY whatsapp-bridge/package.json whatsapp-bridge/package-lock.json ./
+# `ci` over `install`: installs exactly the locked tree (including the pinned
+# libsignal commit), so a deploy can't silently pick up a different Baileys.
+RUN npm ci --omit=dev --no-audit --no-fund
 COPY whatsapp-bridge/src ./src
 
 # --- Runtime: slim image with the venv, app, and built SPA ---
