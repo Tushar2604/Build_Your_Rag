@@ -14,7 +14,7 @@ from src.application.dtos import AskInput
 from src.application.ports.repositories import RequestLog
 from src.application.use_cases.ask_chatbot import AskChatbot
 from src.domain.chat.entities import ChatSession, Message, MessageRole
-from src.domain.chatbot.entities import OPENER_INSTRUCTION
+from src.domain.chatbot.entities import opener_instruction, static_welcome
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
     build_grounded_prompt,
@@ -294,25 +294,37 @@ async def greet(
         if tenant and used >= tenant.daily_token_quota:
             raise QuotaExceededError("Daily token quota exceeded.")
 
+    # With Dynamic off the operator wants their exact words — no model call.
+    verbatim = static_welcome(bot.assistant)
+    instruction = opener_instruction(bot.assistant)
+
     async def event_generator():  # type: ignore[no-untyped-def]
         yield {"event": "citations", "data": "[]"}
         full: list[str] = []
         served_by: dict[str, str] = {}
-        try:
-            async for token in container.llm.stream(
-                bot.system_prompt,
-                OPENER_INSTRUCTION,
-                on_provider=lambda name: served_by.__setitem__("provider", name),
-            ):
-                full.append(token)
-                yield {"event": "token", "data": token}
-        except Exception as exc:  # noqa: BLE001 - log then end the stream
-            log.warning("greeting.generation_failed", error=str(exc))
-            yield {"event": "error", "data": json.dumps({"detail": "Generation failed."})}
-            return
+        if verbatim is not None:
+            full.append(verbatim)
+            yield {"event": "token", "data": verbatim}
+        else:
+            try:
+                async for token in container.llm.stream(
+                    bot.system_prompt,
+                    instruction,
+                    on_provider=lambda name: served_by.__setitem__("provider", name),
+                ):
+                    full.append(token)
+                    yield {"event": "token", "data": token}
+            except Exception as exc:  # noqa: BLE001 - log then end the stream
+                log.warning("greeting.generation_failed", error=str(exc))
+                yield {"event": "error", "data": json.dumps({"detail": "Generation failed."})}
+                return
 
         answer_text = "".join(full)
-        tokens_used = max(1, (len(bot.system_prompt) + len(OPENER_INSTRUCTION) + len(answer_text)) // 4)
+        tokens_used = (
+            0
+            if verbatim is not None
+            else max(1, (len(bot.system_prompt) + len(instruction) + len(answer_text)) // 4)
+        )
 
         assistant = Message(
             session_id=SessionId(session_id),

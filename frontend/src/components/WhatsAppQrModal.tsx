@@ -93,7 +93,7 @@ export default function WhatsAppQrModal({
         </p>
 
         <div className="mt-5 flex flex-col items-center">
-          <div className="w-64 h-64 rounded-xl bg-white border border-gray-200 flex items-center justify-center overflow-hidden">
+          <div className="w-64 h-64 rounded-xl bg-surface border border-gray-200 flex items-center justify-center overflow-hidden">
             {hasQr ? (
               <img
                 src={current.qr_data_url}

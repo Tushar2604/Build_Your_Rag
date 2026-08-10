@@ -14,6 +14,7 @@ from functools import lru_cache
 from src.config.settings import Settings, get_settings
 from src.infrastructure.agent.builder import build_agent_loop
 from src.infrastructure.calendar.google import GoogleCalendarClient
+from src.infrastructure.oauth.providers import OAuthBroker
 from src.infrastructure.email.resend import ResendEmailSender
 from src.infrastructure.llm.embeddings import GeminiEmbedder
 from src.infrastructure.llm.providers import FailoverLLM, build_llm
@@ -54,6 +55,10 @@ class Container:
         # until their settings are configured; nothing in the interview flow
         # hard-depends on either.
         self.calendar = GoogleCalendarClient(settings)
+        # Consent-based integrations (Google Calendar, Google Sheets, Cal.com).
+        # Each provider reports `.enabled is False` until its OAuth app is
+        # registered, and its card then renders as "not configured".
+        self.oauth = OAuthBroker(settings)
         self.email = ResendEmailSender(settings)
         # Post-call delivery. The webhook signature is keyed on the JWT secret
         # so operators have one secret to rotate, not two.

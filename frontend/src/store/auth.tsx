@@ -14,6 +14,9 @@ interface AuthState {
   tenantId: string | null;
   userId: string | null;
   role: string | null;
+  /** Captured at sign-in for the avatar tooltip — the token response does
+   * not carry it, and null is fine (the UI falls back to the tenant id). */
+  email: string | null;
 }
 
 interface AuthContextValue extends AuthState {
@@ -29,7 +32,8 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function saveTokens(resp: TokenResponse) {
+function saveTokens(resp: TokenResponse, email?: string) {
+  if (email) localStorage.setItem("email", email);
   localStorage.setItem("access_token", resp.access_token);
   localStorage.setItem("refresh_token", resp.refresh_token);
   localStorage.setItem("tenant_id", resp.tenant_id);
@@ -43,6 +47,7 @@ function clearTokens() {
   localStorage.removeItem("tenant_id");
   localStorage.removeItem("user_id");
   localStorage.removeItem("role");
+  localStorage.removeItem("email");
 }
 
 function readState(): AuthState {
@@ -51,11 +56,18 @@ function readState(): AuthState {
     tenantId: localStorage.getItem("tenant_id"),
     userId: localStorage.getItem("user_id"),
     role: localStorage.getItem("role"),
+    email: localStorage.getItem("email"),
   };
 }
 
-function stateFromResponse(resp: TokenResponse): AuthState {
-  return { accessToken: resp.access_token, tenantId: resp.tenant_id, userId: resp.user_id, role: resp.role };
+function stateFromResponse(resp: TokenResponse, email?: string): AuthState {
+  return {
+    accessToken: resp.access_token,
+    tenantId: resp.tenant_id,
+    userId: resp.user_id,
+    role: resp.role,
+    email: email ?? localStorage.getItem("email"),
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -63,14 +75,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const resp = await apiLogin(email, password);
-    saveTokens(resp);
-    setState(stateFromResponse(resp));
+    saveTokens(resp, email);
+    setState(stateFromResponse(resp, email));
   }, []);
 
   const register = useCallback(async (tenantName: string, email: string, password: string) => {
     const resp = await apiRegister(tenantName, email, password);
-    saveTokens(resp);
-    setState(stateFromResponse(resp));
+    saveTokens(resp, email);
+    setState(stateFromResponse(resp, email));
   }, []);
 
   const applySession = useCallback((resp: TokenResponse) => {
@@ -80,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     clearTokens();
-    setState({ accessToken: null, tenantId: null, userId: null, role: null });
+    setState({ accessToken: null, tenantId: null, userId: null, role: null, email: null });
   }, []);
 
   return (

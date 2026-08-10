@@ -302,6 +302,38 @@ class GoogleConnectionRepository(Protocol):
 
 
 @dataclass
+class OAuthConnection:
+    """One tenant's consent to one OAuth provider.
+
+    The generic form of GoogleOAuthConnection above, which is now just this
+    record with `provider` pinned to "google_calendar" — kept as its own type so
+    interview scheduling, which only ever means the calendar, doesn't have to
+    name a provider on every call.
+    """
+
+    tenant_id: TenantId
+    provider: str
+    access_token: str
+    expires_at: datetime
+    # Empty when the vendor issued none. The connection works until the access
+    # token expires, then needs re-consent.
+    refresh_token: str = ""
+    scope: str = ""
+    # "Connected as …" — display only.
+    account_label: str = ""
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@runtime_checkable
+class OAuthConnectionRepository(Protocol):
+    async def get(self, tenant_id: TenantId, provider: str) -> OAuthConnection | None: ...
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[OAuthConnection]: ...
+    async def upsert(self, connection: OAuthConnection) -> None: ...
+    async def delete(self, tenant_id: TenantId, provider: str) -> None: ...
+
+
+@dataclass
 class WhatsAppChannel:
     """A chatbot deployed to WhatsApp via Twilio. 1:1 with a chatbot — one
     WhatsApp number serves exactly one chatbot. Credentials are per-channel
@@ -482,6 +514,7 @@ class UnitOfWork(Protocol):
     batch_candidates: BatchCandidateRepository
     tenant_invites: TenantInviteRepository
     google_connections: GoogleConnectionRepository
+    oauth_connections: OAuthConnectionRepository
     whatsapp_channels: WhatsAppChannelRepository
     whatsapp_conversations: WhatsAppConversationRepository
     post_call_configs: PostCallConfigRepository

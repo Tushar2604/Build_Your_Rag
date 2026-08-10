@@ -115,6 +115,16 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
 
+    # --- Cal.com OAuth ---
+    # Cal.com exposes OAuth through its Platform product: you register an OAuth
+    # client and are issued endpoints for your own instance, so the URLs are
+    # settings rather than constants. Blank client id/secret = the Cal.com card
+    # renders as "not configured" and its Connect button stays disabled.
+    cal_com_client_id: str = ""
+    cal_com_client_secret: str = ""
+    cal_com_authorize_url: str = ""
+    cal_com_token_url: str = ""
+
     # --- Resend (candidate interview-invite email) ---
     # Blank = scheduling an interview skips sending email; the admin UI shows a
     # copyable link instead. No hard dependency either way.
@@ -178,6 +188,35 @@ class Settings(BaseSettings):
     @property
     def google_oauth_redirect_uri(self) -> str:
         return f"{self.app_base_url.rstrip('/')}/api/v1/integrations/google/callback"
+
+    def oauth_redirect_uri(self, provider_id: str) -> str:
+        """Where the vendor sends the browser back to. One path per provider, so
+        each can be registered separately in the vendor's console."""
+        return (
+            f"{self.app_base_url.rstrip('/')}/api/v1/integrations/oauth/{provider_id}/callback"
+        )
+
+    def oauth_credentials(self, provider_id: str) -> dict[str, str]:
+        """Client credentials for one OAuth provider.
+
+        Both Google integrations intentionally share one OAuth app — they are
+        the same Google Cloud project, differing only in the scopes requested,
+        and asking an operator to register two clients for one vendor would be
+        busywork.
+        """
+        if provider_id in ("google_calendar", "google_sheets"):
+            return {
+                "client_id": self.google_oauth_client_id,
+                "client_secret": self.google_oauth_client_secret,
+            }
+        if provider_id == "cal_com":
+            return {
+                "client_id": self.cal_com_client_id,
+                "client_secret": self.cal_com_client_secret,
+                "authorize_url": self.cal_com_authorize_url,
+                "token_url": self.cal_com_token_url,
+            }
+        return {}
 
     @property
     def resend_enabled(self) -> bool:

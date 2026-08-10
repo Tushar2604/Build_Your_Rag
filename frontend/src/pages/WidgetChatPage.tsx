@@ -195,7 +195,7 @@ function TextWidgetChat({ publicKey, config }: { publicKey: string; config: Publ
                 className={
                   m.role === "user"
                     ? "rounded-2xl rounded-br-sm px-4 py-2.5 text-white text-sm whitespace-pre-wrap"
-                    : "rounded-2xl rounded-bl-sm px-4 py-2.5 bg-white border border-gray-200 text-gray-800 text-sm whitespace-pre-wrap"
+                    : "rounded-2xl rounded-bl-sm px-4 py-2.5 bg-surface border border-gray-200 text-gray-800 text-sm whitespace-pre-wrap"
                 }
                 style={m.role === "user" ? { backgroundColor: theme } : undefined}
               >
@@ -216,7 +216,7 @@ function TextWidgetChat({ publicKey, config }: { publicKey: string; config: Publ
         </div>
       </div>
 
-      <form onSubmit={send} className="border-t border-gray-200 bg-white px-4 py-3">
+      <form onSubmit={send} className="border-t border-gray-200 bg-surface px-4 py-3">
         <div className="mx-auto max-w-2xl flex gap-2">
           <input
             value={input}

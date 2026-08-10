@@ -3,15 +3,22 @@ import {
 } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
-  getChatbot, updateChatbot, rotateChatbotKey, resetChatbotFlow,
-  Chatbot, Channel, FlowSection,
+  ArrowDown, ArrowLeft, ArrowUp, Bot, BookOpen, ChevronDown, ClipboardCheck,
+  Headphones, History, Loader2, MessageSquare, Phone, Rocket, Sparkles,
+  SlidersHorizontal, X, Zap,
+} from "lucide-react";
+import {
+  getChatbot, updateChatbot, rotateChatbotKey, regenerateFlow,
+  Chatbot, Channel,
 } from "../api/chatbots";
 import { createSession, askStream, greetStream } from "../api/chat";
 import { getChatbotAnalytics, getChatbotRequests, ChatbotAnalytics, RequestLog } from "../api/analytics";
 import { CitationPayload, ApiError } from "../api/client";
 import VoiceCallPanel from "../components/VoiceCallPanel";
-import FlowSectionsEditor from "../components/FlowSectionsEditor";
 import PostCallSettings from "../components/PostCallSettings";
+import AssistantDetailsTab, { Draft } from "../components/assistant/AssistantDetailsTab";
+import KnowledgeBaseTab from "../components/assistant/KnowledgeBaseTab";
+import AssistantIntegrationsTab from "../components/assistant/AssistantIntegrationsTab";
 import { useIdleNudge } from "../hooks/useIdleNudge";
 import { VoiceProfile, listVoices } from "../api/voices";
 
@@ -22,7 +29,13 @@ const NUDGE_LINES = [
 ];
 
 /* ── shared types ── */
-type Tab = "overview" | "config" | "playground" | "post-call" | "deployments" | "analytics";
+type Tab =
+  | "details"
+  | "config"
+  | "knowledge"
+  | "integrations"
+  | "post-call"
+  | "recent-calls";
 
 /* ── helpers ── */
 function CopyButton({ value, label }: { value: string; label?: string }) {
@@ -48,135 +61,13 @@ function SectionCard({ title, children }: { title?: string; children: React.Reac
 }
 
 /* ════════════════════════════════════════════
-   TAB: OVERVIEW
-════════════════════════════════════════════ */
-function OverviewTab({ bot }: { bot: Chatbot }) {
-  const [analytics, setAnalytics]   = useState<ChatbotAnalytics | null>(null);
-  const [requests,  setRequests]    = useState<RequestLog[]>([]);
-  const [loadingA,  setLoadingA]    = useState(true);
-
-  useEffect(() => {
-    Promise.all([
-      getChatbotAnalytics(bot.id, 7),
-      getChatbotRequests(bot.id, 10),
-    ])
-      .then(([a, r]) => { setAnalytics(a); setRequests(r); })
-      .catch(() => {})
-      .finally(() => setLoadingA(false));
-  }, [bot.id]);
-
-  const totalQueries = analytics?.daily.reduce((s, d) => s + d.answers, 0) ?? 0;
-  const scoredDays   = analytics?.daily.filter((d) => d.avg_top_score !== null) ?? [];
-  const avgScore     = scoredDays.length > 0
-    ? scoredDays.reduce((s, d) => s + (d.avg_top_score ?? 0), 0) / scoredDays.length
-    : null;
-  const noCtxRate = analytics && totalQueries > 0
-    ? analytics.daily.reduce((s, d) => s + d.no_context_rate * d.answers, 0) / totalQueries
-    : 0;
-
-  const unanswered = requests.filter((r) => r.no_context || r.refused);
-
-  return (
-    <div className="space-y-6">
-      {/* Metrics */}
-      <div className="grid grid-cols-4 gap-4">
-        {["Queries (7d)", "Avg score", "No-context", "Status"].map((label, i) => {
-          const values = [
-            loadingA ? "—" : totalQueries.toLocaleString(),
-            loadingA ? "—" : (avgScore !== null ? avgScore.toFixed(2) : "—"),
-            loadingA ? "—" : `${Math.round(noCtxRate * 100)}%`,
-            bot.is_public ? "Live" : "Draft",
-          ];
-          const colors = ["", avgScore !== null && avgScore >= 0.7 ? "text-emerald-700" : "text-amber-700", noCtxRate > 0.2 ? "text-amber-700" : "", bot.is_public ? "text-emerald-700" : "text-gray-500"];
-          return (
-            <div key={label} className="metric-card">
-              <p className="metric-card-label">{label}</p>
-              <p className={`metric-card-value ${colors[i]}`}>{values[i]}</p>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Volume sparkline (bar chart) */}
-      {analytics && analytics.daily.length > 0 && (
-        <SectionCard title="Query volume — last 7 days">
-          <div className="flex items-end gap-1 h-20" role="img" aria-label="Query volume chart">
-            {analytics.daily.map((d) => {
-              const max = Math.max(...analytics.daily.map((x) => x.answers), 1);
-              const pct = Math.max(4, Math.round((d.answers / max) * 100));
-              return (
-                <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
-                  <div
-                    className="w-full rounded-t bg-brand-200 hover:bg-brand-400 transition-colors"
-                    style={{ height: `${pct}%` }}
-                    title={`${d.day}: ${d.answers} queries`}
-                  />
-                  <span className="text-[9px] text-gray-400 rotate-0">
-                    {new Date(d.day).toLocaleDateString([], { weekday: "short" }).slice(0, 2)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </SectionCard>
-      )}
-
-      {/* Deployments summary */}
-      <SectionCard title="Deployments">
-        <div className="space-y-2">
-          <div className="flex items-center justify-between py-2 border-b border-gray-100">
-            <div>
-              <p className="text-sm font-medium text-gray-800">Web Widget &amp; Public Link</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {bot.is_public ? bot.public_url : "Enable public access to deploy"}
-              </p>
-            </div>
-            <span className={`badge ${bot.is_public ? "badge-live" : "badge-draft"}`}>
-              {bot.is_public ? "Active" : "Inactive"}
-            </span>
-          </div>
-          <div className="flex items-center justify-between py-2">
-            <div>
-              <p className="text-sm font-medium text-gray-800">REST API</p>
-              <p className="text-xs text-gray-400 mt-0.5">Programmatic access via API key</p>
-            </div>
-            <span className="badge badge-live">Available</span>
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* Unanswered queries */}
-      {unanswered.length > 0 && (
-        <SectionCard title={`Knowledge gaps · ${unanswered.length} unanswered queries`}>
-          <p className="text-xs text-gray-500 mb-3">These queries returned no useful context. Add content to your knowledge base to resolve them.</p>
-          <div className="space-y-1">
-            {unanswered.slice(0, 5).map((r) => (
-              <div key={r.id} className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
-                <span className="text-sm text-gray-700 flex-1 truncate" title={r.query}>{r.query}</span>
-                <span className={`badge ${r.no_context ? "badge-paused" : "badge-draft"} flex-shrink-0`}>
-                  {r.no_context ? "no context" : "refused"}
-                </span>
-              </div>
-            ))}
-          </div>
-          <Link to="/knowledge" className="text-xs text-brand-600 hover:underline mt-3 block">
-            Add to knowledge →
-          </Link>
-        </SectionCard>
-      )}
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════
    TAB: CONFIGURATION
 ════════════════════════════════════════════ */
+/** Call-time settings. Name, welcome message, and the Conversational Flow are
+ * deliberately absent — they belong to the page header and the Assistant
+ * Details tab, and duplicating them here would give each two owners. */
 function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => void }) {
-  const [name,          setName]          = useState(bot.name);
   const [channel,       setChannel]       = useState<Channel>(bot.channel);
-  const [systemPrompt,  setSystemPrompt]  = useState(bot.system_prompt);
-  const [sections,      setSections]      = useState<FlowSection[]>(bot.flow_sections);
-  const [flowBusy,      setFlowBusy]      = useState(false);
   const [voiceId,       setVoiceId]       = useState<string | null>(bot.voice_profile_id);
   const [voices,        setVoices]        = useState<VoiceProfile[]>([]);
   const [topK,          setTopK]          = useState(bot.top_k);
@@ -201,41 +92,18 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
       .catch(() => setVoices([]));
   }, []);
 
-  /** Adopt the stock flow (server-side), then mirror the result locally. */
-  async function useSections() {
-    setFlowBusy(true); setError(null);
-    try {
-      const updated = await resetChatbotFlow(bot.id);
-      onUpdate(updated);
-      setSections(updated.flow_sections);
-      setSystemPrompt(updated.system_prompt);
-      setDirty(false);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to load the stock flow.");
-    } finally { setFlowBusy(false); }
-  }
-
   async function save() {
     setSaving(true); setError(null); setSaved(false);
     try {
       const origins = originsText.split("\n").map((o) => o.trim()).filter(Boolean);
       const updated = await updateChatbot(bot.id, {
-        name, channel, top_k: topK, is_public: isPublic,
-        // The API rejects both prompt forms together, so send whichever one
-        // this assistant is actually authored in.
-        ...(sections.length > 0
-          ? { flow_sections: sections }
-          : { system_prompt: systemPrompt }),
+        channel, top_k: topK, is_public: isPublic,
         allowed_origins: origins,
         voice_profile_id: voiceId,
         voice_profile_id_set: true,
         widget: { display_name: displayName, theme_color: themeColor, welcome_message: welcome, launcher_position: position },
       });
       onUpdate(updated);
-      // The server recomposes and may substitute the stock flow, so take its
-      // answer rather than trusting the local draft.
-      setSections(updated.flow_sections);
-      setSystemPrompt(updated.system_prompt);
       setVoiceId(updated.voice_profile_id);
       setSaved(true); setDirty(false);
       setTimeout(() => setSaved(false), 2000);
@@ -246,33 +114,6 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
 
   return (
     <div className="space-y-6 max-w-2xl">
-      {/* Identity */}
-      <SectionCard title="Identity">
-        <div className="space-y-4">
-          <div>
-            <label className="label">Name</label>
-            <input className="input" value={name} onChange={(e) => { setName(e.target.value); mark(); }} maxLength={120} />
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* Conversational Flow */}
-      <SectionCard title="Conversational Flow">
-        <p className="text-xs text-gray-500 mb-4">
-          The assistant's instructions, as ordered sections. Reorder them, switch
-          one off to test a behaviour, or add a branch for a specific role — no
-          redeploy needed.
-        </p>
-        <FlowSectionsEditor
-          sections={sections}
-          onChange={(next) => { setSections(next); mark(); }}
-          rawPrompt={systemPrompt}
-          onRawPromptChange={(p) => { setSystemPrompt(p); mark(); }}
-          onUseSections={useSections}
-          busy={flowBusy}
-        />
-      </SectionCard>
-
       {/* Channel */}
       <SectionCard title="Channel">
         <div className="segmented">
@@ -439,7 +280,7 @@ interface ChatMsg {
 function PlaygroundTab({ bot }: { bot: Chatbot }) {
   if (bot.channel === "voice") {
     return (
-      <div className="h-[calc(100vh-180px)] min-h-[480px] border border-gray-200 rounded-xl overflow-hidden bg-white">
+      <div className="h-[calc(100vh-180px)] min-h-[480px] border border-gray-200 rounded-xl overflow-hidden bg-surface">
         <VoiceCallPanel
           botName={bot.name}
           adapter={{
@@ -550,7 +391,7 @@ function TextPlaygroundTab({ bot }: { bot: Chatbot }) {
   return (
     <div className="flex gap-0 h-[calc(100vh-180px)] min-h-[480px]">
       {/* Chat panel */}
-      <div className="flex flex-col flex-1 border border-gray-200 rounded-xl overflow-hidden bg-white">
+      <div className="flex flex-col flex-1 border border-gray-200 rounded-xl overflow-hidden bg-surface">
         {/* Session header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex-shrink-0">
           <div className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -593,7 +434,7 @@ function TextPlaygroundTab({ bot }: { bot: Chatbot }) {
                 {msg.role === "user" ? "U" : "AI"}
               </div>
               <div className={`max-w-[78%] flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
-                <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-xs ${msg.role === "user" ? "bg-ink-900 text-white rounded-tr-sm" : "bg-white border border-gray-200 text-gray-800 rounded-tl-sm"}`}>
+                <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-xs ${msg.role === "user" ? "bg-ink-900 text-white rounded-tr-sm" : "bg-surface border border-gray-200 text-gray-800 rounded-tl-sm"}`}>
                   {msg.content || (msg.streaming && (
                     <span className="inline-flex gap-1 items-center">
                       <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.3s]" />
@@ -1201,32 +1042,286 @@ function AnalyticsTab({ bot }: { bot: Chatbot }) {
 /* ════════════════════════════════════════════
    ROOT: AssistantDetailPage
 ════════════════════════════════════════════ */
-const TABS: { id: Tab; label: string }[] = [
-  { id: "overview",    label: "Overview"      },
-  { id: "config",      label: "Configuration" },
-  { id: "playground",  label: "Playground"    },
-  { id: "post-call",   label: "Post-Call"     },
-  { id: "deployments", label: "Deployments"   },
-  { id: "analytics",   label: "Analytics"     },
+const TABS: { id: Tab; label: string; icon: typeof Bot }[] = [
+  { id: "details",     label: "Assistant Details",  icon: Bot },
+  { id: "config",      label: "Call Configuration", icon: SlidersHorizontal },
+  { id: "knowledge",   label: "Knowledge Base",     icon: BookOpen },
+  { id: "integrations",label: "Integrations",       icon: Zap },
+  { id: "post-call",   label: "Post-Call",          icon: ClipboardCheck },
+  { id: "recent-calls",label: "Recent Calls",       icon: History },
 ];
 
+/** Placeholders the welcome message can use, filled from call context at dial
+ * time. Surfaced by the `{ }` button so nobody has to guess the spelling. */
+const WELCOME_VARIABLES: { token: string; description: string }[] = [
+  { token: "user_name",   description: "The contact's name, from your call list." },
+  { token: "first_name",  description: "First name only." },
+  { token: "company",     description: "Your workspace name." },
+  { token: "agent_name",  description: "This assistant's name." },
+  { token: "phone",       description: "The number being dialled." },
+];
+
+/** "Ask AI" — describe the assistant again and have its flow rewritten. */
+function AskAiModal({
+  bot,
+  onClose,
+  onGenerated,
+}: {
+  bot: Chatbot;
+  onClose: () => void;
+  onGenerated: (b: Chatbot) => void;
+}) {
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (description.trim().length < 10 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      onGenerated(await regenerateFlow(bot.id, { description: description.trim() }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not rebuild the flow.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="askai-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <form onSubmit={submit} className="card w-full max-w-xl p-6 space-y-4 animate-scale-in">
+        <div>
+          <h2 id="askai-title" className="text-[15px] font-semibold text-gray-900 flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-brand-400" strokeWidth={2} />
+            Rebuild this assistant's flow
+          </h2>
+          <p className="text-xs text-gray-500 mt-1">
+            Describe what <strong className="text-gray-700">{bot.name}</strong> should do.
+            The AI writes a fresh Conversational Flow and welcome message for it.
+          </p>
+        </div>
+
+        <textarea
+          autoFocus
+          rows={6}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          maxLength={4000}
+          aria-label="Assistant description"
+          placeholder="Call candidates who applied for engineering roles, confirm they're still interested, check their notice period, and book a recruiter callback."
+          className="input resize-y text-[13.5px] leading-relaxed bg-surface-2"
+        />
+
+        <div className="rounded-lg bg-amber-50 border border-amber-200 px-3.5 py-2.5 text-xs text-amber-800">
+          This replaces every section of the current flow. The name, voice, model,
+          knowledge base, and publish state are all kept.
+        </div>
+
+        {error && (
+          <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-2.5 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="btn-secondary text-sm">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={busy || description.trim().length < 10}
+            className="btn-primary text-sm"
+          >
+            {busy ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2} />
+                Writing the flow…
+              </>
+            ) : (
+              "Rebuild flow"
+            )}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** Right-hand slide-over. Used for Test and Deploy, which are both "do a thing
+ * to this assistant" rather than "another page of it". */
+function SlideOver({
+  title,
+  onClose,
+  wide = false,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className={`h-full bg-canvas border-l border-gray-200 flex flex-col animate-slide-up
+                    ${wide ? "w-full max-w-3xl" : "w-full max-w-xl"}`}
+      >
+        <div className="flex items-center justify-between px-5 h-[58px] border-b border-gray-200 flex-shrink-0">
+          <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
+          <button onClick={onClose} aria-label="Close" className="icon-btn">
+            <X className="w-4 h-4" strokeWidth={2} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** The Code view: exactly what the model receives, plus the runtime settings. */
+function CodeView({ bot, draft }: { bot: Chatbot; draft: Draft }) {
+  const composed =
+    draft.sections.length > 0
+      ? draft.sections
+          .filter((s) => s.enabled && s.body.trim())
+          .map((s) => `## ${s.title}\n${s.body.trim()}`)
+          .join("\n\n")
+      : draft.rawPrompt;
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-2xl border border-gray-200 bg-surface p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-[14px] font-semibold text-gray-900">Composed system prompt</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              The enabled sections, folded together in order — this exact string is
+              what the model is given on every turn.
+            </p>
+          </div>
+          <CopyButton value={composed} />
+        </div>
+        <pre className="code-block max-h-[420px] overflow-y-auto">{composed || "(empty)"}</pre>
+      </section>
+
+      <section className="rounded-2xl border border-gray-200 bg-surface p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-[14px] font-semibold text-gray-900">Assistant configuration</h2>
+          <CopyButton value={JSON.stringify(draft.assistant, null, 2)} />
+        </div>
+        <pre className="code-block max-h-64 overflow-y-auto">
+          {JSON.stringify({ id: bot.id, name: draft.name, ...draft.assistant }, null, 2)}
+        </pre>
+      </section>
+    </div>
+  );
+}
+
 export default function AssistantDetailPage() {
-  const { id = "" }              = useParams<{ id: string }>();
+  const { id = "" } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = (searchParams.get("tab") ?? "overview") as Tab;
+  const activeTab = (searchParams.get("tab") ?? "details") as Tab;
 
-  const [bot,     setBot]     = useState<Chatbot | null>(null);
+  const [bot, setBot] = useState<Chatbot | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const fetchBot = useCallback(() => {
+  // Draft of everything the header + Assistant Details tab own. Kept here so
+  // the "Saved / Unsaved" indicator has a single thing to look at.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [codeView, setCodeView] = useState(false);
+  const [showVariables, setShowVariables] = useState(false);
+  const [showAskAi, setShowAskAi] = useState(false);
+  const [showDeploy, setShowDeploy] = useState(false);
+  const [testMode, setTestMode] = useState<"chat" | "web-call" | null>(null);
+
+  /** Reset the draft from a server response — used on load, after Ask AI, and
+   * after every save, so the local copy always reflects what was persisted. */
+  const adopt = useCallback((next: Chatbot) => {
+    setBot(next);
+    setDraft({
+      name: next.name,
+      assistant: next.assistant,
+      sections: next.flow_sections,
+      rawPrompt: next.system_prompt,
+    });
+    setDirty(false);
+  }, []);
+
+  useEffect(() => {
     getChatbot(id)
-      .then(setBot)
+      .then(adopt)
       .catch((e) => setError(e.message ?? "Failed to load assistant."))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, adopt]);
 
-  useEffect(() => { fetchBot(); }, [fetchBot]);
+  function patchDraft(patch: Partial<Draft>) {
+    setDraft((d) => (d ? { ...d, ...patch } : d));
+    setDirty(true);
+    setSaveError(null);
+  }
+
+  async function save() {
+    if (!bot || !draft || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await updateChatbot(bot.id, {
+        name: draft.name,
+        assistant: draft.assistant,
+        // The API rejects both prompt forms together, so send whichever one
+        // this assistant is actually authored in.
+        ...(draft.sections.length > 0
+          ? { flow_sections: draft.sections }
+          : { system_prompt: draft.rawPrompt }),
+      });
+      // The server recomposes and may substitute the stock flow, so take its
+      // answer rather than trusting the local draft.
+      adopt(updated);
+    } catch (e) {
+      setSaveError(e instanceof ApiError ? e.message : "Failed to save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ⌘S saves — this page is edited in long sittings and hunting for the button
+  // every time gets old.
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (dirty) save();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   function setTab(tab: Tab) {
     setSearchParams({ tab }, { replace: true });
@@ -1234,16 +1329,16 @@ export default function AssistantDetailPage() {
 
   if (loading) {
     return (
-      <div className="page">
-        <div className="skeleton h-6 w-48 mb-2" />
-        <div className="skeleton h-4 w-32" />
+      <div className="px-6 py-6">
+        <div className="skeleton h-8 w-64 mb-3" />
+        <div className="skeleton h-4 w-40" />
       </div>
     );
   }
 
-  if (error || !bot) {
+  if (error || !bot || !draft) {
     return (
-      <div className="page">
+      <div className="px-6 py-6">
         <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
           {error ?? "Assistant not found."}
         </div>
@@ -1251,50 +1346,283 @@ export default function AssistantDetailPage() {
     );
   }
 
+  const outgoing = draft.assistant.direction === "outgoing";
+
   return (
-    <div className="page">
-      {/* Breadcrumb + title */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Link to="/assistants" className="text-xs text-gray-400 hover:text-gray-600">Assistants</Link>
-            <span className="text-xs text-gray-300">/</span>
-            <span className="text-xs text-gray-600 font-medium">{bot.name}</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <h1 className="page-title">{bot.name}</h1>
-            {bot.is_public
-              ? <span className="badge badge-live"><span className="dot-live mr-1" />Live</span>
-              : <span className="badge badge-draft"><span className="dot-draft mr-1" />Draft</span>
-            }
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            Top-{bot.top_k} retrieval · {bot.is_public ? "Public access enabled" : "Private — enable public in Configuration"}
-          </p>
-        </div>
-      </div>
+    <div className="animate-fade-in">
+      {showAskAi && (
+        <AskAiModal
+          bot={bot}
+          onClose={() => setShowAskAi(false)}
+          onGenerated={(b) => {
+            adopt(b);
+            setShowAskAi(false);
+            setTab("details");
+          }}
+        />
+      )}
 
-      {/* Tab bar */}
-      <div className="tab-bar mb-6">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={activeTab === t.id ? "tab-item-active" : "tab-item"}
+      {showDeploy && (
+        <SlideOver title="Deploy" wide onClose={() => setShowDeploy(false)}>
+          <DeploymentsTab bot={bot} onUpdate={setBot} />
+        </SlideOver>
+      )}
+
+      {testMode && (
+        <SlideOver
+          title={testMode === "chat" ? "Test with Chat" : "Test with Web Call"}
+          wide
+          onClose={() => setTestMode(null)}
+        >
+          {dirty && (
+            <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-2.5 text-xs text-amber-800">
+              You have unsaved changes — this test runs against the last saved
+              version. Save first to try your edits.
+            </div>
+          )}
+          <PlaygroundTab bot={testMode === "web-call" ? { ...bot, channel: "voice" } : bot} />
+        </SlideOver>
+      )}
+
+      {/* ── Header ── */}
+      <header className="sticky top-0 z-30 bg-ink-950 border-b border-white/[0.06]">
+        <div className="flex items-center gap-3 px-5 h-[58px] flex-wrap">
+          <Link
+            to="/assistants"
+            aria-label="Back to assistants"
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-400
+                       transition-colors hover:bg-white/[0.06] hover:text-gray-100 flex-shrink-0"
           >
-            {t.label}
-          </button>
-        ))}
-      </div>
+            <ArrowLeft className="w-[18px] h-[18px]" strokeWidth={2} />
+          </Link>
 
-      {/* Tab content */}
-      {activeTab === "overview"    && <OverviewTab    bot={bot} />}
-      {activeTab === "config"      && <ConfigTab      bot={bot} onUpdate={setBot} />}
-      {activeTab === "playground"  && <PlaygroundTab  bot={bot} />}
-      {activeTab === "post-call"   && <PostCallSettings chatbotId={bot.id} />}
-      {activeTab === "deployments" && <DeploymentsTab bot={bot} onUpdate={setBot} />}
-      {activeTab === "analytics"   && <AnalyticsTab   bot={bot} />}
+          <input
+            value={draft.name}
+            onChange={(e) => patchDraft({ name: e.target.value })}
+            maxLength={120}
+            aria-label="Assistant name"
+            className="w-[260px] rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5
+                       text-[14px] font-semibold text-gray-100 transition-colors
+                       focus:border-brand-500/60 focus:outline-none focus:bg-white/[0.07]"
+          />
+
+          {/* Direction */}
+          <button
+            type="button"
+            onClick={() =>
+              patchDraft({
+                assistant: {
+                  ...draft.assistant,
+                  direction: outgoing ? "incoming" : "outgoing",
+                },
+              })
+            }
+            title={
+              outgoing
+                ? "Outgoing — the platform dials the contact. Click to switch to incoming."
+                : "Incoming — a contact dials in. Click to switch to outgoing."
+            }
+            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04]
+                       px-3 py-1.5 text-[13px] font-medium text-gray-200 transition-colors
+                       hover:bg-white/[0.08] flex-shrink-0"
+          >
+            {outgoing ? "Outgoing" : "Incoming"}
+            <span className="w-5 h-5 rounded-full bg-brand-500/20 flex items-center justify-center">
+              {outgoing ? (
+                <ArrowUp className="w-3 h-3 text-brand-400" strokeWidth={2.5} />
+              ) : (
+                <ArrowDown className="w-3 h-3 text-brand-400" strokeWidth={2.5} />
+              )}
+            </span>
+          </button>
+
+          {/* Variables reference */}
+          <div className="relative flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowVariables((v) => !v)}
+              aria-expanded={showVariables}
+              title="Variables you can use in the welcome message"
+              className="inline-flex items-center justify-center w-9 h-8 rounded-lg border border-white/10
+                         bg-white/[0.04] text-[13px] font-mono text-gray-300 transition-colors hover:bg-white/[0.08]"
+            >
+              {"{ }"}
+            </button>
+            {showVariables && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowVariables(false)} aria-hidden="true" />
+                <div className="absolute z-20 left-0 top-full mt-1.5 w-72 rounded-lg border border-gray-200
+                                bg-surface shadow-modal p-3">
+                  <p className="text-xs text-gray-500 mb-2">
+                    Use these in the welcome message — they're replaced with call data
+                    when the assistant dials.
+                  </p>
+                  <ul className="space-y-1.5">
+                    {WELCOME_VARIABLES.map((v) => (
+                      <li key={v.token} className="text-xs">
+                        <code className="code-inline">[{v.token}]</code>
+                        <span className="text-gray-500 ml-1.5">{v.description}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Save state */}
+          <div className="flex items-center gap-2 flex-shrink-0 ml-1">
+            {saving ? (
+              <span className="text-[13px] text-gray-400 flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" strokeWidth={2} />
+                Saving…
+              </span>
+            ) : dirty ? (
+              <button onClick={save} className="btn-primary btn-sm">
+                Save changes
+              </button>
+            ) : (
+              <span className="text-[13px] text-gray-500">Saved</span>
+            )}
+          </div>
+
+          <div className="flex-1" />
+
+          <button
+            onClick={() => setShowAskAi(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-cta-500 px-3.5 py-2 text-[13px]
+                       font-semibold text-white transition-colors hover:bg-cta-600 flex-shrink-0"
+          >
+            <Sparkles className="w-4 h-4" strokeWidth={2} />
+            Ask AI
+          </button>
+
+          {/* Test with */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-[13px] font-semibold text-gray-200">Test with</span>
+            <div className="flex items-center rounded-lg overflow-hidden border border-white/10">
+              <button
+                onClick={() => setTestMode("chat")}
+                className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
+                           font-medium text-brand-300 transition-colors hover:bg-brand-600/30"
+              >
+                <MessageSquare className="w-4 h-4" strokeWidth={1.75} />
+                Chat
+              </button>
+              <button
+                onClick={() => setTestMode("web-call")}
+                className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
+                           font-medium text-brand-300 transition-colors hover:bg-brand-600/30
+                           border-l border-white/10"
+              >
+                <Headphones className="w-4 h-4" strokeWidth={1.75} />
+                Web Call
+              </button>
+              <Link
+                to="/channels"
+                title="Phone calls run through a connected number — set one up under Phone Numbers."
+                className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
+                           font-medium text-brand-300 transition-colors hover:bg-brand-600/30
+                           border-l border-white/10"
+              >
+                <Phone className="w-4 h-4" strokeWidth={1.75} />
+                Phone Call
+              </Link>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowDeploy(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04]
+                       px-3.5 py-2 text-[13px] font-medium text-gray-200 transition-colors
+                       hover:bg-white/[0.08] flex-shrink-0"
+          >
+            <Rocket className="w-4 h-4" strokeWidth={1.75} />
+            Deploy
+            <ChevronDown className="w-3.5 h-3.5" strokeWidth={2} />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-3 px-5 pb-3 flex-wrap">
+          <nav className="flex items-center gap-1 flex-wrap" aria-label="Assistant sections">
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              const active = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  aria-current={active ? "page" : undefined}
+                  className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13.5px]
+                              font-medium transition-colors ${
+                                active
+                                  ? "bg-white/[0.08] text-white"
+                                  : "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200"
+                              }`}
+                >
+                  <Icon className="w-4 h-4" strokeWidth={1.75} />
+                  {t.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="flex-1" />
+
+          {/* UI ⇄ Code */}
+          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5">
+            <span className={`text-[13px] font-semibold ${codeView ? "text-gray-500" : "text-brand-400"}`}>UI</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={codeView}
+              aria-label="Show the composed prompt as code"
+              onClick={() => setCodeView((c) => !c)}
+              className={`block w-9 h-5 rounded-full relative transition-colors ${
+                codeView ? "bg-brand-500" : "bg-gray-300"
+              }`}
+            >
+              <span
+                className={`absolute top-[3px] w-3.5 h-3.5 rounded-full bg-white transition-all ${
+                  codeView ? "left-[19px]" : "left-[3px]"
+                }`}
+              />
+            </button>
+            <span className={`text-[13px] font-semibold ${codeView ? "text-brand-400" : "text-gray-500"}`}>Code</span>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Body ── */}
+      <div className="max-w-6xl mx-auto px-6 py-6">
+        {saveError && (
+          <div role="alert" className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+            {saveError}
+          </div>
+        )}
+
+        {codeView ? (
+          <CodeView bot={bot} draft={draft} />
+        ) : (
+          <>
+            {activeTab === "details" && (
+              <AssistantDetailsTab
+                bot={bot}
+                draft={draft}
+                onDraftChange={patchDraft}
+                onReplaceBot={adopt}
+              />
+            )}
+            {activeTab === "config" && <ConfigTab bot={bot} onUpdate={setBot} />}
+            {activeTab === "knowledge" && <KnowledgeBaseTab chatbotId={bot.id} />}
+            {activeTab === "integrations" && <AssistantIntegrationsTab />}
+            {activeTab === "post-call" && <PostCallSettings chatbotId={bot.id} />}
+            {activeTab === "recent-calls" && <AnalyticsTab bot={bot} />}
+          </>
+        )}
+      </div>
     </div>
   );
 }

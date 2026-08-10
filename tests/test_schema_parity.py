@@ -27,6 +27,7 @@ NEW_TABLES = {
     "issue_reports": m.IssueReportModel,
     "voice_profiles": m.VoiceProfileModel,
     "whatsapp_web_sessions": m.WhatsAppWebSessionModel,
+    "oauth_connections": m.OAuthConnectionModel,
 }
 
 
@@ -36,7 +37,7 @@ NEW_TABLES = {
 # checks, skipping 0014 in between.
 DDL_RANGES = (
     ("0011_team_and_custom_questions", "0013_broadcasts"),
-    ("0014_tighten_default_prompt", "0016_whatsapp_web_sessions"),
+    ("0014_tighten_default_prompt", "0018_oauth_connections"),
 )
 
 
@@ -96,6 +97,34 @@ def test_flow_sections_backfills_existing_rows(migration_sql: str) -> None:
     # and the mapper would show an empty flow for bots that never opted out.
     assert re.search(
         r"ADD COLUMN flow_sections JSONB DEFAULT '\[\]'::jsonb NOT NULL", migration_sql
+    )
+
+
+def test_assistant_config_column_is_added_to_chatbots(migration_sql: str) -> None:
+    assert "assistant_config" in {c.name for c in m.ChatbotModel.__table__.columns}
+    assert re.search(r"ALTER TABLE chatbots ADD COLUMN assistant_config", migration_sql)
+
+
+def test_assistant_config_backfills_existing_rows(migration_sql: str) -> None:
+    # Same failure as flow_sections: without a server default every existing
+    # assistant reads NULL and loses its language, voice, and model settings.
+    assert re.search(
+        r"ADD COLUMN assistant_config JSONB DEFAULT '\{.*?\}'::jsonb NOT NULL",
+        migration_sql,
+        re.S,
+    )
+
+
+def test_google_oauth_connections_are_carried_into_the_generic_table(
+    migration_sql: str,
+) -> None:
+    # These rows are consent a user already gave. Dropping the old table
+    # without copying them would silently break interview scheduling until
+    # every tenant reconnected.
+    assert "INSERT INTO oauth_connections" in migration_sql
+    assert "FROM google_oauth_connections" in migration_sql
+    assert migration_sql.index("INSERT INTO oauth_connections") < migration_sql.index(
+        "DROP TABLE google_oauth_connections"
     )
 
 

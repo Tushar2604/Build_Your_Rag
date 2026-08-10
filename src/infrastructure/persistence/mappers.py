@@ -10,13 +10,20 @@ import uuid
 
 from src.application.ports.repositories import (
     GoogleOAuthConnection,
+    OAuthConnection,
     TenantInvite,
     WhatsAppChannel,
     WhatsAppConversation,
 )
 from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Citation, Message, MessageRole
-from src.domain.chatbot.entities import Chatbot, FlowSection, RetrievalConfig, WidgetConfig
+from src.domain.chatbot.entities import (
+    AssistantConfig,
+    Chatbot,
+    FlowSection,
+    RetrievalConfig,
+    WidgetConfig,
+)
 from src.domain.document.entities import Document, IngestionStatus
 from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
@@ -110,7 +117,9 @@ def document_to_domain(row: m.DocumentModel) -> Document:
 def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
     rc = row.retrieval or {}
     wc = row.widget_config or {}
+    ac = row.assistant_config or {}
     default_widget = WidgetConfig()
+    default_assistant = AssistantConfig()
     return Chatbot(
         id=ChatbotId(row.id),
         tenant_id=TenantId(row.tenant_id),
@@ -130,6 +139,16 @@ def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
             top_k=rc.get("top_k", 5),
             min_score=rc.get("min_score", 0.0),
             rerank=rc.get("rerank", False),
+        ),
+        assistant=AssistantConfig(
+            direction=ac.get("direction", default_assistant.direction),
+            languages=list(ac.get("languages") or default_assistant.languages),
+            tts_voice=ac.get("tts_voice", default_assistant.tts_voice),
+            llm_model=ac.get("llm_model", default_assistant.llm_model),
+            stt_model=ac.get("stt_model", default_assistant.stt_model),
+            welcome_message=ac.get("welcome_message", ""),
+            welcome_dynamic=bool(ac.get("welcome_dynamic", True)),
+            welcome_interruptible=bool(ac.get("welcome_interruptible", False)),
         ),
         voice_profile_id=row.voice_profile_id,
         allowed_document_ids=[DocumentId(uuid.UUID(d)) for d in (row.allowed_document_ids or [])],
@@ -156,6 +175,19 @@ def flow_sections_to_jsonb(sections: list[FlowSection]) -> list[dict]:
         {"id": str(s.id), "title": s.title, "body": s.body, "enabled": s.enabled}
         for s in sections
     ]
+
+
+def assistant_config_to_jsonb(ac: AssistantConfig) -> dict:
+    return {
+        "direction": ac.direction,
+        "languages": list(ac.languages),
+        "tts_voice": ac.tts_voice,
+        "llm_model": ac.llm_model,
+        "stt_model": ac.stt_model,
+        "welcome_message": ac.welcome_message,
+        "welcome_dynamic": ac.welcome_dynamic,
+        "welcome_interruptible": ac.welcome_interruptible,
+    }
 
 
 def widget_config_to_jsonb(wc: WidgetConfig) -> dict:
@@ -294,14 +326,29 @@ def batch_candidate_to_domain(row: m.BatchCandidateModel) -> BatchCandidate:
     )
 
 
-def google_connection_to_domain(row: m.GoogleOAuthConnectionModel) -> GoogleOAuthConnection:
+def oauth_connection_to_domain(row: m.OAuthConnectionModel) -> OAuthConnection:
+    return OAuthConnection(
+        tenant_id=TenantId(row.tenant_id),
+        provider=row.provider,
+        access_token=row.access_token,
+        refresh_token=row.refresh_token,
+        expires_at=row.expires_at,
+        scope=row.scope,
+        account_label=row.account_label,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def google_connection_to_domain(row: m.OAuthConnectionModel) -> GoogleOAuthConnection:
+    """The calendar's narrower view of the same row — see OAuthConnection."""
     return GoogleOAuthConnection(
         tenant_id=TenantId(row.tenant_id),
         access_token=row.access_token,
         refresh_token=row.refresh_token,
         expires_at=row.expires_at,
         scope=row.scope,
-        connected_email=row.connected_email,
+        connected_email=row.account_label,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

@@ -205,7 +205,7 @@ export default function DocumentsPage() {
       <div
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
-        className="mb-6 rounded-xl border-2 border-dashed border-gray-200 bg-white px-6 py-10 text-center hover:border-brand-400 hover:bg-brand-50/30 transition-colors"
+        className="mb-6 rounded-xl border-2 border-dashed border-gray-200 bg-surface px-6 py-10 text-center hover:border-brand-400 hover:bg-brand-50/30 transition-colors"
         aria-label="Drop files here to upload"
       >
         <svg className="mx-auto w-10 h-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">

@@ -5,6 +5,7 @@
 // for) and move up/down buttons (keyboard- and screen-reader-reachable, since
 // HTML5 drag-and-drop is neither).
 import { useState } from "react";
+import { ChevronDown, GripVertical, Plus, Trash2 } from "lucide-react";
 import { FlowSection } from "../api/chatbots";
 
 interface Props {
@@ -19,6 +20,35 @@ interface Props {
 }
 
 const MAX_BODY = 6000;
+
+function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={onClick}
+      className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] font-bold uppercase
+                  tracking-wide transition-colors ${
+                    on ? "bg-brand-500/10 text-brand-400" : "bg-gray-100 text-gray-500"
+                  }`}
+    >
+      {on ? "On" : "Off"}
+      <span
+        className={`block w-8 h-[18px] rounded-full relative transition-colors ${
+          on ? "bg-brand-500" : "bg-gray-300"
+        }`}
+      >
+        <span
+          className={`absolute top-[3px] w-3 h-3 rounded-full bg-white transition-all ${
+            on ? "left-[17px]" : "left-[3px]"
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
 
 export default function FlowSectionsEditor({
   sections,
@@ -85,7 +115,8 @@ export default function FlowSectionsEditor({
           <p className="text-xs text-amber-800 mt-1">
             Switch to Conversational Flow to reorder behaviours and toggle them
             individually. Your current prompt will be replaced by the stock
-            sections.
+            sections — or use Ask AI in the header to have one written from a
+            description instead.
           </p>
           <button
             type="button"
@@ -98,7 +129,7 @@ export default function FlowSectionsEditor({
         </div>
         <textarea
           className="input resize-none text-xs leading-relaxed"
-          rows={10}
+          rows={12}
           value={rawPrompt}
           onChange={(e) => onRawPromptChange(e.target.value)}
           maxLength={40000}
@@ -110,8 +141,8 @@ export default function FlowSectionsEditor({
 
   /* ── Section mode ── */
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
+    <div>
+      <div className="flex items-center justify-between mb-4">
         <p className="text-xs text-gray-500">
           {sections.length} section{sections.length !== 1 ? "s" : ""} ·{" "}
           <span className={enabledCount === 0 ? "text-red-600 font-medium" : ""}>
@@ -121,20 +152,23 @@ export default function FlowSectionsEditor({
         <button
           type="button"
           onClick={add}
-          className="btn-secondary text-xs px-3 py-1.5 h-auto"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-surface
+                     px-3.5 py-2 text-[13px] font-medium text-gray-700 transition-colors
+                     hover:bg-gray-100 hover:text-gray-900"
         >
-          + Add Section
+          <Plus className="w-4 h-4" strokeWidth={2} />
+          Add Section
         </button>
       </div>
 
       {enabledCount === 0 && (
-        <div role="alert" className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+        <div role="alert" className="mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
           Every section is off or empty. Saving now restores the stock prompt —
           an assistant with no instructions would answer unguarded.
         </div>
       )}
 
-      <ul className="space-y-2">
+      <ul className="space-y-3">
         {sections.map((section, index) => {
           const isOpen = expanded.has(index);
           return (
@@ -148,37 +182,38 @@ export default function FlowSectionsEditor({
                 setDragIndex(null);
               }}
               onDragEnd={() => setDragIndex(null)}
-              className={`rounded-lg border bg-white transition ${
-                dragIndex === index ? "opacity-50 border-brand-400" : "border-gray-200"
-              } ${section.enabled ? "" : "bg-gray-50"}`}
+              className={`rounded-xl border bg-surface transition ${
+                dragIndex === index ? "opacity-50 border-brand-500" : "border-gray-200"
+              }`}
             >
-              <div className="flex items-center gap-2 p-2">
+              <div className="flex items-center gap-2 p-3">
                 <button
                   type="button"
                   onClick={() => toggleExpanded(index)}
                   aria-expanded={isOpen}
-                  aria-label={isOpen ? "Collapse section" : "Expand section"}
-                  className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 rounded"
+                  aria-label={isOpen ? `Collapse ${section.title}` : `Expand ${section.title}`}
+                  className="w-7 h-7 flex items-center justify-center rounded text-gray-500 hover:text-gray-900"
                 >
-                  <span className={`transition-transform inline-block ${isOpen ? "rotate-90" : ""}`}>
-                    ›
-                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                    strokeWidth={2}
+                  />
                 </button>
 
                 <span
-                  className="cursor-grab select-none text-gray-300 hover:text-gray-500 px-1"
+                  className="cursor-grab select-none text-gray-500 hover:text-gray-300"
                   aria-hidden="true"
                   title="Drag to reorder"
                 >
-                  ⠿
+                  <GripVertical className="w-4 h-4" strokeWidth={2} />
                 </span>
 
-                <span className="text-xs tabular-nums text-gray-400 w-5 text-right">
+                <span className="text-[13px] font-semibold tabular-nums text-gray-600 w-5 text-right">
                   {index + 1}.
                 </span>
 
                 <input
-                  className="input flex-1 h-8 text-sm"
+                  className="input flex-1 h-9 text-[14px] font-semibold bg-surface-2"
                   value={section.title}
                   maxLength={120}
                   aria-label={`Section ${index + 1} title`}
@@ -191,7 +226,7 @@ export default function FlowSectionsEditor({
                     onClick={() => move(index, index - 1)}
                     disabled={index === 0}
                     aria-label={`Move ${section.title} up`}
-                    className="w-6 h-6 text-xs text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400"
+                    className="w-6 h-6 text-xs text-gray-500 hover:text-gray-900 disabled:opacity-30"
                   >
                     ↑
                   </button>
@@ -200,60 +235,40 @@ export default function FlowSectionsEditor({
                     onClick={() => move(index, index + 1)}
                     disabled={index === sections.length - 1}
                     aria-label={`Move ${section.title} down`}
-                    className="w-6 h-6 text-xs text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:hover:text-gray-400"
+                    className="w-6 h-6 text-xs text-gray-500 hover:text-gray-900 disabled:opacity-30"
                   >
                     ↓
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={section.enabled}
-                  aria-label={`${section.title} enabled`}
+                <Toggle
+                  on={section.enabled}
                   onClick={() => patch(index, { enabled: !section.enabled })}
-                  className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition ${
-                    section.enabled
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-gray-200 text-gray-500"
-                  }`}
-                >
-                  {section.enabled ? "On" : "Off"}
-                  <span
-                    className={`block w-6 h-3 rounded-full relative transition ${
-                      section.enabled ? "bg-emerald-500" : "bg-gray-400"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 w-2 h-2 rounded-full bg-white transition-all ${
-                        section.enabled ? "left-3.5" : "left-0.5"
-                      }`}
-                    />
-                  </span>
-                </button>
+                  label={`${section.title} enabled`}
+                />
 
                 <button
                   type="button"
                   onClick={() => remove(index)}
                   aria-label={`Delete ${section.title}`}
-                  className="w-7 h-7 flex items-center justify-center text-gray-300 hover:text-red-600 rounded"
+                  className="w-8 h-8 flex items-center justify-center rounded text-gray-500 hover:text-red-500"
                 >
-                  🗑
+                  <Trash2 className="w-4 h-4" strokeWidth={1.75} />
                 </button>
               </div>
 
               {isOpen && (
-                <div className="px-3 pb-3 pl-12">
+                <div className="px-4 pb-4">
                   <textarea
-                    className="input resize-y text-xs leading-relaxed"
-                    rows={6}
+                    className="input resize-y text-[13px] leading-relaxed bg-surface-2 rounded-lg"
+                    rows={8}
                     value={section.body}
                     maxLength={MAX_BODY}
                     aria-label={`Section ${index + 1} instructions`}
                     placeholder="What should the assistant do in this part of the conversation?"
                     onChange={(e) => patch(index, { body: e.target.value })}
                   />
-                  <p className="text-[10px] text-gray-400 text-right mt-1 tabular-nums">
+                  <p className="text-[10px] text-gray-500 text-right mt-1 tabular-nums">
                     {section.body.length}/{MAX_BODY}
                   </p>
                 </div>
@@ -267,7 +282,7 @@ export default function FlowSectionsEditor({
         type="button"
         onClick={onUseSections}
         disabled={busy}
-        className="text-xs text-gray-400 hover:text-gray-700 underline"
+        className="mt-4 text-xs text-gray-500 hover:text-gray-300 underline"
       >
         Reset to the stock flow
       </button>

@@ -191,7 +191,7 @@ function ConfigRow({ chatbotId, config, onSaved, onRemoved }: RowProps) {
                 className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                   on
                     ? "bg-brand-600 text-white"
-                    : "bg-white text-gray-600 border border-gray-300 hover:border-gray-400"
+                    : "bg-surface text-gray-600 border border-gray-300 hover:border-gray-400"
                 }`}
               >
                 {label}

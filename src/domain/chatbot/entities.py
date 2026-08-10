@@ -172,6 +172,41 @@ OPENER_INSTRUCTION = (
     "normal conversation style above."
 )
 
+def static_welcome(
+    assistant: AssistantConfig, variables: dict[str, str] | None = None
+) -> str | None:
+    """The literal opener to send, or None if the model should author one.
+
+    With Dynamic off, the operator has said "say exactly this" — so the text is
+    returned as-is and the generation call is skipped entirely. Routing it
+    through the model to reproduce a string verbatim costs a request, adds
+    latency, and is the one thing models are least reliable at.
+    """
+    if assistant.welcome_message and not assistant.welcome_dynamic:
+        return assistant.render_welcome(variables or {})
+    return None
+
+
+def opener_instruction(assistant: AssistantConfig) -> str:
+    """What to send as the opening 'user' turn when a session has no messages.
+
+    With a welcome message set and Dynamic on, the configured line becomes the
+    brief rather than the script — the model says the same thing in its own
+    words, which is what makes a repeat caller not hear a recording.
+    """
+    if assistant.welcome_message and assistant.welcome_dynamic:
+        return (
+            "This is the very start of a new conversation. Open it by saying this, "
+            "naturally and in your own words — same meaning, same information, not "
+            "word for word:\n\n"
+            f"{assistant.welcome_message}\n\n"
+            "Keep it to two sentences at most, ask at most one question, and follow "
+            "your normal conversation style above. Any [square-bracket] placeholder "
+            "you don't have a value for should simply be left out of what you say."
+        )
+    return OPENER_INSTRUCTION
+
+
 # Publishable (non-secret) key prefix. It identifies a chatbot to the embeddable
 # widget without exposing the owner's account — analogous to a Stripe pk_ key.
 PUBLIC_KEY_PREFIX = "pk_"
@@ -189,6 +224,89 @@ class RetrievalConfig:
     top_k: int = 5
     min_score: float = 0.0  # cosine similarity floor; 0 = no filter
     rerank: bool = False     # phase-2 toggle
+
+
+# --- Assistant settings ------------------------------------------------------
+# The knobs the builder surfaces above the Conversational Flow: which way the
+# call goes, what the assistant speaks and listens with, and the first thing it
+# says. These are presentation/runtime configuration rather than prompt content,
+# so they live beside `flow_sections` instead of inside it.
+
+# Outgoing = the platform dials the contact. Incoming = a contact dials in.
+CallDirection = Literal["outgoing", "incoming"]
+
+MAX_WELCOME_MESSAGE = 600
+
+# Curated option lists. These are the *labels* the builder offers; the actual
+# synthesis/transcription backend is chosen by the adapters in
+# infrastructure/voice and infrastructure/llm. Keeping them as plain strings
+# means adding a voice is a one-line change and never a migration.
+LANGUAGE_OPTIONS: tuple[str, ...] = (
+    "English (India)", "English (US)", "English (UK)", "Hindi", "Spanish",
+    "French", "German", "Portuguese", "Arabic", "Japanese",
+)
+TTS_VOICE_OPTIONS: tuple[str, ...] = (
+    "Cartesia - Riya", "Cartesia - Aarav", "ElevenLabs - Rachel",
+    "ElevenLabs - Adam", "OpenAI - Alloy", "OpenAI - Nova", "Browser default",
+)
+LLM_MODEL_OPTIONS: tuple[str, ...] = (
+    "gpt-4.1-mini", "gpt-4o-mini", "llama-3.3-70b-versatile",
+    "gemini-2.5-flash", "qwen2.5",
+)
+STT_MODEL_OPTIONS: tuple[str, ...] = ("Soniox", "Deepgram", "Whisper", "Browser")
+
+
+@dataclass
+class AssistantConfig:
+    """Runtime settings shown on the Assistant Details tab.
+
+    Stored as one JSONB blob rather than a column each: the set grows every time
+    a provider is added, and none of it is ever queried or filtered on — it is
+    only ever read whole, alongside the chatbot it configures.
+    """
+
+    direction: str = "outgoing"
+    languages: list[str] = field(default_factory=lambda: ["English (India)"])
+    tts_voice: str = "Cartesia - Riya"
+    llm_model: str = "gpt-4.1-mini"
+    stt_model: str = "Soniox"
+    # The first thing the assistant says. `[variable]` placeholders are filled
+    # from call context at dial time — see `render_welcome`.
+    welcome_message: str = ""
+    # Dynamic = the model rephrases the opener per call instead of reading it
+    # verbatim. Interruptible = the caller can talk over it.
+    welcome_dynamic: bool = True
+    welcome_interruptible: bool = False
+
+    def normalized(self) -> AssistantConfig:
+        return AssistantConfig(
+            direction=self.direction if self.direction in ("outgoing", "incoming") else "outgoing",
+            # Deduplicated, order preserved — the UI renders them as an ordered
+            # list and a repeat would read as a bug.
+            languages=list(
+                dict.fromkeys(lang.strip() for lang in self.languages if lang.strip())
+            )
+            or ["English (India)"],
+            tts_voice=self.tts_voice.strip() or "Browser default",
+            llm_model=self.llm_model.strip() or "gpt-4.1-mini",
+            stt_model=self.stt_model.strip() or "Browser",
+            welcome_message=self.welcome_message.strip()[:MAX_WELCOME_MESSAGE],
+            welcome_dynamic=self.welcome_dynamic,
+            welcome_interruptible=self.welcome_interruptible,
+        )
+
+    def render_welcome(self, variables: dict[str, str]) -> str:
+        """Substitute `[name]`-style placeholders with call context.
+
+        Unknown placeholders are left as-is rather than blanked: an assistant
+        saying "Hi [user_name]" tells the operator their variable never got
+        wired up, where a silent "Hi ," would just look broken to the caller.
+        """
+        text = self.welcome_message
+        for key, value in variables.items():
+            if value:
+                text = text.replace(f"[{key}]", value)
+        return text
 
 
 @dataclass
@@ -268,6 +386,7 @@ class Chatbot:
     flow_sections: list[FlowSection] = field(default_factory=default_flow_sections)
     # Cloned voice for spoken replies; None = the browser's default voice.
     voice_profile_id: uuid.UUID | None = None
+    assistant: AssistantConfig = field(default_factory=AssistantConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     # Empty list = search across ALL ready documents in the tenant.
     allowed_document_ids: list[DocumentId] = field(default_factory=list)

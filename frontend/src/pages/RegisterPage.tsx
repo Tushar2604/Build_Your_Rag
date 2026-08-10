@@ -33,7 +33,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-white">
+    <div className="min-h-screen flex bg-surface">
       {/* Left branding panel */}
       <div className="relative hidden lg:flex flex-col w-[480px] flex-shrink-0 mesh-bg-navy px-12 py-14 overflow-hidden">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_100%,rgba(255,255,255,0.06),transparent_55%)]" />

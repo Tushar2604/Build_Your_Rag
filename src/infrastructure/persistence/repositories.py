@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.application.ports.repositories import (
     ChatbotDailyStat,
     GoogleOAuthConnection,
+    OAuthConnection,
     ProviderStat,
     RequestLog,
     TenantInvite,
@@ -426,6 +427,7 @@ class ChatbotRepositoryImpl:
         row.flow_sections = map_.flow_sections_to_jsonb(chatbot.flow_sections)
         row.voice_profile_id = chatbot.voice_profile_id
         row.retrieval = map_.chatbot_retrieval_to_jsonb(chatbot.retrieval)
+        row.assistant_config = map_.assistant_config_to_jsonb(chatbot.assistant)
         row.allowed_document_ids = [str(d) for d in chatbot.allowed_document_ids]
         row.is_public = chatbot.is_public
         row.public_key = chatbot.public_key
@@ -451,6 +453,7 @@ def _chatbot_to_row(chatbot: Chatbot) -> m.ChatbotModel:
         flow_sections=map_.flow_sections_to_jsonb(chatbot.flow_sections),
         voice_profile_id=chatbot.voice_profile_id,
         retrieval=map_.chatbot_retrieval_to_jsonb(chatbot.retrieval),
+        assistant_config=map_.assistant_config_to_jsonb(chatbot.assistant),
         allowed_document_ids=[str(d) for d in chatbot.allowed_document_ids],
         is_public=chatbot.is_public,
         public_key=chatbot.public_key,
@@ -930,41 +933,95 @@ def _batch_candidate_to_row(candidate: BatchCandidate) -> m.BatchCandidateModel:
     )
 
 
-class GoogleConnectionRepositoryImpl:
+class OAuthConnectionRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
-    async def get(self, tenant_id: TenantId) -> GoogleOAuthConnection | None:
-        row = await self._s.get(m.GoogleOAuthConnectionModel, tenant_id)
-        return map_.google_connection_to_domain(row) if row else None
+    async def get(self, tenant_id: TenantId, provider: str) -> OAuthConnection | None:
+        row = await self._s.get(m.OAuthConnectionModel, (tenant_id, provider))
+        return map_.oauth_connection_to_domain(row) if row else None
 
-    async def upsert(self, connection: GoogleOAuthConnection) -> None:
-        row = await self._s.get(m.GoogleOAuthConnectionModel, connection.tenant_id)
+    async def list_for_tenant(self, tenant_id: TenantId) -> list[OAuthConnection]:
+        rows = (
+            await self._s.execute(
+                select(m.OAuthConnectionModel).where(
+                    m.OAuthConnectionModel.tenant_id == tenant_id
+                )
+            )
+        ).scalars()
+        return [map_.oauth_connection_to_domain(r) for r in rows]
+
+    async def upsert(self, connection: OAuthConnection) -> None:
+        row = await self._s.get(
+            m.OAuthConnectionModel, (connection.tenant_id, connection.provider)
+        )
         if row is None:
             self._s.add(
-                m.GoogleOAuthConnectionModel(
+                m.OAuthConnectionModel(
                     tenant_id=connection.tenant_id,
+                    provider=connection.provider,
                     access_token=connection.access_token,
                     refresh_token=connection.refresh_token,
                     expires_at=connection.expires_at,
                     scope=connection.scope,
-                    connected_email=connection.connected_email,
+                    account_label=connection.account_label,
                     created_at=connection.created_at,
                     updated_at=connection.updated_at,
                 )
             )
-        else:
-            row.access_token = connection.access_token
+            return
+        row.access_token = connection.access_token
+        # Re-consent does not always return a refresh token. Keeping the stored
+        # one rather than blanking it is what stops a reconnect from silently
+        # turning a long-lived connection into an hour-long one.
+        if connection.refresh_token:
             row.refresh_token = connection.refresh_token
-            row.expires_at = connection.expires_at
-            row.scope = connection.scope
-            row.connected_email = connection.connected_email
-            row.updated_at = datetime.now(UTC)
+        row.expires_at = connection.expires_at
+        row.scope = connection.scope
+        if connection.account_label:
+            row.account_label = connection.account_label
+        row.updated_at = datetime.now(UTC)
 
-    async def delete(self, tenant_id: TenantId) -> None:
-        row = await self._s.get(m.GoogleOAuthConnectionModel, tenant_id)
+    async def delete(self, tenant_id: TenantId, provider: str) -> None:
+        row = await self._s.get(m.OAuthConnectionModel, (tenant_id, provider))
         if row is not None:
             await self._s.delete(row)
+
+
+class GoogleConnectionRepositoryImpl:
+    """Interview scheduling's narrower view of `oauth_connections`.
+
+    Calendar code only ever means one provider, so it gets an interface that
+    doesn't make it say so on every call. Same rows, same table.
+    """
+
+    PROVIDER = "google_calendar"
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+        self._generic = OAuthConnectionRepositoryImpl(session)
+
+    async def get(self, tenant_id: TenantId) -> GoogleOAuthConnection | None:
+        row = await self._s.get(m.OAuthConnectionModel, (tenant_id, self.PROVIDER))
+        return map_.google_connection_to_domain(row) if row else None
+
+    async def upsert(self, connection: GoogleOAuthConnection) -> None:
+        await self._generic.upsert(
+            OAuthConnection(
+                tenant_id=connection.tenant_id,
+                provider=self.PROVIDER,
+                access_token=connection.access_token,
+                refresh_token=connection.refresh_token,
+                expires_at=connection.expires_at,
+                scope=connection.scope,
+                account_label=connection.connected_email,
+                created_at=connection.created_at,
+                updated_at=connection.updated_at,
+            )
+        )
+
+    async def delete(self, tenant_id: TenantId) -> None:
+        await self._generic.delete(tenant_id, self.PROVIDER)
 
 
 class WhatsAppChannelRepositoryImpl:

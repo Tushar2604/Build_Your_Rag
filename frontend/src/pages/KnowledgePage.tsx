@@ -190,7 +190,7 @@ export default function KnowledgePage() {
         className={`mb-6 rounded-2xl border-2 border-dashed px-8 py-12 text-center transition-all duration-200 ${
           dragActive
             ? "border-brand-400 bg-brand-50 scale-[1.01] shadow-lift"
-            : "border-gray-200 bg-white hover:border-brand-300 hover:bg-brand-50/30"
+            : "border-gray-200 bg-surface hover:border-brand-300 hover:bg-brand-50/30"
         }`}
         aria-label="Drop files here to upload"
       >

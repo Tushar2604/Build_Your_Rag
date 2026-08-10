@@ -94,7 +94,7 @@ CATALOGUE: tuple[IntegrationSpec, ...] = (
         timing="during_call",
         auth="oauth",
         wired=True,
-        oauth_start_path="/integrations/google/connect",
+        oauth_start_path="/integrations/oauth/google_calendar/start",
     ),
     IntegrationSpec(
         id="cal_com",
@@ -102,16 +102,17 @@ CATALOGUE: tuple[IntegrationSpec, ...] = (
         description="Sync your Cal.com calendar so assistants can book meetings for you.",
         category="calendar_crm",
         timing="during_call",
-        credential_fields=(
-            CredentialField(key="api_key", label="Cal.com API key", secret=True),
-            CredentialField(
-                key="event_type_id",
-                label="Event type ID",
-                placeholder="123456",
-                required=False,
-            ),
+        auth="oauth",
+        wired=True,
+        oauth_start_path="/integrations/oauth/cal_com/start",
+        # Cal.com only issues OAuth clients to its Platform customers, so unlike
+        # Google this one cannot be configured from public docs alone — the card
+        # says so rather than offering a Connect button that would 400.
+        unavailable_reason=(
+            "Needs a Cal.com Platform OAuth client. Set CAL_COM_CLIENT_ID, "
+            "CAL_COM_CLIENT_SECRET, CAL_COM_AUTHORIZE_URL and CAL_COM_TOKEN_URL "
+            "to enable it."
         ),
-        unavailable_reason=_NEEDS_OAUTH_APP,
     ),
     IntegrationSpec(
         id="calendly",
@@ -228,12 +229,9 @@ CATALOGUE: tuple[IntegrationSpec, ...] = (
         description="Append every finished conversation as a row in a spreadsheet.",
         category="data_sheets",
         timing="post_call",
-        credential_fields=(
-            CredentialField(key="spreadsheet_id", label="Spreadsheet ID"),
-            CredentialField(key="worksheet", label="Worksheet name", placeholder="Sheet1",
-                            required=False),
-        ),
-        unavailable_reason=_NEEDS_OAUTH_APP,
+        auth="oauth",
+        wired=True,
+        oauth_start_path="/integrations/oauth/google_sheets/start",
     ),
     IntegrationSpec(
         id="airtable",

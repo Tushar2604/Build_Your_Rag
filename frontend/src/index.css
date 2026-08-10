@@ -2,14 +2,312 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme tokens ──────────────────────────────────────────────────────────
+   Every colour the app uses is a variable, and Tailwind's palette points at
+   those variables (see tailwind.config.js). That is what lets `bg-surface` and
+   `text-gray-900` — written across thirty pages with no `dark:` variants —
+   flip wholesale when `data-theme` changes on <html>.
+
+   Dark is the default: the product is a dark console, and the light theme is
+   the opt-in. `:root` therefore carries dark, and `[data-theme="light"]`
+   overrides it.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root, [data-theme="dark"] {
+    --c-surface: 13 18 20;
+    --c-surface-2: 20 27 29;
+    /* Primary solid control (buttons, active toggles). Fixed teal in both
+       themes — see .btn-primary. */
+    --c-solid: 13 148 136;
+    --c-solid-hover: 15 118 110;
+    --c-canvas: 6 9 10;
+    --c-gray-50: 18 24 26;
+    --c-gray-100: 24 31 34;
+    --c-gray-200: 32 42 45;
+    --c-gray-300: 45 58 62;
+    --c-gray-400: 110 124 128;
+    --c-gray-500: 139 154 157;
+    --c-gray-600: 168 181 184;
+    --c-gray-700: 199 209 211;
+    --c-gray-800: 223 231 232;
+    --c-gray-900: 238 244 245;
+    --c-gray-950: 250 253 253;
+    --c-emerald-50: 7 38 29;
+    --c-emerald-100: 9 52 39;
+    --c-emerald-200: 12 74 55;
+    --c-emerald-300: 17 104 76;
+    --c-emerald-400: 52 211 153;
+    --c-emerald-500: 16 185 129;
+    --c-emerald-600: 52 211 153;
+    --c-emerald-700: 110 231 183;
+    --c-emerald-800: 167 243 208;
+    --c-emerald-900: 209 250 229;
+    --c-red-50: 48 16 16;
+    --c-red-100: 64 20 20;
+    --c-red-200: 88 26 26;
+    --c-red-300: 120 34 34;
+    --c-red-400: 248 113 113;
+    --c-red-500: 239 68 68;
+    --c-red-600: 248 113 113;
+    --c-red-700: 252 165 165;
+    --c-red-800: 254 202 202;
+    --c-red-900: 254 226 226;
+    --c-amber-50: 46 33 8;
+    --c-amber-100: 61 44 10;
+    --c-amber-200: 84 60 14;
+    --c-amber-300: 115 82 19;
+    --c-amber-400: 251 191 36;
+    --c-amber-500: 245 158 11;
+    --c-amber-600: 251 191 36;
+    --c-amber-700: 252 211 77;
+    --c-amber-800: 253 230 138;
+    --c-amber-900: 254 243 199;
+    --c-yellow-50: 44 39 8;
+    --c-yellow-100: 58 52 11;
+    --c-yellow-200: 80 71 15;
+    --c-yellow-300: 110 98 21;
+    --c-yellow-400: 250 204 21;
+    --c-yellow-500: 234 179 8;
+    --c-yellow-600: 250 204 21;
+    --c-yellow-700: 253 224 71;
+    --c-yellow-800: 254 240 138;
+    --c-yellow-900: 254 249 195;
+    --c-green-50: 8 38 20;
+    --c-green-100: 11 52 27;
+    --c-green-200: 15 74 39;
+    --c-green-300: 21 104 54;
+    --c-green-400: 74 222 128;
+    --c-green-500: 34 197 94;
+    --c-green-600: 74 222 128;
+    --c-green-700: 134 239 172;
+    --c-green-800: 187 247 208;
+    --c-green-900: 220 252 231;
+    --c-blue-50: 12 26 48;
+    --c-blue-100: 16 35 64;
+    --c-blue-200: 22 49 88;
+    --c-blue-300: 30 67 120;
+    --c-blue-400: 96 165 250;
+    --c-blue-500: 59 130 246;
+    --c-blue-600: 96 165 250;
+    --c-blue-700: 147 197 253;
+    --c-blue-800: 191 219 254;
+    --c-blue-900: 219 234 254;
+    --c-sky-50: 8 30 44;
+    --c-sky-100: 11 41 59;
+    --c-sky-200: 15 58 84;
+    --c-sky-300: 21 80 115;
+    --c-sky-400: 56 189 248;
+    --c-sky-500: 14 165 233;
+    --c-sky-600: 56 189 248;
+    --c-sky-700: 125 211 252;
+    --c-sky-800: 186 230 253;
+    --c-sky-900: 224 242 254;
+    --c-indigo-50: 22 22 52;
+    --c-indigo-100: 29 29 70;
+    --c-indigo-200: 41 40 98;
+    --c-indigo-300: 56 54 134;
+    --c-indigo-400: 129 140 248;
+    --c-indigo-500: 99 102 241;
+    --c-indigo-600: 129 140 248;
+    --c-indigo-700: 165 180 252;
+    --c-indigo-800: 199 210 254;
+    --c-indigo-900: 224 231 255;
+    --c-violet-50: 28 20 52;
+    --c-violet-100: 38 27 70;
+    --c-violet-200: 53 38 98;
+    --c-violet-300: 72 52 134;
+    --c-violet-400: 167 139 250;
+    --c-violet-500: 139 92 246;
+    --c-violet-600: 167 139 250;
+    --c-violet-700: 196 181 253;
+    --c-violet-800: 221 214 254;
+    --c-violet-900: 237 233 254;
+    --c-purple-50: 34 20 52;
+    --c-purple-100: 46 27 70;
+    --c-purple-200: 63 38 98;
+    --c-purple-300: 86 52 134;
+    --c-purple-400: 192 132 252;
+    --c-purple-500: 168 85 247;
+    --c-purple-600: 192 132 252;
+    --c-purple-700: 216 180 254;
+    --c-purple-800: 233 213 255;
+    --c-purple-900: 243 232 255;
+    --c-orange-50: 48 26 10;
+    --c-orange-100: 64 35 13;
+    --c-orange-200: 88 49 18;
+    --c-orange-300: 120 67 25;
+    --c-orange-400: 251 146 60;
+    --c-orange-500: 249 115 22;
+    --c-orange-600: 251 146 60;
+    --c-orange-700: 253 186 116;
+    --c-orange-800: 254 215 170;
+    --c-orange-900: 255 237 213;
+    --c-brand-50: 6 40 38;
+    --c-brand-100: 8 54 51;
+    --c-brand-200: 11 74 70;
+    --c-brand-300: 16 104 98;
+    --c-brand-400: 45 212 191;
+    --c-brand-500: 20 184 166;
+    --c-brand-600: 45 212 191;
+    --c-brand-700: 94 234 212;
+    --c-brand-800: 153 246 228;
+    --c-brand-900: 204 251 241;
+}
+
+[data-theme="light"] {
+    --c-surface: 255 255 255;
+    --c-surface-2: 250 250 250;
+    --c-solid: 13 148 136;
+    --c-solid-hover: 15 118 110;
+    --c-canvas: 250 250 249;
+    --c-gray-50: 250 250 250;
+    --c-gray-100: 244 244 245;
+    --c-gray-200: 228 228 231;
+    --c-gray-300: 212 212 216;
+    --c-gray-400: 161 161 170;
+    --c-gray-500: 113 113 122;
+    --c-gray-600: 82 82 91;
+    --c-gray-700: 63 63 70;
+    --c-gray-800: 39 39 42;
+    --c-gray-900: 24 24 27;
+    --c-gray-950: 9 9 11;
+    --c-emerald-50: 236 253 245;
+    --c-emerald-100: 209 250 229;
+    --c-emerald-200: 167 243 208;
+    --c-emerald-300: 110 231 183;
+    --c-emerald-400: 52 211 153;
+    --c-emerald-500: 16 185 129;
+    --c-emerald-600: 5 150 105;
+    --c-emerald-700: 4 120 87;
+    --c-emerald-800: 6 95 70;
+    --c-emerald-900: 6 78 59;
+    --c-red-50: 254 242 242;
+    --c-red-100: 254 226 226;
+    --c-red-200: 254 202 202;
+    --c-red-300: 252 165 165;
+    --c-red-400: 248 113 113;
+    --c-red-500: 239 68 68;
+    --c-red-600: 220 38 38;
+    --c-red-700: 185 28 28;
+    --c-red-800: 153 27 27;
+    --c-red-900: 127 29 29;
+    --c-amber-50: 255 251 235;
+    --c-amber-100: 254 243 199;
+    --c-amber-200: 253 230 138;
+    --c-amber-300: 252 211 77;
+    --c-amber-400: 251 191 36;
+    --c-amber-500: 245 158 11;
+    --c-amber-600: 217 119 6;
+    --c-amber-700: 180 83 9;
+    --c-amber-800: 146 64 14;
+    --c-amber-900: 120 53 15;
+    --c-yellow-50: 254 252 232;
+    --c-yellow-100: 254 249 195;
+    --c-yellow-200: 254 240 138;
+    --c-yellow-300: 253 224 71;
+    --c-yellow-400: 250 204 21;
+    --c-yellow-500: 234 179 8;
+    --c-yellow-600: 202 138 4;
+    --c-yellow-700: 161 98 7;
+    --c-yellow-800: 133 77 14;
+    --c-yellow-900: 113 63 18;
+    --c-green-50: 240 253 244;
+    --c-green-100: 220 252 231;
+    --c-green-200: 187 247 208;
+    --c-green-300: 134 239 172;
+    --c-green-400: 74 222 128;
+    --c-green-500: 34 197 94;
+    --c-green-600: 22 163 74;
+    --c-green-700: 21 128 61;
+    --c-green-800: 22 101 52;
+    --c-green-900: 20 83 45;
+    --c-blue-50: 239 246 255;
+    --c-blue-100: 219 234 254;
+    --c-blue-200: 191 219 254;
+    --c-blue-300: 147 197 253;
+    --c-blue-400: 96 165 250;
+    --c-blue-500: 59 130 246;
+    --c-blue-600: 37 99 235;
+    --c-blue-700: 29 78 216;
+    --c-blue-800: 30 64 175;
+    --c-blue-900: 30 58 138;
+    --c-sky-50: 240 249 255;
+    --c-sky-100: 224 242 254;
+    --c-sky-200: 186 230 253;
+    --c-sky-300: 125 211 252;
+    --c-sky-400: 56 189 248;
+    --c-sky-500: 14 165 233;
+    --c-sky-600: 2 132 199;
+    --c-sky-700: 3 105 161;
+    --c-sky-800: 7 89 133;
+    --c-sky-900: 12 74 110;
+    --c-indigo-50: 238 242 255;
+    --c-indigo-100: 224 231 255;
+    --c-indigo-200: 199 210 254;
+    --c-indigo-300: 165 180 252;
+    --c-indigo-400: 129 140 248;
+    --c-indigo-500: 99 102 241;
+    --c-indigo-600: 79 70 229;
+    --c-indigo-700: 67 56 202;
+    --c-indigo-800: 55 48 163;
+    --c-indigo-900: 49 46 129;
+    --c-violet-50: 245 243 255;
+    --c-violet-100: 237 233 254;
+    --c-violet-200: 221 214 254;
+    --c-violet-300: 196 181 253;
+    --c-violet-400: 167 139 250;
+    --c-violet-500: 139 92 246;
+    --c-violet-600: 124 58 237;
+    --c-violet-700: 109 40 217;
+    --c-violet-800: 91 33 182;
+    --c-violet-900: 76 29 149;
+    --c-purple-50: 250 245 255;
+    --c-purple-100: 243 232 255;
+    --c-purple-200: 233 213 255;
+    --c-purple-300: 216 180 254;
+    --c-purple-400: 192 132 252;
+    --c-purple-500: 168 85 247;
+    --c-purple-600: 147 51 234;
+    --c-purple-700: 126 34 206;
+    --c-purple-800: 107 33 168;
+    --c-purple-900: 88 28 135;
+    --c-orange-50: 255 247 237;
+    --c-orange-100: 255 237 213;
+    --c-orange-200: 254 215 170;
+    --c-orange-300: 253 186 116;
+    --c-orange-400: 251 146 60;
+    --c-orange-500: 249 115 22;
+    --c-orange-600: 234 88 12;
+    --c-orange-700: 194 65 12;
+    --c-orange-800: 154 52 18;
+    --c-orange-900: 124 45 18;
+    --c-brand-50: 240 253 250;
+    --c-brand-100: 204 251 241;
+    --c-brand-200: 153 246 228;
+    --c-brand-300: 94 234 212;
+    --c-brand-400: 45 212 191;
+    --c-brand-500: 20 184 166;
+    --c-brand-600: 13 148 136;
+    --c-brand-700: 15 118 110;
+    --c-brand-800: 17 94 89;
+    --c-brand-900: 19 78 74;
+}
+
+
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  html {
+    -webkit-text-size-adjust: 100%;
+    /* Tells the browser which way to render its own chrome — form controls,
+       the scrollbar gutter, and `<select>` popups. Without it those stay light
+       against a dark page. */
+    color-scheme: dark;
+  }
+  [data-theme="light"] { color-scheme: light; }
+
   body {
     font-family: "Inter", system-ui, -apple-system, sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-    /* Literal instead of `@apply bg-canvas` so the base layer never depends on a
-       theme-extension color resolving (keep in sync with theme.colors.canvas). */
-    background-color: #FAFAF9;
+    background-color: rgb(var(--c-canvas));
     @apply text-gray-900 antialiased;
   }
   * { @apply box-border; }
@@ -18,17 +316,18 @@
 
   /* Consistent, quiet focus ring for keyboard users across the app. */
   :focus-visible {
-    @apply outline-none ring-2 ring-brand-500/40 ring-offset-2 ring-offset-white;
+    @apply outline-none ring-2 ring-brand-500/40 ring-offset-2;
+    --tw-ring-offset-color: rgb(var(--c-canvas));
   }
 
   /* Refined scrollbars — unobtrusive, appear on hover. */
-  * { scrollbar-width: thin; scrollbar-color: #d4d4d8 transparent; }
+  * { scrollbar-width: thin; scrollbar-color: rgb(var(--c-gray-300)) transparent; }
   *::-webkit-scrollbar { width: 10px; height: 10px; }
   *::-webkit-scrollbar-thumb {
-    background-color: #d4d4d8; border-radius: 9999px;
+    background-color: rgb(var(--c-gray-300)); border-radius: 9999px;
     border: 3px solid transparent; background-clip: content-box;
   }
-  *::-webkit-scrollbar-thumb:hover { background-color: #a1a1aa; }
+  *::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--c-gray-400)); }
 }
 
 @layer components {
@@ -39,11 +338,18 @@
            hover:-translate-y-px active:translate-y-0
            disabled:pointer-events-none disabled:opacity-50 disabled:translate-y-0;
   }
-  .btn-primary   { @apply btn bg-ink-900 text-white shadow-xs hover:bg-ink-800 active:bg-ink-950; }
-  .btn-accent    { @apply btn bg-brand-600 text-white shadow-xs hover:bg-brand-700 active:bg-brand-800; }
+  /* The primary solid is a fixed teal in both themes rather than "dark ink".
+     Ink-on-canvas works in a light UI and disappears entirely in a dark one,
+     and a button that vanishes when you flip the theme is not a button. */
+  .btn-primary {
+    @apply btn text-white shadow-xs;
+    background-color: rgb(var(--c-solid));
+  }
+  .btn-primary:hover:not(:disabled) { background-color: rgb(var(--c-solid-hover)); }
+  .btn-accent    { @apply btn-primary; }
   /* CTA — warm orange, reserved for primary conversion actions only. */
   .btn-cta       { @apply btn bg-cta-500 text-white shadow-glow-cta hover:bg-cta-600 active:bg-cta-700; }
-  .btn-secondary { @apply btn border border-gray-200 bg-white text-gray-700 shadow-xs hover:bg-gray-50 hover:border-gray-300 active:bg-gray-100; }
+  .btn-secondary { @apply btn border border-gray-200 bg-surface text-gray-700 shadow-xs hover:bg-gray-50 hover:border-gray-300 active:bg-gray-100; }
   .btn-danger    { @apply btn bg-red-600 text-white shadow-xs hover:bg-red-700 active:bg-red-800; }
   .btn-ghost     { @apply btn text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:translate-y-0; }
   .btn-sm        { @apply px-2.5 py-1.5 text-xs gap-1.5 rounded-md; }
@@ -58,7 +364,7 @@
 
   /* ── Form controls ── */
   .input {
-    @apply block w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-xs
+    @apply block w-full rounded-md border border-gray-200 bg-surface px-3 py-2 text-sm text-gray-900 shadow-xs
            placeholder:text-gray-400 transition-colors
            focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20
            disabled:bg-gray-50 disabled:text-gray-500;
@@ -70,18 +376,18 @@
   /* Toggle switch */
   .switch {
     @apply relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full
-           bg-gray-200 transition-colors duration-200 ease-in-out
+           bg-gray-300 transition-colors duration-200 ease-in-out
            focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2;
   }
-  .switch[data-on="true"] { @apply bg-ink-900; }
+  .switch[data-on="true"] { background-color: rgb(var(--c-solid)); }
   .switch-thumb {
     @apply pointer-events-none inline-block h-4 w-4 translate-x-0.5 translate-y-0.5 transform
-           rounded-full bg-white shadow transition duration-200 ease-in-out;
+           rounded-full bg-surface shadow transition duration-200 ease-in-out;
   }
   .switch[data-on="true"] .switch-thumb { @apply translate-x-[18px]; }
 
   /* ── Surfaces ── */
-  .card       { @apply rounded-2xl border border-gray-200/80 bg-white shadow-card; }
+  .card       { @apply rounded-2xl border border-gray-200/80 bg-surface shadow-card; }
   .card-hover { @apply transition-all duration-200 hover:shadow-lift hover:-translate-y-0.5 hover:border-brand-200/60; }
   .divider    { @apply border-t border-gray-100; }
 
@@ -106,7 +412,7 @@
 
   /* Chip — removable / selectable token */
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white
+    @apply inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-surface
            px-2 py-1 text-xs font-medium text-gray-700;
   }
 
@@ -125,8 +431,9 @@
 
   /* Avatar / monogram */
   .avatar {
-    @apply inline-flex items-center justify-center rounded-full bg-ink-900 text-white
+    @apply inline-flex items-center justify-center rounded-full text-white
            font-semibold uppercase tracking-tight;
+    background-color: rgb(var(--c-solid));
   }
 
   /* Inline text link */
@@ -148,25 +455,25 @@
     @apply px-3 py-1.5 text-[13px] font-medium text-gray-500 rounded-md cursor-pointer
            transition-colors hover:text-gray-800;
   }
-  .segmented-item-active { @apply segmented-item bg-white text-gray-900 shadow-xs; }
+  .segmented-item-active { @apply segmented-item bg-surface text-gray-900 shadow-xs; }
 
   .tab-bar  { @apply flex border-b border-gray-200 gap-6; }
   .tab-item {
     @apply pb-3 pt-1 text-sm font-medium text-gray-500 hover:text-gray-800
            border-b-2 border-transparent -mb-px cursor-pointer transition-colors;
   }
-  .tab-item-active { @apply tab-item border-ink-900 text-gray-900; }
+  .tab-item-active { @apply tab-item border-brand-500 text-gray-900; }
 
   /* ── Skeleton shimmer ── */
   .skeleton {
-    @apply rounded bg-gray-100 animate-shimmer;
-    background-image: linear-gradient(90deg, #f3f4f6 25%, #e9eaec 50%, #f3f4f6 75%);
+    @apply rounded animate-shimmer;
+    background-image: linear-gradient(90deg, rgb(var(--c-gray-100)) 25%, rgb(var(--c-gray-200)) 50%, rgb(var(--c-gray-100)) 75%);
     background-size: 200% 100%;
   }
 
   /* ── Code / mono ── */
   .code-block {
-    @apply rounded-lg bg-ink-950 text-gray-100 text-xs font-mono p-4 overflow-x-auto
+    @apply rounded-lg bg-ink-950 text-xs font-mono p-4 overflow-x-auto text-[#dbe3e4]
            whitespace-pre-wrap break-all leading-relaxed;
   }
   .code-inline { @apply rounded bg-gray-100 px-1.5 py-0.5 text-[13px] font-mono text-gray-800; }

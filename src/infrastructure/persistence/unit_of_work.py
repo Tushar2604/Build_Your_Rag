@@ -27,6 +27,7 @@ from src.infrastructure.persistence.repositories import (
     ChunkRepositoryImpl,
     DocumentRepositoryImpl,
     GoogleConnectionRepositoryImpl,
+    OAuthConnectionRepositoryImpl,
     InterviewBatchRepositoryImpl,
     InterviewRepositoryImpl,
     IssueReportRepositoryImpl,
@@ -89,6 +90,7 @@ class SqlAlchemyUnitOfWork:
         self.batch_candidates = BatchCandidateRepositoryImpl(s)
         self.tenant_invites = TenantInviteRepositoryImpl(s)
         self.google_connections = GoogleConnectionRepositoryImpl(s)
+        self.oauth_connections = OAuthConnectionRepositoryImpl(s)
         self.whatsapp_channels = WhatsAppChannelRepositoryImpl(s)
         self.whatsapp_conversations = WhatsAppConversationRepositoryImpl(s)
         self.post_call_configs = PostCallConfigRepositoryImpl(s)

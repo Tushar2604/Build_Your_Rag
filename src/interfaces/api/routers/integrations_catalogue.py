@@ -75,18 +75,32 @@ async def list_catalogue(
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         connections = await uow.tenant_integrations.list_for_tenant(principal.tenant_id)
-        # Google Calendar's connection lives in its own OAuth table, so it isn't
-        # in tenant_integrations — ask that repository directly.
-        google = await uow.google_connections.get(principal.tenant_id)
+        # OAuth consents live in their own table, not in tenant_integrations —
+        # they are tokens the vendor issued, not credentials a tenant typed.
+        oauth = await uow.oauth_connections.list_for_tenant(principal.tenant_id)
 
     by_id = {c.integration_id: c for c in connections}
+    oauth_by_provider = {c.provider: c for c in oauth}
+    configured_providers = container.oauth.enabled_ids()
+
     cards: list[IntegrationCardResponse] = []
     for spec in CATALOGUE:
         card = _card(spec, by_id.get(spec.id))
-        if spec.id == "google_calendar" and google is not None:
-            card.connected = True
-            card.config = {"account": google.connected_email}
-            card.connected_at = None
+        if spec.auth == "oauth":
+            # "Wired" for an OAuth card means the server actually has an app
+            # registered for that vendor. Claiming otherwise would put a Connect
+            # button on a card whose consent screen would reject the request.
+            card.wired = spec.id in configured_providers
+            if not card.wired and not card.unavailable_reason:
+                card.unavailable_reason = (
+                    f"{spec.name} needs an OAuth app registered on this server "
+                    f"before it can be connected."
+                )
+            connection = oauth_by_provider.get(spec.id)
+            if connection is not None:
+                card.connected = True
+                card.config = {"account": connection.account_label}
+                card.connected_at = connection.created_at
         cards.append(card)
 
     return IntegrationCatalogueResponse(
@@ -185,9 +199,15 @@ async def test_connection(
 async def disconnect(
     integration_id: str, principal: AdminPrincipalDep, container: ContainerDep
 ) -> None:
-    if get_spec(integration_id) is None:
+    spec = get_spec(integration_id)
+    if spec is None:
         raise HTTPException(status_code=404, detail="Unknown integration")
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
-        await uow.tenant_integrations.delete(principal.tenant_id, integration_id)
+        if spec.auth == "oauth":
+            # Its consent lives in oauth_connections; deleting the (absent)
+            # tenant_integrations row would report success and disconnect nothing.
+            await uow.oauth_connections.delete(principal.tenant_id, integration_id)
+        else:
+            await uow.tenant_integrations.delete(principal.tenant_id, integration_id)
         await uow.commit()

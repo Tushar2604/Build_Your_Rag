@@ -145,6 +145,10 @@ class ChatbotModel(Base):
     # Empty list = the owner wrote a raw prompt instead of using the flow editor.
     flow_sections: Mapped[list] = mapped_column(JSONB, default=list)
     retrieval: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Runtime settings shown on the Assistant Details tab: call direction,
+    # languages, TTS/LLM/STT choices, and the welcome message. One blob — see
+    # migration 0017 for why it isn't a column each.
+    assistant_config: Mapped[dict] = mapped_column(JSONB, default=dict)
     allowed_document_ids: Mapped[list] = mapped_column(JSONB, default=list)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     # Publishable key embedded in the widget snippet; looked up across tenants.
@@ -323,17 +327,24 @@ class BatchCandidateModel(Base):
     )
 
 
-class GoogleOAuthConnectionModel(Base):
-    __tablename__ = "google_oauth_connections"
+class OAuthConnectionModel(Base):
+    """One tenant's consent to one OAuth provider.
+
+    Keyed (tenant_id, provider) so every consent-based integration shares this
+    table — `provider` matches an id in infrastructure/oauth/providers.
+    """
+
+    __tablename__ = "oauth_connections"
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
     )
+    provider: Mapped[str] = mapped_column(String(64), primary_key=True)
     access_token: Mapped[str] = mapped_column(Text)
-    refresh_token: Mapped[str] = mapped_column(Text)
+    refresh_token: Mapped[str] = mapped_column(Text, default="")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    scope: Mapped[str] = mapped_column(String(500), default="")
-    connected_email: Mapped[str] = mapped_column(String(320), default="")
+    scope: Mapped[str] = mapped_column(String(1000), default="")
+    account_label: Mapped[str] = mapped_column(String(320), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

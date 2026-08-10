@@ -40,7 +40,7 @@ export default function AcceptInvitePage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-white">
+    <div className="min-h-screen flex bg-surface">
       <div className="hidden lg:flex flex-col w-[480px] flex-shrink-0 bg-ink-950 px-12 py-14">
         <div className="flex items-center gap-2.5 mb-auto">
           <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center flex-shrink-0">

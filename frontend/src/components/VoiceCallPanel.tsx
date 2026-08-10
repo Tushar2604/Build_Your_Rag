@@ -329,7 +329,7 @@ export default function VoiceCallPanel({
                   ? "text-white rounded-br-sm"
                   : c.role === "system"
                     ? "bg-amber-50 text-amber-800 text-xs"
-                    : "bg-white border border-gray-200 text-gray-800 rounded-bl-sm"
+                    : "bg-surface border border-gray-200 text-gray-800 rounded-bl-sm"
               }`}
               style={c.role === "user" ? { backgroundColor: theme } : undefined}
             >

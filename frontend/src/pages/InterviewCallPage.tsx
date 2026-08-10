@@ -127,7 +127,7 @@ export default function InterviewCallPage() {
       </div>
 
       <div className="flex-1 flex flex-col">
-        <header className="px-5 py-4 bg-white border-b border-gray-200">
+        <header className="px-5 py-4 bg-surface border-b border-gray-200">
           <h1 className="text-sm font-semibold text-gray-900">
             Hi{bootstrap.candidate_name ? `, ${bootstrap.candidate_name}` : ""} — let's get started
           </h1>

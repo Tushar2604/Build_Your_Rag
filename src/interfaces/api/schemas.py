@@ -128,6 +128,93 @@ class FlowSectionSchema(BaseModel):
     enabled: bool = True
 
 
+class AssistantConfigSchema(BaseModel):
+    """Runtime settings on the Assistant Details tab — see domain AssistantConfig."""
+
+    direction: Literal["outgoing", "incoming"] = "outgoing"
+    languages: list[str] = Field(default_factory=lambda: ["English (India)"], max_length=10)
+    tts_voice: str = Field(default="Cartesia - Riya", max_length=80)
+    llm_model: str = Field(default="gpt-4.1-mini", max_length=80)
+    stt_model: str = Field(default="Soniox", max_length=80)
+    welcome_message: str = Field(default="", max_length=600)
+    welcome_dynamic: bool = True
+    welcome_interruptible: bool = False
+
+
+class AssistantOptionsResponse(BaseModel):
+    """The dropdown contents for the Assistant Settings row. Served from the
+    domain lists so the UI can never offer a value the backend rejects."""
+
+    languages: list[str]
+    tts_voices: list[str]
+    llm_models: list[str]
+    stt_models: list[str]
+    use_cases: list[dict[str, str]]
+
+
+class GenerateAssistantRequest(BaseModel):
+    """Free-text description typed into the create box."""
+
+    description: str = Field(min_length=10, max_length=4000)
+    # One of the use-case chips. Free-form rather than an enum so adding a chip
+    # is a one-line change; unknown values are simply ignored as a hint.
+    use_case: str | None = Field(default=None, max_length=40)
+    channel: Literal["text", "voice"] = "voice"
+
+
+class RegenerateFlowRequest(BaseModel):
+    """"Ask AI" on an existing assistant — refine or rebuild its flow."""
+
+    description: str = Field(min_length=10, max_length=4000)
+    use_case: str | None = Field(default=None, max_length=40)
+
+
+class OAuthStartResponse(BaseModel):
+    """The vendor consent URL. Returned as JSON rather than a redirect — see
+    the module docstring on routers/oauth.py."""
+
+    authorize_url: str
+
+
+class OAuthStatusResponse(BaseModel):
+    provider: str
+    connected: bool
+    account_label: str = ""
+    # False when the server has no OAuth app registered for this vendor, which
+    # is a different problem from "you haven't connected yet".
+    configured: bool = False
+
+
+class AssistantKnowledgeDocument(BaseModel):
+    """A tenant document as seen from one assistant's Knowledge Base tab."""
+
+    id: uuid.UUID
+    filename: str
+    status: str
+    chunk_count: int
+    error: str | None = None
+    attached: bool
+
+
+class AssistantKnowledgeResponse(BaseModel):
+    """Everything the Knowledge Base tab renders in one call.
+
+    `scope_is_all` distinguishes the two meanings of an empty attachment list:
+    an assistant that searches every document in the tenant (the default) versus
+    one deliberately scoped to a set. The tab needs to say which, because the
+    answers differ completely.
+    """
+
+    documents: list[AssistantKnowledgeDocument]
+    attached_count: int
+    ready_count: int
+    scope_is_all: bool
+
+
+class SetAssistantKnowledgeRequest(BaseModel):
+    document_ids: list[uuid.UUID] = Field(default_factory=list, max_length=500)
+
+
 class CreateChatbotRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     channel: Literal["text", "voice"] = "text"
@@ -157,6 +244,12 @@ class UpdateChatbotRequest(BaseModel):
     # to opt in via `voice_profile_id_set`.
     voice_profile_id: uuid.UUID | None = None
     voice_profile_id_set: bool = False
+    # Whole-object replace — the settings row is saved as a unit, and a partial
+    # merge of eight independent knobs would make "which value won" unanswerable.
+    assistant: AssistantConfigSchema | None = None
+    # Which documents this assistant may retrieve from. Empty list = every ready
+    # document in the tenant (see Chatbot.document_filter).
+    allowed_document_ids: list[uuid.UUID] | None = Field(default=None, max_length=500)
 
 
 class ChatbotResponse(BaseModel):
@@ -168,14 +261,19 @@ class ChatbotResponse(BaseModel):
     # to convert it into the stock sections.
     flow_sections: list[FlowSectionSchema]
     voice_profile_id: uuid.UUID | None = None
+    assistant: AssistantConfigSchema
     top_k: int
     is_public: bool
     public_key: str
     allowed_origins: list[str]
+    allowed_document_ids: list[uuid.UUID]
     widget: WidgetConfigSchema
     # Convenience fields the builder UI copies/embeds directly.
     public_url: str
     embed_snippet: str
+    # False when the flow came from `fallback_blueprint` rather than the model —
+    # only ever set on a generate response, so the UI can label it a draft.
+    ai_generated: bool = True
 
 
 # --- Public widget (no auth; called from third-party pages) ---

@@ -57,7 +57,7 @@ function GeneralTab() {
         <p className="text-sm text-gray-500 mb-4">These actions are irreversible. Proceed with caution.</p>
         <button
           type="button"
-          className="btn border border-red-200 text-red-600 hover:bg-red-50 bg-white"
+          className="btn border border-red-200 text-red-600 hover:bg-red-50 bg-surface"
           onClick={() => alert("Contact support to delete your organisation account.")}
         >
           Delete organisation

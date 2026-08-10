@@ -36,6 +36,7 @@ from src.interfaces.api.routers import (
     integrations_catalogue,
     interview_batches,
     interviews,
+    oauth,
     post_call,
     public,
     support,
@@ -186,6 +187,7 @@ def create_app() -> FastAPI:
     app.include_router(post_call.router, prefix=api_prefix)
     app.include_router(broadcasts.router, prefix=api_prefix)
     app.include_router(integrations_catalogue.router, prefix=api_prefix)
+    app.include_router(oauth.router, prefix=api_prefix)
     app.include_router(support.router, prefix=api_prefix)
     app.include_router(voices.router, prefix=api_prefix)
     app.include_router(whatsapp_web.router, prefix=api_prefix)

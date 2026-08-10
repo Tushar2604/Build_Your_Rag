@@ -87,6 +87,67 @@ POST /api/v1/sessions/{id}/stream       { message } -> SSE token stream
 
 Ops: `GET /healthz` (liveness), `GET /readyz` (DB check), `GET /metrics` (Prometheus).
 
+## Building an assistant
+
+You describe the assistant in prose and the platform writes its configuration:
+
+```
+POST /api/v1/chatbots/generate   { description, use_case?, channel? }  -> a saved assistant
+```
+
+An LLM turns the description into a name, a welcome message, and a
+**Conversational Flow** specific to that job — a collections assistant gets a
+payment-arrangement flow, a recruiting one gets a candidate-qualification flow.
+Nothing is templated, and everything is editable afterwards.
+
+Two invariants survive whatever the model returns
+(`src/application/use_cases/generate_assistant.py`):
+
+* **Structure** — sections are sorted back onto a known spine (Identity &
+  Purpose → Facts → Actions & Limits → Flow: … → Scope & Redirects →
+  Guardrails), so the editor always renders something recognisable.
+* **Safety** — a Guardrails section is appended if the model omits one. An
+  assistant with no injection resistance is a liability, and the model is the
+  least reliable place to enforce that.
+
+If generation fails — no API key, rate limit, malformed JSON — the endpoint
+returns a usable draft with `ai_generated: false` rather than an error. The
+owner is mid-create; a dead end is worse than a rough draft.
+
+`POST /api/v1/chatbots/{id}/flow/generate` ("Ask AI") rebuilds an existing
+assistant's flow from a new description, keeping its name, voice, model,
+knowledge base, and publish state.
+
+### Assistant settings
+
+Call direction, languages, TTS voice, LLM, transcription backend, and the
+welcome message live in one `assistant` object, saved as a unit:
+
+```
+GET   /api/v1/chatbots/options            -> the values the UI may offer
+PATCH /api/v1/chatbots/{id}   { assistant: { direction, languages, tts_voice, ... } }
+```
+
+The welcome message supports `[user_name]`-style placeholders filled from call
+data at dial time. With **Dynamic** on, the message is a brief the model
+rephrases per call; with it off the text is spoken verbatim and the generation
+call is skipped entirely — routing a request through a model to reproduce a
+fixed string costs latency and is the one thing models are least reliable at.
+
+### Per-assistant knowledge base
+
+```
+GET /api/v1/chatbots/{id}/knowledge                        -> every doc, flagged attached
+PUT /api/v1/chatbots/{id}/knowledge   { document_ids: [] }  -> replace the selection
+```
+
+An empty selection means "search every ready document in the workspace", which
+is what an assistant starts on. An assistant with **no** knowledge base still
+works — it answers from its Conversational Flow alone — so the UI nudges toward
+uploading one rather than blocking. Submitted ids are intersected with the
+tenant's own documents before saving, so a foreign or deleted id can't sit in
+the allowlist quietly narrowing retrieval.
+
 ## Conversational Flow
 
 An assistant's system prompt is authored as an **ordered list of named,
@@ -170,18 +231,52 @@ so adding an integration is a deploy rather than a migration; only the
 can't be stored under an integration. Secret fields are write-only: responses go
 through `redact()`, so a stored credential never travels back to the browser.
 
-**Three transact today**, and each spec carries a `wired` flag:
+### One-click connect (OAuth)
 
-| Integration | What it does |
-|---|---|
-| **Slack** | Incoming webhook. Adds `slack` as a Post-Call delivery method — connect it once and post-call reports land in your channel as formatted blocks. |
-| **Custom API** | HMAC-signed POST to any HTTPS endpoint you control. |
-| **Google Calendar** | Reuses the existing per-tenant OAuth flow. |
+Consent-based integrations are connected in a popup — the user approves in
+their own account and never handles a token:
 
-The other 11 cards render with their Connect button **disabled** and an explicit
-reason (they need a vendor OAuth app plus an adapter). That is deliberate: a
-card that appears to connect and then silently does nothing is worse than one
-that says it isn't ready.
+```
+GET    /api/v1/integrations/oauth/{provider}/start      -> the vendor consent URL
+GET    /api/v1/integrations/oauth/{provider}/callback   -> stores tokens, closes the popup
+GET    /api/v1/integrations/oauth/{provider}/status
+DELETE /api/v1/integrations/oauth/{provider}
+```
+
+`start` returns the URL as JSON rather than redirecting, because a plain
+browser navigation wouldn't carry the bearer token (the JWT lives in
+localStorage, not a cookie). The callback replies with a page that
+`postMessage`s the result to the app's own origin and closes itself, so the
+page behind the popup never navigates.
+
+**`state` is a signed JWT** carrying the tenant id, the provider, a
+short expiry, and an `oauth-state` audience. That is what lets the callback
+attribute a consent without a session, rejects a replayed or forged value, and
+stops a consent obtained for one provider being redeemed as another (whose
+scopes may be wider).
+
+Providers live in `src/infrastructure/oauth/providers.py` — one client
+parameterised by a spec, since every vendor runs the identical three steps and
+differs only in two URLs, a scope string, and where the account label lives.
+Both Google integrations share one OAuth app; they differ only in scopes.
+Google Sheets asks for `drive.file`, not `drive`, so it can only touch files it
+creates or the user explicitly opens with it.
+
+**What transacts today**, per each spec's `wired` flag:
+
+| Integration | Connect | What it does |
+|---|---|---|
+| **Google Calendar** | 1-click OAuth | Check availability and create events. |
+| **Google Sheets** | 1-click OAuth | Append finished conversations as rows. |
+| **Slack** | Webhook URL | Adds `slack` as a Post-Call delivery method. |
+| **Custom API** | Endpoint URL | HMAC-signed POST to any HTTPS endpoint you control. |
+| **Cal.com** | 1-click OAuth* | *Needs a Cal.com Platform OAuth client — see `.env.example`. |
+
+An OAuth card is only `wired` when the server actually has an app registered for
+that vendor; otherwise it renders with Connect **disabled** and says what is
+missing. The remaining cards do the same (they need a vendor OAuth app plus an
+adapter). That is deliberate: a card that appears to connect and then silently
+does nothing is worse than one that says it isn't ready.
 
 ## Personal WhatsApp linking ("Phone WhatsApp")
 
