@@ -185,33 +185,40 @@ class OAuthStatusResponse(BaseModel):
     configured: bool = False
 
 
+class ChatbotCardCounts(BaseModel):
+    """Per-assistant counts the list cards show at a glance."""
+
+    knowledge_files: int = 0
+    post_call_actions: int = 0
+    integrations: int = 0
+
+
 class AssistantKnowledgeDocument(BaseModel):
-    """A tenant document as seen from one assistant's Knowledge Base tab."""
+    """One document in this assistant's own knowledge base."""
 
     id: uuid.UUID
     filename: str
     status: str
     chunk_count: int
     error: str | None = None
-    attached: bool
 
 
 class AssistantKnowledgeResponse(BaseModel):
-    """Everything the Knowledge Base tab renders in one call.
+    """This assistant's knowledge base.
 
-    `scope_is_all` distinguishes the two meanings of an empty attachment list:
-    an assistant that searches every document in the tenant (the default) versus
-    one deliberately scoped to a set. The tab needs to say which, because the
-    answers differ completely.
+    Only its own documents — an assistant never sees, or retrieves from, files
+    uploaded for a different one. `ready_count` is what actually answers
+    questions; the rest are still ingesting or failed.
     """
 
     documents: list[AssistantKnowledgeDocument]
-    attached_count: int
+    total_count: int
     ready_count: int
-    scope_is_all: bool
 
 
-class SetAssistantKnowledgeRequest(BaseModel):
+class AttachAssistantKnowledgeRequest(BaseModel):
+    """Documents just uploaded for this assistant. Additive — see the route."""
+
     document_ids: list[uuid.UUID] = Field(default_factory=list, max_length=500)
 
 
@@ -254,6 +261,9 @@ class UpdateChatbotRequest(BaseModel):
 
 class ChatbotResponse(BaseModel):
     id: uuid.UUID
+    # Short id for humans ("#236637"). Assigned by the database, so it is
+    # absent only for an assistant that has not been persisted yet.
+    display_id: int | None = None
     name: str
     channel: Literal["text", "voice"]
     system_prompt: str
@@ -274,6 +284,8 @@ class ChatbotResponse(BaseModel):
     # False when the flow came from `fallback_blueprint` rather than the model —
     # only ever set on a generate response, so the UI can label it a draft.
     ai_generated: bool = True
+    # Populated on list/get so a card needs no follow-up requests.
+    counts: ChatbotCardCounts = Field(default_factory=ChatbotCardCounts)
 
 
 # --- Public widget (no auth; called from third-party pages) ---
@@ -582,10 +594,40 @@ class BroadcastRecipientInput(BaseModel):
     display_name: str = Field(default="", max_length=160)
 
 
+BroadcastModeLiteral = Literal["broadcast", "broadcast_reply"]
+SenderKindLiteral = Literal["cloud_api", "personal"]
+
+
+class CampaignSenderResponse(BaseModel):
+    """One WhatsApp number a campaign can send from.
+
+    Cloud API numbers and QR-linked personal accounts are listed together
+    because, from the operator's side, both are just "a WhatsApp number I can
+    send from" — the difference only matters to the transport.
+    """
+
+    id: uuid.UUID
+    kind: SenderKindLiteral
+    label: str
+    phone_number: str
+    # False when the sender exists but can't send right now (a personal account
+    # that isn't linked, or a bridge that isn't configured). The reason says why.
+    available: bool = True
+    unavailable_reason: str = ""
+    # The assistant already bound to this number, if any.
+    chatbot_id: uuid.UUID | None = None
+    chatbot_name: str = ""
+
+
 class CreateBroadcastRequest(BaseModel):
     chatbot_id: uuid.UUID
     name: str = Field(min_length=1, max_length=160)
     message_template: str = Field(min_length=1, max_length=1600)
+    mode: BroadcastModeLiteral = "broadcast_reply"
+    # Which number to send from. Omitted = fall back to the assistant's own
+    # Cloud API channel, which is how campaigns worked before senders existed.
+    sender_kind: SenderKindLiteral | None = None
+    sender_id: uuid.UUID | None = None
     # Structured contacts, or a pasted CSV/newline blob — the UI offers both and
     # the server normalizes either into recipients.
     recipients: list[BroadcastRecipientInput] = Field(default_factory=list, max_length=5000)
@@ -612,7 +654,10 @@ class BroadcastResponse(BaseModel):
     id: uuid.UUID
     chatbot_id: uuid.UUID
     chatbot_name: str
-    whatsapp_channel_id: uuid.UUID
+    whatsapp_channel_id: uuid.UUID | None = None
+    whatsapp_session_id: uuid.UUID | None = None
+    sender_kind: SenderKindLiteral = "cloud_api"
+    mode: BroadcastModeLiteral = "broadcast_reply"
     from_number: str
     name: str
     message_template: str

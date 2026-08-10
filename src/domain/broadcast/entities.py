@@ -23,6 +23,18 @@ from src.domain.shared.identifiers import ChatbotId, SessionId, TenantId, new_id
 # completed -> every recipient reached a terminal state, or operator closed it
 BroadcastStatus = Literal["queued", "sending", "paused", "completed"]
 
+# What happens after the message lands.
+#   broadcast       -> an announcement. Replies are still recorded (the funnel
+#                      counts them) but the assistant does not answer.
+#   broadcast_reply -> the assistant picks up the conversation, so a reply gets
+#                      the same grounded, multi-turn handling as any inbound.
+BroadcastMode = Literal["broadcast", "broadcast_reply"]
+
+# Which WhatsApp the campaign sends from.
+#   cloud_api -> a Twilio/Cloud API business number (whatsapp_channels)
+#   personal  -> a QR-linked personal account (whatsapp_web_sessions)
+SenderKind = Literal["cloud_api", "personal"]
+
 # Recipient lifecycle. `sent -> delivered -> read` are Twilio status-callback
 # transitions; `replied` is ours, set when an inbound message arrives on that
 # recipient's conversation. Only `failed` and `replied` are terminal-ish —
@@ -138,9 +150,15 @@ class BroadcastRecipient:
 class Broadcast:
     tenant_id: TenantId
     chatbot_id: ChatbotId
-    whatsapp_channel_id: uuid.UUID
     name: str
     message_template: str
+    # Exactly one of these is set, per `sender_kind`. Two typed fields rather
+    # than one polymorphic id, so "which table does this point at" is never a
+    # guess.
+    whatsapp_channel_id: uuid.UUID | None = None
+    whatsapp_session_id: uuid.UUID | None = None
+    sender_kind: SenderKind = "cloud_api"
+    mode: BroadcastMode = "broadcast_reply"
     id: uuid.UUID = field(default_factory=new_id)
     status: BroadcastStatus = "queued"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -169,9 +187,23 @@ class Broadcast:
             .replace("{{phone}}", recipient.phone_number)
         )[:MAX_MESSAGE_CHARS]
 
+    @property
+    def sender_id(self) -> uuid.UUID | None:
+        """Whichever sender this campaign actually uses."""
+        return (
+            self.whatsapp_channel_id
+            if self.sender_kind == "cloud_api"
+            else self.whatsapp_session_id
+        )
+
+    def replies_are_answered(self) -> bool:
+        return self.mode == "broadcast_reply"
+
     def validation_error(self) -> str | None:
         if not self.name.strip():
             return "Campaign name is required."
+        if self.sender_id is None:
+            return "Choose the WhatsApp number this campaign sends from."
         if not self.message_template.strip():
             return "The broadcast message is required."
         if len(self.message_template) > MAX_MESSAGE_CHARS:

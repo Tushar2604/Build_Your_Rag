@@ -8,6 +8,7 @@ a machine with nothing installed.
 
 from __future__ import annotations
 
+import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -30,8 +31,13 @@ TENANT_ID = TenantId(uuid.uuid4())
 class FakeChatbotRepo:
     def __init__(self) -> None:
         self.items: dict[uuid.UUID, Chatbot] = {}
+        # Stands in for the Postgres sequence behind `display_id` (migration
+        # 0020): assigned on insert, unique, never reused.
+        self._next_display_id = 100000
 
     async def add(self, bot: Chatbot) -> None:
+        bot.display_id = self._next_display_id
+        self._next_display_id += 1
         self.items[bot.id] = bot
 
     async def get(self, tenant_id: TenantId, chatbot_id: ChatbotId) -> Chatbot | None:
@@ -57,10 +63,23 @@ class FakeDocumentRepo:
         return []
 
 
+class FakeEmptyRepo:
+    """A repository with nothing in it — enough for the card counts."""
+
+    async def list_for_tenant(self, tenant_id: TenantId) -> list:
+        return []
+
+    async def list_for_chatbot(self, tenant_id: TenantId, chatbot_id) -> list:
+        return []
+
+
 class FakeUnitOfWork:
     def __init__(self, chatbots: FakeChatbotRepo, documents: FakeDocumentRepo) -> None:
         self.chatbots = chatbots
         self.documents = documents
+        self.post_call_configs = FakeEmptyRepo()
+        self.tenant_integrations = FakeEmptyRepo()
+        self.oauth_connections = FakeEmptyRepo()
         self.committed = 0
 
     def set_tenant_scope(self, tenant_id: TenantId) -> None:
@@ -78,6 +97,12 @@ class FakeLLM:
 
     async def generate(self, system: str, user: str) -> LLMResult:
         return LLMResult(text=self.text, tokens_used=1, provider="fake", model="fake")
+
+    async def stream(self, system, user, on_provider=None):  # type: ignore[no-untyped-def]
+        # Small chunks, so the route is exercised against a genuinely partial
+        # document rather than one arriving whole.
+        for i in range(0, len(self.text), 11):
+            yield self.text[i : i + 11]
 
 
 GENERATED = """{
@@ -219,6 +244,8 @@ class TestAssistantSettings:
 
 
 class TestKnowledgeBase:
+    """An assistant's knowledge base is its own documents and nothing else."""
+
     def _add_docs(self, documents: FakeDocumentRepo) -> list[Document]:
         docs = [
             Document(
@@ -240,69 +267,128 @@ class TestKnowledgeBase:
         documents.items.extend(docs)
         return docs
 
-    def test_an_assistant_starts_searching_everything(self, api) -> None:
+    def test_a_new_assistant_starts_with_an_empty_knowledge_base(self, api) -> None:
         client, _, documents = api
         self._add_docs(documents)
         created = _generate(client)
 
         body = client.get(f"/api/v1/chatbots/{created['id']}/knowledge").json()
-        assert body["scope_is_all"] is True
-        assert body["attached_count"] == 0
-        assert body["ready_count"] == 2  # the parsing one is not ready
-        assert len(body["documents"]) == 3
+        # Three documents exist in the workspace and none of them are this
+        # assistant's, so it sees none of them.
+        assert body["documents"] == []
+        assert body["total_count"] == 0
+        assert body["ready_count"] == 0
 
-    def test_attaching_documents_narrows_the_scope(self, api) -> None:
+    def test_uploaded_documents_belong_to_the_assistant(self, api) -> None:
         client, chatbots, documents = api
         docs = self._add_docs(documents)
         created = _generate(client)
 
-        body = client.put(
+        body = client.post(
             f"/api/v1/chatbots/{created['id']}/knowledge",
             json={"document_ids": [str(docs[0].id)]},
         ).json()
 
-        assert body["scope_is_all"] is False
-        assert body["attached_count"] == 1
-        assert [d["attached"] for d in body["documents"]] == [True, False, False]
-        # And it actually reached the aggregate that drives retrieval.
+        assert [d["filename"] for d in body["documents"]] == ["handbook.pdf"]
+        assert body["total_count"] == 1
+        assert body["ready_count"] == 1
+        # And it reached the aggregate that drives retrieval.
         bot = chatbots.items[uuid.UUID(created["id"])]
         assert bot.document_filter() == [DocumentId(docs[0].id)]
 
-    def test_documents_from_another_tenant_are_dropped(self, api) -> None:
-        # A dangling id would sit in the allowlist forever and quietly narrow
-        # retrieval to nothing.
-        client, chatbots, documents = api
-        self._add_docs(documents)
-        created = _generate(client)
-
-        body = client.put(
-            f"/api/v1/chatbots/{created['id']}/knowledge",
-            json={"document_ids": [str(uuid.uuid4())]},
-        ).json()
-
-        assert body["attached_count"] == 0
-        assert chatbots.items[uuid.UUID(created["id"])].allowed_document_ids == []
-
-    def test_clearing_the_selection_searches_everything_again(self, api) -> None:
+    def test_attaching_is_additive(self, api) -> None:
+        # Two uploads finishing at once must not have the second wipe the first.
         client, _, documents = api
         docs = self._add_docs(documents)
         created = _generate(client)
 
-        client.put(
+        client.post(
             f"/api/v1/chatbots/{created['id']}/knowledge",
             json={"document_ids": [str(docs[0].id)]},
         )
-        body = client.put(
-            f"/api/v1/chatbots/{created['id']}/knowledge", json={"document_ids": []}
+        body = client.post(
+            f"/api/v1/chatbots/{created['id']}/knowledge",
+            json={"document_ids": [str(docs[1].id)]},
         ).json()
 
-        assert body["scope_is_all"] is True
+        assert {d["filename"] for d in body["documents"]} == {"handbook.pdf", "pricing.pdf"}
+
+    def test_attaching_the_same_document_twice_does_not_duplicate_it(self, api) -> None:
+        client, _, documents = api
+        docs = self._add_docs(documents)
+        created = _generate(client)
+
+        for _ in range(2):
+            body = client.post(
+                f"/api/v1/chatbots/{created['id']}/knowledge",
+                json={"document_ids": [str(docs[0].id)]},
+            ).json()
+
+        assert body["total_count"] == 1
+
+    def test_documents_from_another_tenant_are_dropped(self, api) -> None:
+        # A dangling id would sit in the list forever, scoping retrieval to a
+        # document that cannot be read.
+        client, chatbots, documents = api
+        self._add_docs(documents)
+        created = _generate(client)
+
+        body = client.post(
+            f"/api/v1/chatbots/{created['id']}/knowledge",
+            json={"document_ids": [str(uuid.uuid4())]},
+        ).json()
+
+        assert body["total_count"] == 0
+        assert chatbots.items[uuid.UUID(created["id"])].allowed_document_ids == []
+
+    def test_removing_a_document_leaves_it_in_the_workspace(self, api) -> None:
+        client, _, documents = api
+        docs = self._add_docs(documents)
+        created = _generate(client)
+        client.post(
+            f"/api/v1/chatbots/{created['id']}/knowledge",
+            json={"document_ids": [str(docs[0].id), str(docs[1].id)]},
+        )
+
+        body = client.delete(
+            f"/api/v1/chatbots/{created['id']}/knowledge/{docs[0].id}"
+        ).json()
+
+        assert [d["filename"] for d in body["documents"]] == ["pricing.pdf"]
+        # "Stop answering from this" is not "delete the file".
+        assert len(documents.items) == 3
+
+    def test_a_deleted_document_drops_out_rather_than_rendering_broken(self, api) -> None:
+        client, _, documents = api
+        docs = self._add_docs(documents)
+        created = _generate(client)
+        client.post(
+            f"/api/v1/chatbots/{created['id']}/knowledge",
+            json={"document_ids": [str(docs[0].id), str(docs[1].id)]},
+        )
+
+        documents.items.remove(docs[0])
+        body = client.get(f"/api/v1/chatbots/{created['id']}/knowledge").json()
+
+        assert [d["filename"] for d in body["documents"]] == ["pricing.pdf"]
+
+    def test_only_ready_documents_count_as_answering(self, api) -> None:
+        client, _, documents = api
+        docs = self._add_docs(documents)
+        created = _generate(client)
+
+        body = client.post(
+            f"/api/v1/chatbots/{created['id']}/knowledge",
+            json={"document_ids": [str(docs[0].id), str(docs[2].id)]},
+        ).json()
+
+        assert body["total_count"] == 2
+        assert body["ready_count"] == 1  # draft.pdf is still parsing
 
     def test_an_unknown_assistant_is_a_404(self, api) -> None:
         client, _, _ = api
-        assert (
-            client.get(f"/api/v1/chatbots/{uuid.uuid4()}/knowledge").status_code == 404
-        )
+        response = client.get(f"/api/v1/chatbots/{uuid.uuid4()}/knowledge")
+        assert response.status_code == 404
 
 
 class FakeTenantIntegrationRepo:
@@ -423,3 +509,113 @@ class TestIntegrationsCatalogue:
 
         assert client.delete("/api/v1/integrations-catalogue/google_calendar").status_code == 204
         assert oauth_repo.items == []
+
+
+class TestGenerateStream:
+    """The SSE endpoint the create box drives."""
+
+    def _events(self, client: TestClient) -> list[tuple[str, str]]:
+        with client.stream(
+            "POST",
+            "/api/v1/chatbots/generate/stream",
+            json={"description": "call candidates who applied to Google India"},
+        ) as response:
+            assert response.status_code == 200
+            events, event = [], None
+            for line in response.iter_lines():
+                if line.startswith("event:"):
+                    event = line.split(":", 1)[1].strip()
+                elif line.startswith("data:") and event:
+                    events.append((event, line.split(":", 1)[1].strip()))
+        return events
+
+    def test_the_flow_arrives_section_by_section(self, api) -> None:
+        client, _, _ = api
+        events = self._events(client)
+        kinds = [k for k, _ in events]
+
+        assert kinds[0] == "meta"
+        assert kinds[-1] == "done"
+        assert kinds.count("section") == 5
+
+    def test_the_assistant_is_saved_once_at_the_end(self, api) -> None:
+        client, chatbots, _ = api
+        events = self._events(client)
+
+        payload = json.loads(next(d for k, d in events if k == "done"))
+        assert payload["name"] == "Google India Hiring Assistant"
+        assert [s["title"] for s in payload["flow_sections"]][-1] == "Guardrails"
+        # Exactly one assistant, created from the validated blueprint.
+        assert len(chatbots.items) == 1
+        assert str(next(iter(chatbots.items))) == payload["id"]
+
+    def test_the_streamed_sections_match_what_was_saved(self, api) -> None:
+        # A flow that displays differently from what persists would make the
+        # builder look like it silently rewrote the model's work.
+        client, _, _ = api
+        events = self._events(client)
+
+        streamed = [json.loads(d)["title"] for k, d in events if k == "section"]
+        done = json.loads(next(d for k, d in events if k == "done"))
+        saved = [s["title"] for s in done["flow_sections"]]
+        assert saved == [*streamed, "Guardrails"]
+
+
+class TestDisplayId:
+    """The short id the UI shows as #236637."""
+
+    def test_a_generated_assistant_gets_one(self, api) -> None:
+        client, _, _ = api
+        assert _generate(client)["display_id"] is not None
+
+    def test_every_assistant_gets_a_different_one(self, api) -> None:
+        client, _, _ = api
+        ids = {_generate(client)["display_id"] for _ in range(3)}
+        assert len(ids) == 3
+
+    def test_it_is_stable_across_reads(self, api) -> None:
+        # It goes in tickets and URLs; an id that changed on refresh would be
+        # worse than no id at all.
+        client, _, _ = api
+        created = _generate(client)
+        fetched = client.get(f"/api/v1/chatbots/{created['id']}").json()
+        assert fetched["display_id"] == created["display_id"]
+
+    def test_it_survives_an_edit(self, api) -> None:
+        client, _, _ = api
+        created = _generate(client)
+        updated = client.patch(
+            f"/api/v1/chatbots/{created['id']}", json={"name": "Renamed"}
+        ).json()
+        assert updated["display_id"] == created["display_id"]
+
+
+class TestCardCounts:
+    """The at-a-glance numbers on an assistant card."""
+
+    def test_a_new_assistant_reports_zeroes(self, api) -> None:
+        client, _, _ = api
+        counts = _generate(client)["counts"]
+        assert counts == {"knowledge_files": 0, "post_call_actions": 0, "integrations": 0}
+
+    def test_attaching_a_document_is_reflected(self, api) -> None:
+        client, _, documents = api
+        doc = Document(
+            tenant_id=TENANT_ID,
+            filename="handbook.pdf",
+            content_type="application/pdf",
+            size_bytes=10,
+            storage_key="k/handbook",
+            checksum="deadbeef",
+            status=IngestionStatus.READY,
+            chunk_count=3,
+        )
+        documents.items.append(doc)
+        created = _generate(client)
+
+        client.post(
+            f"/api/v1/chatbots/{created['id']}/knowledge",
+            json={"document_ids": [str(doc.id)]},
+        )
+        listed = client.get("/api/v1/chatbots").json()
+        assert listed[0]["counts"]["knowledge_files"] == 1

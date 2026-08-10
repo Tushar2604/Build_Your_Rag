@@ -108,7 +108,7 @@ export default function LoginPage() {
             </Link>
           </p>
 
-          <div className="card shadow-modal backdrop-blur-sm bg-white/90 p-6 mt-6">
+          <div className="card shadow-modal p-6 mt-6">
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
               <div>
                 <label htmlFor="email" className="label">Work email</label>

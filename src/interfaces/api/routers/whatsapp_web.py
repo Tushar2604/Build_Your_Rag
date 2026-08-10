@@ -256,6 +256,11 @@ async def _reply_to_message(
             await uow.whatsapp_conversations.add(conversation)
             await uow.commit()
         chat_session_id: SessionId = conversation.session_id
+        auto_reply = conversation.auto_reply
+
+    if not auto_reply:
+        # Announce-only campaign — the reply is kept, not answered.
+        return
 
     use_case = AskChatbot(container.unit_of_work(), container.embedder, container.llm)
     try:

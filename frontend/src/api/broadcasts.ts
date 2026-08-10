@@ -2,6 +2,27 @@ import { api } from "./client";
 
 export type BroadcastStatus = "queued" | "sending" | "paused" | "completed";
 
+/** broadcast = announce only (replies recorded, not answered).
+ *  broadcast_reply = the assistant picks up the conversation. */
+export type BroadcastMode = "broadcast" | "broadcast_reply";
+
+/** cloud_api = a Twilio/Cloud API business number.
+ *  personal  = a QR-linked personal WhatsApp ("Phone WhatsApp"). */
+export type SenderKind = "cloud_api" | "personal";
+
+/** One WhatsApp number a campaign can send from. */
+export interface CampaignSender {
+  id: string;
+  kind: SenderKind;
+  label: string;
+  phone_number: string;
+  /** False when it exists but cannot send right now — see the reason. */
+  available: boolean;
+  unavailable_reason: string;
+  chatbot_id: string | null;
+  chatbot_name: string;
+}
+
 export type RecipientStatus =
   | "pending"
   | "sent"
@@ -14,7 +35,10 @@ export interface Broadcast {
   id: string;
   chatbot_id: string;
   chatbot_name: string;
-  whatsapp_channel_id: string;
+  whatsapp_channel_id: string | null;
+  whatsapp_session_id: string | null;
+  sender_kind: SenderKind;
+  mode: BroadcastMode;
   from_number: string;
   name: string;
   message_template: string;
@@ -67,6 +91,15 @@ export interface CreateBroadcastInput {
   name: string;
   message_template: string;
   recipients_text?: string;
+  mode?: BroadcastMode;
+  /** Omit both to fall back to the number already bound to the assistant. */
+  sender_kind?: SenderKind;
+  sender_id?: string;
+}
+
+/** Every WhatsApp number this workspace can send a campaign from. */
+export function listCampaignSenders(): Promise<CampaignSender[]> {
+  return api.get<CampaignSender[]>("/broadcasts/senders");
 }
 
 export function listBroadcasts(): Promise<Broadcast[]> {

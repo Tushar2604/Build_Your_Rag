@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from src.application.ports.services import LLMProvider
@@ -151,6 +152,89 @@ body. The welcome_message MAY use square-bracket variables such as [user_name] \
 because those are filled from call data at dial time."""
 
 
+class SectionStreamParser:
+    """Pulls complete section objects out of a JSON reply as it arrives.
+
+    The builder shows the flow being written rather than appearing all at once,
+    which means sections have to surface before the model has finished the
+    document — so waiting for valid JSON is not an option.
+
+    A section is emitted the moment its closing brace arrives, found by
+    string-aware brace matching (a `}` inside a body must not end the object,
+    and neither must an escaped quote). Anything not yet complete stays in the
+    buffer. Nothing here is authoritative: the completed reply is still parsed
+    and validated normally at the end, and this only drives what is displayed.
+    """
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._cursor = 0
+        self._in_sections = False
+        self._meta_sent = False
+
+    def feed(self, chunk: str) -> list[dict]:
+        self._buffer += chunk
+        if not self._in_sections:
+            marker = self._buffer.find('"sections"', self._cursor)
+            if marker == -1:
+                return []
+            bracket = self._buffer.find("[", marker)
+            if bracket == -1:
+                return []
+            self._in_sections = True
+            self._cursor = bracket + 1
+
+        found: list[dict] = []
+        while (section := self._next_section()) is not None:
+            found.append(section)
+        return found
+
+    def meta(self) -> dict | None:
+        """The head fields, once all three have arrived. Emitted at most once."""
+        if self._meta_sent:
+            return None
+        fields = {}
+        for key in ("name", "direction", "welcome_message"):
+            match = re.search(rf'"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"', self._buffer)
+            if match is None:
+                return None
+            fields[key] = json.loads(f'"{match.group(1)}"')
+        self._meta_sent = True
+        return fields
+
+    def _next_section(self) -> dict | None:
+        start = self._buffer.find("{", self._cursor)
+        if start == -1:
+            return None
+
+        depth, in_string, escaped = 0, False, False
+        for i in range(start, len(self._buffer)):
+            char = self._buffer[i]
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    self._cursor = i + 1
+                    try:
+                        parsed = json.loads(self._buffer[start : i + 1])
+                    except json.JSONDecodeError:
+                        return None
+                    return parsed if isinstance(parsed, dict) else None
+        return None
+
+
 def _extract_json(raw: str) -> dict | None:
     """Pull the JSON object out of a model reply.
 
@@ -226,10 +310,11 @@ def _blueprint_from_payload(payload: dict, description: str) -> AssistantBluepri
 
 # Verbs and articles that make a truncated description read as a fragment rather
 # than a name ("Call Candidates Who Applied…"). Dropped from the front only.
-_NAME_STOPWORDS = frozenset(
-    "a an the call calls calling contact contacts help i want we need it should "
-    "this that assistant agent bot make making to for and of".split()
-)
+_NAME_STOPWORDS = frozenset({
+    "a", "an", "the", "call", "calls", "calling", "contact", "contacts", "help",
+    "i", "want", "we", "need", "it", "should", "this", "that", "assistant",
+    "agent", "bot", "make", "making", "to", "for", "and", "of",
+})
 
 
 def _name_from_description(description: str) -> str:
@@ -361,6 +446,61 @@ class GenerateAssistantUseCase:
         if existing_name:
             blueprint.name = existing_name
         return blueprint
+
+    async def stream(
+        self,
+        description: str,
+        *,
+        use_case: str | None = None,
+        existing_name: str | None = None,
+    ) -> AsyncIterator[tuple[str, object]]:
+        """Same generation, surfaced as it happens.
+
+        Yields `("meta", {...})` once the name and welcome message are known,
+        `("section", {...})` per section as the model finishes writing it, and
+        finally `("blueprint", AssistantBlueprint)` carrying the validated,
+        correctly ordered result. The streamed sections are for display; the
+        blueprint is what gets saved, so a model that emits sections out of
+        order still persists them on the spine.
+
+        Never raises, for the same reason `execute` doesn't: the owner is
+        mid-create, and a dead end is worse than a draft.
+        """
+        user = self._build_user_prompt(description, use_case, existing_name)
+        parser = SectionStreamParser()
+        collected = ""
+
+        try:
+            async for token in self._llm.stream(_SYSTEM, user):
+                collected += token
+                for section in parser.feed(token):
+                    if (meta := parser.meta()) is not None:
+                        yield "meta", meta
+                    title = _clean(section.get("title"), 120)
+                    body = _clean(section.get("body"), MAX_SECTION_BODY)
+                    if title and body:
+                        yield "section", {"title": title, "body": body}
+        except Exception:  # noqa: BLE001 — provider failures must not 500 the builder
+            logger.warning("assistant generation: streaming call failed", exc_info=True)
+            yield "blueprint", fallback_blueprint(description, use_case)
+            return
+
+        # The head fields can still be unsent if the model put them after the
+        # sections array; emit them before the caller settles on the blueprint.
+        if (meta := parser.meta()) is not None:
+            yield "meta", meta
+
+        payload = _extract_json(collected)
+        blueprint = _blueprint_from_payload(payload, description) if payload else None
+        if blueprint is None:
+            logger.warning(
+                "assistant generation: unusable streamed output (%d chars)", len(collected)
+            )
+            blueprint = fallback_blueprint(description, use_case)
+        elif existing_name:
+            blueprint.name = existing_name
+
+        yield "blueprint", blueprint
 
     @staticmethod
     def _build_user_prompt(

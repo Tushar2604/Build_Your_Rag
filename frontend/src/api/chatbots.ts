@@ -1,4 +1,4 @@
-import { api } from "./client";
+import { api, streamEvents } from "./client";
 
 export interface WidgetConfig {
   theme_color: string;
@@ -40,8 +40,17 @@ export interface AssistantOptions {
   use_cases: { id: string; label: string }[];
 }
 
+/** At-a-glance numbers the assistant cards show. */
+export interface ChatbotCardCounts {
+  knowledge_files: number;
+  post_call_actions: number;
+  integrations: number;
+}
+
 export interface Chatbot {
   id: string;
+  /** Short id for humans ("#236637"), assigned by the database. */
+  display_id: number | null;
   name: string;
   channel: Channel;
   /** The composed prompt the model actually receives (read-only when the bot
@@ -63,6 +72,7 @@ export interface Chatbot {
   embed_snippet: string;
   /** False when generation fell back to a draft — only set on a generate call. */
   ai_generated: boolean;
+  counts: ChatbotCardCounts;
 }
 
 export interface CreateChatbotInput {
@@ -100,15 +110,13 @@ export interface KnowledgeDocument {
   status: string;
   chunk_count: number;
   error: string | null;
-  attached: boolean;
 }
 
 export interface AssistantKnowledge {
+  /** This assistant's own documents. Never another assistant's. */
   documents: KnowledgeDocument[];
-  attached_count: number;
+  total_count: number;
   ready_count: number;
-  /** True when nothing is attached, i.e. the assistant searches everything. */
-  scope_is_all: boolean;
 }
 
 export function listChatbots(): Promise<Chatbot[]> {
@@ -166,11 +174,66 @@ export function getAssistantKnowledge(id: string): Promise<AssistantKnowledge> {
   return api.get<AssistantKnowledge>(`/chatbots/${id}/knowledge`);
 }
 
-export function setAssistantKnowledge(
+/** Add freshly uploaded documents. Additive, so concurrent uploads don't
+ * overwrite each other. */
+export function attachAssistantKnowledge(
   id: string,
   documentIds: string[],
 ): Promise<AssistantKnowledge> {
-  return api.put<AssistantKnowledge>(`/chatbots/${id}/knowledge`, {
+  return api.post<AssistantKnowledge>(`/chatbots/${id}/knowledge`, {
     document_ids: documentIds,
   });
+}
+
+/** Remove a document from this assistant. The file stays in the workspace. */
+export function detachAssistantKnowledge(
+  id: string,
+  documentId: string,
+): Promise<AssistantKnowledge> {
+  return api.delete<AssistantKnowledge>(`/chatbots/${id}/knowledge/${documentId}`);
+}
+
+/* ── Streaming generation ── */
+export interface GenerationMeta {
+  name: string;
+  direction: "outgoing" | "incoming";
+  welcome_message: string;
+}
+
+/**
+ * Generate an assistant, surfacing each section as the model writes it.
+ *
+ * `onSection` fires per completed section; `onDone` carries the saved
+ * assistant. Returns an abort function — navigating away mid-generation
+ * shouldn't leave a stream running.
+ */
+export function generateAssistantStream(
+  input: { description: string; use_case?: string | null; channel?: Channel },
+  handlers: {
+    onMeta?: (meta: GenerationMeta) => void;
+    onSection?: (section: { title: string; body: string }) => void;
+    onDone?: (bot: Chatbot) => void;
+    onError?: (message: string) => void;
+  },
+): () => void {
+  return streamEvents(
+    "/chatbots/generate/stream",
+    input,
+    (event, data) => {
+      if (event === "meta") handlers.onMeta?.(JSON.parse(data) as GenerationMeta);
+      else if (event === "section")
+        handlers.onSection?.(JSON.parse(data) as { title: string; body: string });
+      else if (event === "done") handlers.onDone?.(JSON.parse(data) as Chatbot);
+      else if (event === "error") {
+        try {
+          handlers.onError?.(
+            (JSON.parse(data) as { detail?: string }).detail ?? "Generation failed.",
+          );
+        } catch {
+          handlers.onError?.("Generation failed.");
+        }
+      }
+    },
+    handlers.onError,
+  );
 }

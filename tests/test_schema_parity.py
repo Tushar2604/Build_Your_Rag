@@ -10,6 +10,7 @@ rather than a deploy.
 from __future__ import annotations
 
 import io
+import pathlib
 import re
 
 import pytest
@@ -37,7 +38,7 @@ NEW_TABLES = {
 # checks, skipping 0014 in between.
 DDL_RANGES = (
     ("0011_team_and_custom_questions", "0013_broadcasts"),
-    ("0014_tighten_default_prompt", "0018_oauth_connections"),
+    ("0014_tighten_default_prompt", "0021_campaign_mode_and_sender"),
 )
 
 
@@ -59,6 +60,12 @@ def migration_sql() -> str:
 
 
 def _migrated_columns(sql: str, table: str) -> set[str]:
+    """Every column a migration gives `table`, however it was added.
+
+    A column can arrive two ways — in the original CREATE, or in a later
+    ALTER ... ADD COLUMN — and a check that only reads the CREATE reports a
+    perfectly-migrated column as missing the first time a table is extended.
+    """
     match = re.search(rf"CREATE TABLE {table} \((.*?)\n\);", sql, re.S)
     assert match, f"{table} is never created by a migration"
     constraints = ("PRIMARY KEY", "FOREIGN KEY", "UNIQUE", "CONSTRAINT", "CHECK")
@@ -68,6 +75,8 @@ def _migrated_columns(sql: str, table: str) -> set[str]:
         if not line or line.startswith(constraints):
             continue
         columns.add(line.split()[0])
+
+    columns.update(re.findall(rf"ALTER TABLE {table} ADD COLUMN (\w+)", sql))
     return columns
 
 
@@ -195,3 +204,39 @@ def test_deleting_an_assistant_does_not_unlink_whatsapp(migration_sql: str) -> N
         r"FOREIGN KEY\(chatbot_id\) REFERENCES chatbots \(id\)([^,\n]*)", match.group(1)
     )
     assert fk and "ON DELETE SET NULL" in fk.group(1)
+
+
+@pytest.fixture(scope="module")
+def migration_source() -> str:
+    path = (
+        pathlib.Path(__file__).parent.parent
+        / "migrations"
+        / "versions"
+        / "0019_pin_assistant_knowledge.py"
+    )
+    return path.read_text(encoding="utf-8")
+
+
+class TestKnowledgeBackfillMigration:
+    """0019 changes what an empty `allowed_document_ids` means.
+
+    The migration is what stops that change from silently stripping the
+    knowledge from every assistant built under the old rule, so its two guards
+    are worth pinning: it must only touch already-empty lists, and it must pin
+    only documents that can actually answer.
+    """
+
+    def test_only_assistants_with_no_documents_are_touched(self, migration_source: str) -> None:
+        # An assistant already scoped to specific documents is an explicit
+        # choice; overwriting it would destroy real configuration.
+        assert "WHERE c.allowed_document_ids = '[]'::jsonb" in migration_source
+
+    def test_only_ready_documents_are_pinned(self, migration_source: str) -> None:
+        # A failed or still-parsing document has no chunks, so pinning it would
+        # scope an assistant to something unreadable.
+        assert "d.status = 'ready'" in migration_source
+
+    def test_an_empty_match_yields_a_list_not_null(self, migration_source: str) -> None:
+        # jsonb_agg returns NULL over zero rows; NULL reads back as "unset".
+        assert "COALESCE" in migration_source
+        assert "'[]'::jsonb" in migration_source

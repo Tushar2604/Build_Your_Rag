@@ -45,10 +45,12 @@ def test_default_system_prompt_enforces_grounding() -> None:
     assert "Do NOT invent" in DEFAULT_SYSTEM_PROMPT
 
 
-def test_document_filter_empty_returns_none() -> None:
+def test_document_filter_empty_means_no_knowledge_not_everything() -> None:
     bot = Chatbot(tenant_id=TenantId(new_id()), name="b")
-    # Empty allow-list means "search all tenant documents".
-    assert bot.document_filter() is None
+    # An assistant with no documents attached answers from its Conversational
+    # Flow alone. It must NOT inherit every file another assistant uploaded —
+    # returning None here would mean exactly that.
+    assert bot.document_filter() == []
 
 
 def test_document_filter_with_ids_returns_list() -> None:

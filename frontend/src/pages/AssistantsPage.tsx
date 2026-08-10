@@ -5,18 +5,20 @@
 // welcome message, and a Conversational Flow specific to that description, then
 // drops you straight into the builder to edit it. There is no wizard, because
 // every field a wizard would ask for is one the description already answers.
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowUpRight, Bot, MoreVertical, Sparkles, Loader2 } from "lucide-react";
+import {
+  ArrowDownUp, ArrowUpRight, Bot, Brain, FileText, Mic, Settings2, Sparkles, Zap,
+} from "lucide-react";
 import {
   listChatbots,
-  generateAssistant,
+  generateAssistantStream,
   getAssistantOptions,
   Chatbot,
   AssistantOptions,
 } from "../api/chatbots";
-import { ApiError } from "../api/client";
+import FlowWritingView, { WritingSection } from "../components/assistant/FlowWritingView";
 
 const MAX_DESCRIPTION = 4000;
 const MIN_DESCRIPTION = 10;
@@ -29,32 +31,54 @@ function CreateAssistantCard({ onCreated }: { onCreated: (bot: Chatbot) => void 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // What the generator has produced so far. Replaces the form while writing.
+  const [writtenName, setWrittenName] = useState("");
+  const [writtenWelcome, setWrittenWelcome] = useState("");
+  const [writtenSections, setWrittenSections] = useState<WritingSection[]>([]);
+  const abortRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     // A failure here only costs the chips — the box still creates assistants,
     // so it is not worth surfacing as an error.
     getAssistantOptions().then(setOptions).catch(() => setOptions(null));
   }, []);
 
+  // Leaving mid-generation must not leave a stream running.
+  useEffect(() => () => abortRef.current?.(), []);
+
   const tooShort = description.trim().length < MIN_DESCRIPTION;
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault();
     if (tooShort || busy) return;
     setBusy(true);
     setError(null);
-    try {
-      onCreated(
-        await generateAssistant({
-          description: description.trim(),
-          use_case: useCase,
-          channel: "voice",
-        }),
-      );
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create the assistant.");
-    } finally {
-      setBusy(false);
-    }
+    setWrittenName("");
+    setWrittenWelcome("");
+    setWrittenSections([]);
+
+    abortRef.current = generateAssistantStream(
+      { description: description.trim(), use_case: useCase, channel: "voice" },
+      {
+        onMeta: (meta) => {
+          setWrittenName(meta.name);
+          setWrittenWelcome(meta.welcome_message);
+        },
+        onSection: (section) => setWrittenSections((prev) => [...prev, section]),
+        onDone: (bot) => {
+          abortRef.current = null;
+          setBusy(false);
+          // A beat so the last section finishes revealing rather than being
+          // yanked away mid-word.
+          setTimeout(() => onCreated(bot), 700);
+        },
+        onError: (message) => {
+          abortRef.current = null;
+          setBusy(false);
+          setError(message || "Could not create the assistant.");
+        },
+      },
+    );
   }
 
   return (
@@ -64,13 +88,28 @@ function CreateAssistantCard({ onCreated }: { onCreated: (bot: Chatbot) => void 
     >
       <div className="px-6 pt-5 pb-4 border-b border-brand-500/15 bg-brand-500/[0.04]">
         <h2 className="text-[15px] font-semibold text-brand-400">
-          Create a new voice AI assistant
+          {busy ? "Building your voice AI assistant" : "Create a new voice AI assistant"}
         </h2>
         <p className="text-[13px] text-gray-500 mt-0.5">
-          Describe the type of voice AI assistant you want to create
+          {busy
+            ? "Watch the conversational flow being written — you can edit every word of it next."
+            : "Describe the type of voice AI assistant you want to create"}
         </p>
       </div>
 
+      {/* While generating, the form gives way to the flow being written. The
+          description is preserved underneath, so a failure returns you to it
+          with your text intact rather than an empty box. */}
+      {busy ? (
+        <div className="px-6 py-5">
+          <FlowWritingView
+            name={writtenName}
+            welcomeMessage={writtenWelcome}
+            sections={writtenSections}
+            writing={busy}
+          />
+        </div>
+      ) : (
       <div className="px-6 py-5">
         <textarea
           value={description}
@@ -123,60 +162,104 @@ function CreateAssistantCard({ onCreated }: { onCreated: (bot: Chatbot) => void 
 
           <button
             type="submit"
-            disabled={tooShort || busy}
+            disabled={tooShort}
             className="btn-primary px-5 py-2.5 flex-shrink-0"
           >
-            {busy ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2} />
-                Building your assistant…
-              </>
-            ) : (
-              "Create Voice AI Assistant"
-            )}
+            Create Voice AI Assistant
           </button>
         </div>
       </div>
+      )}
     </form>
   );
 }
 
 /* ── Assistant card ── */
+function CardStat({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Brain;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <Icon className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" strokeWidth={1.75} />
+      <span className="text-[12.5px] text-gray-500 flex-shrink-0">{label}:</span>
+      <span className="text-[12.5px] font-semibold text-gray-800 truncate">{value}</span>
+    </div>
+  );
+}
+
 function AssistantCard({ bot, index }: { bot: Chatbot; index: number }) {
   const live = bot.is_public;
+  // The voice label carries a provider prefix ("Cartesia - Riya") that the card
+  // has no room for and the operator already chose; the provider is the part
+  // that identifies it at a glance.
+  const voice = (bot.assistant.tts_voice.split(" - ")[0] || "Default").toLowerCase();
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, delay: Math.min(index, 8) * 0.03, ease: "easeOut" }}
+      className="rounded-xl border border-gray-200 bg-surface flex flex-col
+                 transition-colors hover:border-brand-500/40"
     >
-      <Link
-        to={`/assistants/${bot.id}`}
-        className="group block rounded-xl border border-gray-200 bg-surface px-4 py-3.5
-                   transition-colors hover:border-brand-500/40 hover:bg-surface-2"
-      >
-        <div className="flex items-start gap-3">
-          <ArrowUpRight
-            className="w-4 h-4 mt-0.5 flex-shrink-0 text-brand-400 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
-            strokeWidth={2.25}
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-semibold text-gray-900 truncate">{bot.name}</p>
-            <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
-              <span className="capitalize">{bot.assistant.direction}</span>
-              <span className="text-gray-300">·</span>
-              <span>{bot.assistant.languages[0] ?? "English"}</span>
-              <span className="text-gray-300">·</span>
-              <span>{bot.flow_sections.length || "raw"} section{bot.flow_sections.length === 1 ? "" : "s"}</span>
-            </p>
-          </div>
+      <div className="px-4 pt-3.5 pb-3">
+        <div className="flex items-start gap-2.5">
+          <ArrowUpRight className="w-4 h-4 mt-0.5 flex-shrink-0 text-cta-500" strokeWidth={2.25} />
+          <Link
+            to={`/assistants/${bot.id}`}
+            className="text-[16px] font-semibold text-gray-900 hover:text-brand-400 transition-colors
+                       truncate flex-1 min-w-0"
+          >
+            {bot.name}
+          </Link>
           <span className={live ? "badge badge-live" : "badge badge-draft"}>
             <span className={live ? "dot-live mr-1" : "dot-draft mr-1"} />
             {live ? "Live" : "Draft"}
           </span>
-          <MoreVertical className="w-4 h-4 text-gray-500 flex-shrink-0" strokeWidth={1.75} />
         </div>
-      </Link>
+        <p className="text-[12.5px] text-gray-500 mt-1 ml-[26px] truncate">
+          {bot.assistant.languages.join(", ")}
+        </p>
+      </div>
+
+      <div className="border-t border-gray-100 px-4 py-3 grid grid-cols-2 gap-x-4 gap-y-2">
+        <CardStat icon={Brain} label="LLM" value={bot.assistant.llm_model} />
+        <CardStat icon={Mic} label="Voice" value={voice} />
+        <CardStat icon={FileText} label="KB Files" value={String(bot.counts.knowledge_files)} />
+        <CardStat icon={ArrowDownUp} label="Direction" value={bot.assistant.direction} />
+        <CardStat
+          icon={Settings2}
+          label={`Post-call (${bot.counts.post_call_actions})`}
+          value={bot.counts.post_call_actions === 0 ? "None" : "Configured"}
+        />
+        <CardStat
+          icon={Zap}
+          label={`Integrations (${bot.counts.integrations})`}
+          value={bot.counts.integrations === 0 ? "None" : "Connected"}
+        />
+      </div>
+
+      <div className="border-t border-gray-100 px-4 py-3 flex items-center gap-3 mt-auto">
+        <span
+          title="This assistant's short id — stable, unique, and safe to quote in a ticket."
+          className="rounded-lg border border-gray-200 bg-surface-2 px-3 py-2 text-[12.5px]
+                     font-mono text-gray-500 flex-shrink-0"
+        >
+          {bot.display_id ? `ID: #${bot.display_id}` : "ID: —"}
+        </span>
+        <Link
+          to={`/assistants/${bot.id}`}
+          className="btn-primary flex-1 justify-center py-2 text-[13.5px]"
+        >
+          Edit Agent
+        </Link>
+      </div>
     </motion.div>
   );
 }

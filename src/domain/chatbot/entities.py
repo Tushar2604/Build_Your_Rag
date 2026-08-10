@@ -377,6 +377,10 @@ class Chatbot:
     tenant_id: TenantId
     name: str
     id: ChatbotId = field(default_factory=lambda: ChatbotId(new_id()))
+    # Short id for humans, assigned by the database on insert — see
+    # migration 0020. None until then, and never invented here: a
+    # fabricated one would collide the moment two creates raced.
+    display_id: int | None = None
     channel: Channel = "text"
     # Derived cache of `flow_sections` (see `apply_flow_sections`). Every
     # generation path reads this field, so composition happens once on write
@@ -397,8 +401,17 @@ class Chatbot:
     widget: WidgetConfig = field(default_factory=WidgetConfig)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-    def document_filter(self) -> list[DocumentId] | None:
-        return self.allowed_document_ids or None
+    def document_filter(self) -> list[DocumentId]:
+        """The documents this assistant may retrieve from — its knowledge base.
+
+        Always the explicit list, never a "search everything" fallback. Each
+        assistant owns its own knowledge base: an empty one means it answers
+        from its Conversational Flow alone, not that it inherits every document
+        another assistant uploaded. Migration 0019 pins the previous implicit
+        set onto assistants created before this rule, so none of them silently
+        lost their sources.
+        """
+        return list(self.allowed_document_ids)
 
     def apply_flow_sections(self, sections: list[FlowSection]) -> None:
         """Replace the flow and recompute the effective system prompt.

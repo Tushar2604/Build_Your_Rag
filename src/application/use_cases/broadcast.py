@@ -150,10 +150,20 @@ class AddBroadcastRecipients:
 class SendBroadcast:
     """Work a campaign's pending queue until it is empty, paused, or stopped."""
 
-    def __init__(self, uow: UnitOfWork, whatsapp_sender, status_callback_url: str = "") -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        whatsapp_sender,
+        status_callback_url: str = "",
+        bridge=None,
+    ) -> None:
         self._uow = uow
         self._sender = whatsapp_sender
         self._status_callback_url = status_callback_url
+        # The Node sidecar that owns QR-linked personal accounts. Only needed
+        # for `sender_kind == "personal"`; None simply makes those campaigns
+        # report that the bridge is unavailable rather than crashing.
+        self._bridge = bridge
 
     async def execute(self, tenant_id: TenantId, broadcast_id: uuid.UUID) -> int:
         """Returns how many messages were sent in this run."""
@@ -164,11 +174,21 @@ class SendBroadcast:
                 broadcast = await uow.broadcasts.get(tenant_id, broadcast_id)
                 if broadcast is None or not broadcast.accepts_sends():
                     return sent_total
-                channel = await uow.whatsapp_channels.get(
-                    tenant_id, broadcast.whatsapp_channel_id
-                )
-                if channel is None:
-                    log.warning("broadcast.channel_missing", broadcast_id=str(broadcast_id))
+                # A campaign sends from a Cloud API number or a linked personal
+                # account. Only the former has Twilio credentials to look up.
+                channel = None
+                if broadcast.sender_kind == "cloud_api":
+                    channel = await uow.whatsapp_channels.get(
+                        tenant_id, broadcast.whatsapp_channel_id
+                    )
+                    if channel is None:
+                        log.warning("broadcast.channel_missing", broadcast_id=str(broadcast_id))
+                        broadcast.complete()
+                        await uow.broadcasts.update(broadcast)
+                        await uow.commit()
+                        return sent_total
+                elif broadcast.whatsapp_session_id is None:
+                    log.warning("broadcast.session_missing", broadcast_id=str(broadcast_id))
                     broadcast.complete()
                     await uow.broadcasts.update(broadcast)
                     await uow.commit()
@@ -196,16 +216,35 @@ class SendBroadcast:
                 await uow.broadcasts.update(broadcast)
                 await uow.commit()
 
+    async def _deliver(self, broadcast: Broadcast, channel, recipient, body: str):
+        """Hand one message to whichever transport this campaign sends through.
+
+        Returns the same `(ok, provider_message_id, error)` shape either way, so
+        the bookkeeping below does not care which one ran. The personal bridge
+        has no per-message id to give back — it is a socket, not an API with
+        delivery receipts — so its campaigns simply never advance past `sent`.
+        """
+        if broadcast.sender_kind == "cloud_api":
+            return await self._sender.send(
+                account_sid=channel.twilio_account_sid,
+                auth_token=channel.twilio_auth_token,
+                from_number=channel.phone_number,
+                to_number=recipient.phone_number,
+                body=body,
+                status_callback=self._status_callback_url,
+            )
+
+        if self._bridge is None or not self._bridge.enabled:
+            return False, "", "The WhatsApp bridge is not configured on this server."
+        jid = f"{recipient.phone_number.lstrip('+')}@s.whatsapp.net"
+        ok, error = await self._bridge.send_text(
+            str(broadcast.whatsapp_session_id), jid, body
+        )
+        return ok, "", error
+
     async def _send_one(self, uow, broadcast: Broadcast, channel, recipient) -> None:
         body = broadcast.render_message(recipient)
-        ok, message_sid, error = await self._sender.send(
-            account_sid=channel.twilio_account_sid,
-            auth_token=channel.twilio_auth_token,
-            from_number=channel.phone_number,
-            to_number=recipient.phone_number,
-            body=body,
-            status_callback=self._status_callback_url,
-        )
+        ok, message_sid, error = await self._deliver(broadcast, channel, recipient, body)
         if not ok:
             recipient.mark_failed(error)
             await uow.broadcast_recipients.update(recipient)
@@ -231,10 +270,18 @@ class SendBroadcast:
 
     async def _ensure_conversation(self, uow, broadcast: Broadcast, channel, recipient):
         """Reuse the recipient's existing WhatsApp conversation if they have one
-        (a returning contact keeps their history), otherwise create it."""
+        (a returning contact keeps their history), otherwise create it.
+
+        The conversation is created for both modes — an announce-only campaign
+        still wants the outbound message in the log, and still wants to count a
+        reply — but `auto_reply` decides whether the assistant answers.
+        """
         from src.application.ports.repositories import WhatsAppConversation
 
-        existing = await uow.whatsapp_conversations.get(channel.id, recipient.phone_number)
+        # The owning id is the channel for Cloud API and the linked session for
+        # a personal account; the column holds either (see migration 0021).
+        owner_id = broadcast.sender_id
+        existing = await uow.whatsapp_conversations.get(owner_id, recipient.phone_number)
         if existing is not None:
             return existing.session_id
 
@@ -246,9 +293,10 @@ class SendBroadcast:
         await uow.chats.add_session(session)
         await uow.whatsapp_conversations.add(
             WhatsAppConversation(
-                whatsapp_channel_id=channel.id,
+                whatsapp_channel_id=owner_id,
                 phone_number=recipient.phone_number,
                 session_id=session.id,
+                auto_reply=broadcast.replies_are_answered(),
             )
         )
         await uow.flush()

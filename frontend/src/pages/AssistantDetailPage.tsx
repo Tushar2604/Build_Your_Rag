@@ -1,6 +1,4 @@
-import {
-  useState, useEffect, useRef, useCallback, KeyboardEvent,
-} from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowDown, ArrowLeft, ArrowUp, Bot, BookOpen, ChevronDown, ClipboardCheck,
@@ -11,22 +9,14 @@ import {
   getChatbot, updateChatbot, rotateChatbotKey, regenerateFlow,
   Chatbot, Channel,
 } from "../api/chatbots";
-import { createSession, askStream, greetStream } from "../api/chat";
 import { getChatbotAnalytics, getChatbotRequests, ChatbotAnalytics, RequestLog } from "../api/analytics";
-import { CitationPayload, ApiError } from "../api/client";
-import VoiceCallPanel from "../components/VoiceCallPanel";
+import { ApiError } from "../api/client";
 import PostCallSettings from "../components/PostCallSettings";
 import AssistantDetailsTab, { Draft } from "../components/assistant/AssistantDetailsTab";
 import KnowledgeBaseTab from "../components/assistant/KnowledgeBaseTab";
 import AssistantIntegrationsTab from "../components/assistant/AssistantIntegrationsTab";
-import { useIdleNudge } from "../hooks/useIdleNudge";
+import TestModePanel, { TestMode } from "../components/assistant/TestModePanel";
 import { VoiceProfile, listVoices } from "../api/voices";
-
-const NUDGE_LINES = [
-  "Just checking in — are you still there?",
-  "No rush! I'm here whenever you're ready to continue.",
-  "Still with me? Let me know if you have any questions.",
-];
 
 /* ── shared types ── */
 type Tab =
@@ -260,278 +250,6 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
           Changes saved successfully.
         </div>
       )}
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════
-   TAB: PLAYGROUND
-════════════════════════════════════════════ */
-interface ChatMsg {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  citations?: CitationPayload[];
-  tokensUsed?: number;
-  latency?: number;
-  streaming?: boolean;
-}
-
-function PlaygroundTab({ bot }: { bot: Chatbot }) {
-  if (bot.channel === "voice") {
-    return (
-      <div className="h-[calc(100vh-180px)] min-h-[480px] border border-gray-200 rounded-xl overflow-hidden bg-surface">
-        <VoiceCallPanel
-          botName={bot.name}
-          adapter={{
-            createSession: async () => (await createSession(bot.id)).session_id,
-            greet: (sid, h) =>
-              greetStream(sid, { onToken: h.onToken, onDone: () => h.onDone?.(), onError: h.onError }),
-            ask: (sid, text, h) =>
-              askStream(sid, text, { onToken: h.onToken, onDone: (tokens) => h.onDone?.(tokens), onError: h.onError }),
-          }}
-        />
-      </div>
-    );
-  }
-  return <TextPlaygroundTab bot={bot} />;
-}
-
-function TextPlaygroundTab({ bot }: { bot: Chatbot }) {
-  const [sessionId, setSessionId]     = useState<string | null>(null);
-  const [messages,  setMessages]      = useState<ChatMsg[]>([]);
-  const [input,     setInput]         = useState("");
-  const [streaming, setStreaming]     = useState(false);
-  const [error,     setError]         = useState<string | null>(null);
-  const [initErr,   setInitErr]       = useState<string | null>(null);
-  const [selectedChunks, setSelected] = useState<CitationPayload[] | null>(null);
-  const bottomRef   = useRef<HTMLDivElement>(null);
-  const inputRef    = useRef<HTMLTextAreaElement>(null);
-  const abortRef    = useRef<(() => void) | null>(null);
-  const startRef    = useRef<number>(0);
-
-  useEffect(() => {
-    createSession(bot.id)
-      .then((s) => {
-        setSessionId(s.session_id);
-
-        // AI-generated opening turn — the model greets first instead of the
-        // playground sitting empty. Silently skipped on error.
-        const greetingMsg: ChatMsg = { id: crypto.randomUUID(), role: "assistant", content: "", streaming: true };
-        setMessages([greetingMsg]);
-        greetStream(s.session_id, {
-          onToken: (t) => {
-            setMessages((p) => p.map((m) => m.id === greetingMsg.id ? { ...m, content: m.content + t } : m));
-          },
-          onDone: () => {
-            setMessages((p) => p.map((m) => m.id === greetingMsg.id ? { ...m, streaming: false } : m));
-          },
-          onError: () => {
-            setMessages((p) => p.filter((m) => m.id !== greetingMsg.id));
-          },
-        });
-      })
-      .catch((e) => setInitErr(e.message ?? "Failed to start session."));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id]);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
-
-  useIdleNudge(!streaming && messages.length > 0, () => {
-    setMessages((p) => [
-      ...p,
-      {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: NUDGE_LINES[Math.floor(Math.random() * NUDGE_LINES.length)],
-      },
-    ]);
-  });
-
-  function send() {
-    const text = input.trim();
-    if (!text || !sessionId || streaming) return;
-    setInput(""); setError(null);
-    startRef.current = Date.now();
-
-    const userMsg: ChatMsg   = { id: crypto.randomUUID(), role: "user",      content: text };
-    const asstMsg: ChatMsg   = { id: crypto.randomUUID(), role: "assistant", content: "", streaming: true };
-    setMessages((p) => [...p, userMsg, asstMsg]);
-    setStreaming(true);
-    setSelected(null);
-
-    abortRef.current = askStream(sessionId, text, {
-      onCitations: (c) => {
-        setMessages((p) => p.map((m) => m.id === asstMsg.id ? { ...m, citations: c } : m));
-        setSelected(c);
-      },
-      onToken: (t) => {
-        setMessages((p) => p.map((m) => m.id === asstMsg.id ? { ...m, content: m.content + t } : m));
-      },
-      onDone: (tokens) => {
-        const latency = Date.now() - startRef.current;
-        setMessages((p) => p.map((m) => m.id === asstMsg.id ? { ...m, streaming: false, tokensUsed: tokens, latency } : m));
-        setStreaming(false);
-        inputRef.current?.focus();
-      },
-      onError: (e) => {
-        setMessages((p) => p.map((m) => m.id === asstMsg.id ? { ...m, content: "Error generating response.", streaming: false } : m));
-        setError(e);
-        setStreaming(false);
-      },
-    });
-  }
-
-  function handleKey(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-  }
-
-  const lastAsstMsg = [...messages].reverse().find((m) => m.role === "assistant" && !m.streaming);
-
-  return (
-    <div className="flex gap-0 h-[calc(100vh-180px)] min-h-[480px]">
-      {/* Chat panel */}
-      <div className="flex flex-col flex-1 border border-gray-200 rounded-xl overflow-hidden bg-surface">
-        {/* Session header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/60 flex-shrink-0">
-          <div className="w-2 h-2 rounded-full bg-emerald-500" />
-          <span className="text-xs text-gray-600 font-medium">Playground — {bot.name}</span>
-          <span className="ml-auto text-[10px] text-gray-400 font-mono">
-            {sessionId ? sessionId.slice(0, 8) + "…" : "Initializing…"}
-          </span>
-          {messages.length > 0 && (
-            <button
-              type="button"
-              onClick={() => { setMessages([]); setSelected(null); }}
-              className="text-[10px] text-gray-400 hover:text-gray-600"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
-        {initErr && (
-          <div className="m-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{initErr}</div>
-        )}
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-5 space-y-5" aria-live="polite">
-          {messages.length === 0 && !initErr && (
-            <div className="flex flex-col items-center justify-center h-full text-center pb-8">
-              <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center mb-3">
-                <svg className="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
-                </svg>
-              </div>
-              <p className="text-sm text-gray-500">Ask anything to test this assistant.</p>
-              <p className="text-xs text-gray-400 mt-1">Responses use the saved configuration and knowledge.</p>
-            </div>
-          )}
-
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-              <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${msg.role === "user" ? "bg-ink-900 text-white" : "bg-brand-50 text-brand-600 ring-1 ring-brand-100"}`}>
-                {msg.role === "user" ? "U" : "AI"}
-              </div>
-              <div className={`max-w-[78%] flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
-                <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-xs ${msg.role === "user" ? "bg-ink-900 text-white rounded-tr-sm" : "bg-surface border border-gray-200 text-gray-800 rounded-tl-sm"}`}>
-                  {msg.content || (msg.streaming && (
-                    <span className="inline-flex gap-1 items-center">
-                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.3s]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.15s]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" />
-                    </span>
-                  ))}
-                </div>
-                {msg.role === "assistant" && msg.citations && msg.citations.length > 0 && !msg.streaming && (
-                  <button
-                    type="button"
-                    onClick={() => setSelected(msg.citations ?? null)}
-                    className="text-[10px] text-brand-600 mt-1 hover:underline"
-                  >
-                    {msg.citations.length} source{msg.citations.length !== 1 ? "s" : ""} used →
-                  </button>
-                )}
-                {msg.role === "assistant" && !msg.streaming && msg.latency && (
-                  <span className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
-                    {(msg.latency / 1000).toFixed(1)}s · {msg.tokensUsed?.toLocaleString()} tokens
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-
-        {error && (
-          <div className="mx-4 mb-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{error}</div>
-        )}
-
-        {/* Input */}
-        <div className="border-t border-gray-100 px-4 py-3 flex gap-2 items-end flex-shrink-0">
-          <textarea
-            ref={inputRef}
-            rows={1}
-            value={input}
-            onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`; }}
-            onKeyDown={handleKey}
-            placeholder="Ask something… (Enter to send)"
-            disabled={!sessionId || streaming}
-            className="input resize-none min-h-[38px] max-h-[120px] py-2 leading-relaxed flex-1"
-            maxLength={8000}
-          />
-          {streaming ? (
-            <button type="button" onClick={() => { abortRef.current?.(); setStreaming(false); }} className="btn-secondary flex-shrink-0 h-9 px-3">
-              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
-            </button>
-          ) : (
-            <button type="button" onClick={() => send()} disabled={!input.trim() || !sessionId} className="btn-primary flex-shrink-0 h-9 px-3">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Context inspector panel */}
-      <div className="w-72 flex-shrink-0 ml-4 flex flex-col">
-        <div className="card flex-1 overflow-hidden flex flex-col">
-          <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
-            <p className="text-xs font-semibold text-gray-700">Context inspector</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">Retrieved chunks for the last query</p>
-          </div>
-          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
-            {!selectedChunks && (
-              <p className="text-xs text-gray-400 text-center py-8">Send a message to see what the assistant retrieved.</p>
-            )}
-            {selectedChunks?.length === 0 && (
-              <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-3">No context retrieved. The assistant answered without knowledge — consider adding relevant documents.</p>
-            )}
-            {selectedChunks?.map((c) => (
-              <div key={c.ordinal} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-brand-100 text-brand-700 text-[9px] font-bold flex-shrink-0">
-                    {c.ordinal}
-                  </span>
-                  <span className={`text-[10px] font-medium tabular-nums ${c.score >= 0.7 ? "text-emerald-700" : c.score >= 0.5 ? "text-amber-700" : "text-red-600"}`}>
-                    {c.score.toFixed(3)}
-                  </span>
-                </div>
-                <p className="text-[11px] text-gray-600 leading-relaxed line-clamp-5">{c.snippet}</p>
-              </div>
-            ))}
-          </div>
-          {lastAsstMsg && (
-            <div className="px-3 py-2 border-t border-gray-100 bg-gray-50/60 flex-shrink-0">
-              <p className="text-[10px] text-gray-500 font-medium">Last response</p>
-              <p className="text-[10px] text-gray-400 tabular-nums">
-                {lastAsstMsg.tokensUsed?.toLocaleString()} tokens · {lastAsstMsg.latency ? `${(lastAsstMsg.latency / 1000).toFixed(1)}s` : "—"}
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -1258,7 +976,8 @@ export default function AssistantDetailPage() {
   const [showVariables, setShowVariables] = useState(false);
   const [showAskAi, setShowAskAi] = useState(false);
   const [showDeploy, setShowDeploy] = useState(false);
-  const [testMode, setTestMode] = useState<"chat" | "web-call" | null>(null);
+  const [testMode, setTestMode] = useState<TestMode | null>(null);
+  const [startingTest, setStartingTest] = useState(false);
 
   /** Reset the draft from a server response — used on load, after Ask AI, and
    * after every save, so the local copy always reflects what was persisted. */
@@ -1286,8 +1005,29 @@ export default function AssistantDetailPage() {
     setSaveError(null);
   }
 
-  async function save() {
-    if (!bot || !draft || saving) return;
+  /** Start a test, saving first so it exercises the flow currently on screen.
+   *
+   * Editing the flow and then testing the *previous* version is the single
+   * most confusing thing this page could do — you would tune a section, hear
+   * no change, and conclude the section does nothing. So the save is not
+   * optional and not a warning banner; it just happens.
+   */
+  async function startTest(mode: TestMode) {
+    if (startingTest) return;
+    setStartingTest(true);
+    try {
+      if (dirty) {
+        const saved = await save();
+        if (!saved) return; // the error is already on screen
+      }
+      setTestMode(mode);
+    } finally {
+      setStartingTest(false);
+    }
+  }
+
+  async function save(): Promise<boolean> {
+    if (!bot || !draft || saving) return false;
     setSaving(true);
     setSaveError(null);
     try {
@@ -1303,8 +1043,10 @@ export default function AssistantDetailPage() {
       // The server recomposes and may substitute the stock flow, so take its
       // answer rather than trusting the local draft.
       adopt(updated);
+      return true;
     } catch (e) {
       setSaveError(e instanceof ApiError ? e.message : "Failed to save.");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -1347,9 +1089,14 @@ export default function AssistantDetailPage() {
   }
 
   const outgoing = draft.assistant.direction === "outgoing";
+  const testing = testMode !== null;
 
   return (
-    <div className="animate-fade-in">
+    // Two columns: the builder, and the test panel docked beside it. Docked
+    // rather than overlaid so you can read a reply and edit the section that
+    // caused it without dismissing anything.
+    <div className="flex h-full min-h-0 animate-fade-in">
+      <div className="flex-1 min-w-0 overflow-y-auto">
       {showAskAi && (
         <AskAiModal
           bot={bot}
@@ -1365,22 +1112,6 @@ export default function AssistantDetailPage() {
       {showDeploy && (
         <SlideOver title="Deploy" wide onClose={() => setShowDeploy(false)}>
           <DeploymentsTab bot={bot} onUpdate={setBot} />
-        </SlideOver>
-      )}
-
-      {testMode && (
-        <SlideOver
-          title={testMode === "chat" ? "Test with Chat" : "Test with Web Call"}
-          wide
-          onClose={() => setTestMode(null)}
-        >
-          {dirty && (
-            <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-2.5 text-xs text-amber-800">
-              You have unsaved changes — this test runs against the last saved
-              version. Save first to try your edits.
-            </div>
-          )}
-          <PlaygroundTab bot={testMode === "web-call" ? { ...bot, channel: "voice" } : bot} />
         </SlideOver>
       )}
 
@@ -1400,10 +1131,12 @@ export default function AssistantDetailPage() {
             value={draft.name}
             onChange={(e) => patchDraft({ name: e.target.value })}
             maxLength={120}
+            disabled={testing}
             aria-label="Assistant name"
             className="w-[260px] rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5
                        text-[14px] font-semibold text-gray-100 transition-colors
-                       focus:border-brand-500/60 focus:outline-none focus:bg-white/[0.07]"
+                       focus:border-brand-500/60 focus:outline-none focus:bg-white/[0.07]
+                       disabled:opacity-50"
           />
 
           {/* Direction */}
@@ -1422,9 +1155,10 @@ export default function AssistantDetailPage() {
                 ? "Outgoing — the platform dials the contact. Click to switch to incoming."
                 : "Incoming — a contact dials in. Click to switch to outgoing."
             }
+            disabled={testing}
             className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04]
                        px-3 py-1.5 text-[13px] font-medium text-gray-200 transition-colors
-                       hover:bg-white/[0.08] flex-shrink-0"
+                       hover:bg-white/[0.08] flex-shrink-0 disabled:opacity-50"
           >
             {outgoing ? "Outgoing" : "Incoming"}
             <span className="w-5 h-5 rounded-full bg-brand-500/20 flex items-center justify-center">
@@ -1478,7 +1212,7 @@ export default function AssistantDetailPage() {
                 Saving…
               </span>
             ) : dirty ? (
-              <button onClick={save} className="btn-primary btn-sm">
+              <button onClick={save} disabled={testing} className="btn-primary btn-sm">
                 Save changes
               </button>
             ) : (
@@ -1488,59 +1222,81 @@ export default function AssistantDetailPage() {
 
           <div className="flex-1" />
 
-          <button
-            onClick={() => setShowAskAi(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-cta-500 px-3.5 py-2 text-[13px]
-                       font-semibold text-white transition-colors hover:bg-cta-600 flex-shrink-0"
-          >
-            <Sparkles className="w-4 h-4" strokeWidth={2} />
-            Ask AI
-          </button>
-
-          {/* Test with */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="text-[13px] font-semibold text-gray-200">Test with</span>
-            <div className="flex items-center rounded-lg overflow-hidden border border-white/10">
-              <button
-                onClick={() => setTestMode("chat")}
-                className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
-                           font-medium text-brand-300 transition-colors hover:bg-brand-600/30"
-              >
-                <MessageSquare className="w-4 h-4" strokeWidth={1.75} />
-                Chat
-              </button>
-              <button
-                onClick={() => setTestMode("web-call")}
-                className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
-                           font-medium text-brand-300 transition-colors hover:bg-brand-600/30
-                           border-l border-white/10"
-              >
-                <Headphones className="w-4 h-4" strokeWidth={1.75} />
-                Web Call
-              </button>
-              <Link
-                to="/channels"
-                title="Phone calls run through a connected number — set one up under Phone Numbers."
-                className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
-                           font-medium text-brand-300 transition-colors hover:bg-brand-600/30
-                           border-l border-white/10"
-              >
-                <Phone className="w-4 h-4" strokeWidth={1.75} />
-                Phone Call
-              </Link>
+          {testing ? (
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <span className="inline-flex items-center gap-2 rounded-lg bg-cta-500/15 px-3 py-2
+                               text-[13px] font-semibold text-cta-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-cta-500 animate-pulse" />
+                Testing Mode Active
+              </span>
+              <span className="text-[12.5px] text-gray-500 hidden xl:inline">
+                &mdash; Agent configuration is locked during testing
+              </span>
             </div>
-          </div>
+          ) : (
+            <>
+              <button
+                onClick={() => setShowAskAi(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-cta-500 px-3.5 py-2 text-[13px]
+                           font-semibold text-white transition-colors hover:bg-cta-600 flex-shrink-0"
+              >
+                <Sparkles className="w-4 h-4" strokeWidth={2} />
+                Ask AI
+              </button>
 
-          <button
-            onClick={() => setShowDeploy(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04]
-                       px-3.5 py-2 text-[13px] font-medium text-gray-200 transition-colors
-                       hover:bg-white/[0.08] flex-shrink-0"
-          >
-            <Rocket className="w-4 h-4" strokeWidth={1.75} />
-            Deploy
-            <ChevronDown className="w-3.5 h-3.5" strokeWidth={2} />
-          </button>
+              {/* Test with — saves the draft first; see startTest(). */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-[13px] font-semibold text-gray-200">Test with</span>
+                <div className="flex items-center rounded-lg overflow-hidden border border-white/10">
+                  <button
+                    onClick={() => startTest("chat")}
+                    disabled={startingTest}
+                    className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
+                               font-medium text-brand-300 transition-colors hover:bg-brand-600/30
+                               disabled:opacity-50"
+                  >
+                    {startingTest ? (
+                      <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2} />
+                    ) : (
+                      <MessageSquare className="w-4 h-4" strokeWidth={1.75} />
+                    )}
+                    Chat
+                  </button>
+                  <button
+                    onClick={() => startTest("web-call")}
+                    disabled={startingTest}
+                    className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
+                               font-medium text-brand-300 transition-colors hover:bg-brand-600/30
+                               border-l border-white/10 disabled:opacity-50"
+                  >
+                    <Headphones className="w-4 h-4" strokeWidth={1.75} />
+                    Web Call
+                  </button>
+                  <Link
+                    to="/channels"
+                    title="Phone calls run through a connected number — set one up under Phone Numbers."
+                    className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
+                               font-medium text-brand-300 transition-colors hover:bg-brand-600/30
+                               border-l border-white/10"
+                  >
+                    <Phone className="w-4 h-4" strokeWidth={1.75} />
+                    Phone Call
+                  </Link>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowDeploy(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04]
+                           px-3.5 py-2 text-[13px] font-medium text-gray-200 transition-colors
+                           hover:bg-white/[0.08] flex-shrink-0"
+              >
+                <Rocket className="w-4 h-4" strokeWidth={1.75} />
+                Deploy
+                <ChevronDown className="w-3.5 h-3.5" strokeWidth={2} />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Tabs */}
@@ -1595,8 +1351,8 @@ export default function AssistantDetailPage() {
         </div>
       </header>
 
-      {/* ── Body ── */}
-      <div className="max-w-6xl mx-auto px-6 py-6">
+        {/* ── Body ── */}
+        <div className="max-w-6xl mx-auto px-6 py-6">
         {saveError && (
           <div role="alert" className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
             {saveError}
@@ -1622,7 +1378,12 @@ export default function AssistantDetailPage() {
             {activeTab === "recent-calls" && <AnalyticsTab bot={bot} />}
           </>
         )}
+        </div>
       </div>
+
+      {testMode && (
+        <TestModePanel bot={bot} mode={testMode} onClose={() => setTestMode(null)} />
+      )}
     </div>
   );
 }

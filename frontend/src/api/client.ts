@@ -70,15 +70,18 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
-export function streamSSE(
+/**
+ * POST to an SSE endpoint and dispatch every event by name.
+ *
+ * The chat stream and the assistant-generation stream carry different event
+ * vocabularies but the identical wire format, so the parser lives here once and
+ * callers decide what the names mean. Returns an abort function.
+ */
+export function streamEvents(
   path: string,
   body: unknown,
-  handlers: {
-    onCitations?: (citations: CitationPayload[]) => void;
-    onToken?: (token: string) => void;
-    onDone?: (tokensUsed: number) => void;
-    onError?: (err: string) => void;
-  },
+  onEvent: (event: string, data: string) => void,
+  onError?: (err: string) => void,
 ): () => void {
   const controller = new AbortController();
   const token = getToken();
@@ -97,7 +100,7 @@ export function streamSSE(
 
       if (!res.ok || !res.body) {
         if (res.status === 401 && token) handleExpiredSession();
-        handlers.onError?.(`HTTP ${res.status}`);
+        onError?.(`HTTP ${res.status}`);
         return;
       }
 
@@ -105,14 +108,14 @@ export function streamSSE(
       const decoder = new TextDecoder();
       let buffer = "";
 
-      while (true) {
+      for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         // Parse complete SSE events (separated by a blank line). We must NOT
         // trim token data: the model's whitespace (spaces between words, and
         // newlines as their own tokens) is significant. Per the SSE spec we
         // strip only a single leading space after "data:" and rejoin the
-        // event's multiple data lines with "\n".
+        // event's multiple data lines with a newline.
         buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
 
         let sep: number;
@@ -129,32 +132,51 @@ export function streamSSE(
               dataLines.push(line.slice(5).replace(/^ /, ""));
             }
           }
-          const data = dataLines.join("\n");
-
-          if (eventType === "citations") {
-            handlers.onCitations?.(JSON.parse(data) as CitationPayload[]);
-          } else if (eventType === "token") {
-            handlers.onToken?.(data);
-          } else if (eventType === "done") {
-            const parsed = JSON.parse(data) as { tokens_used: number };
-            handlers.onDone?.(parsed.tokens_used);
-          } else if (eventType === "error") {
-            try {
-              handlers.onError?.((JSON.parse(data) as { detail?: string }).detail ?? "Generation failed.");
-            } catch {
-              handlers.onError?.("Generation failed.");
-            }
-          }
+          onEvent(eventType, dataLines.join("\n"));
         }
       }
     } catch (err) {
       if ((err as Error).name !== "AbortError") {
-        handlers.onError?.((err as Error).message);
+        onError?.((err as Error).message);
       }
     }
   })();
 
   return () => controller.abort();
+}
+
+export function streamSSE(
+  path: string,
+  body: unknown,
+  handlers: {
+    onCitations?: (citations: CitationPayload[]) => void;
+    onToken?: (token: string) => void;
+    onDone?: (tokensUsed: number) => void;
+    onError?: (err: string) => void;
+  },
+): () => void {
+  return streamEvents(
+    path,
+    body,
+    (eventType, data) => {
+      if (eventType === "citations") {
+        handlers.onCitations?.(JSON.parse(data) as CitationPayload[]);
+      } else if (eventType === "token") {
+        handlers.onToken?.(data);
+      } else if (eventType === "done") {
+        handlers.onDone?.((JSON.parse(data) as { tokens_used: number }).tokens_used);
+      } else if (eventType === "error") {
+        try {
+          handlers.onError?.(
+            (JSON.parse(data) as { detail?: string }).detail ?? "Generation failed.",
+          );
+        } catch {
+          handlers.onError?.("Generation failed.");
+        }
+      }
+    },
+    handlers.onError,
+  );
 }
 
 export interface CitationPayload {

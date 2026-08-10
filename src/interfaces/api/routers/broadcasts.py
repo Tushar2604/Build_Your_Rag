@@ -29,6 +29,7 @@ from src.interfaces.api.schemas import (
     BroadcastMessageResponse,
     BroadcastRecipientResponse,
     BroadcastResponse,
+    CampaignSenderResponse,
     CreateBroadcastRequest,
     RecipientPageResponse,
     SendManualMessageRequest,
@@ -58,6 +59,9 @@ def _to_response(b: Broadcast, chatbot_name: str, from_number: str) -> Broadcast
         chatbot_id=b.chatbot_id,
         chatbot_name=chatbot_name,
         whatsapp_channel_id=b.whatsapp_channel_id,
+        whatsapp_session_id=b.whatsapp_session_id,
+        sender_kind=b.sender_kind,  # type: ignore[arg-type]
+        mode=b.mode,  # type: ignore[arg-type]
         from_number=from_number,
         name=b.name,
         message_template=b.message_template,
@@ -90,7 +94,10 @@ async def _run_send(tenant_id: TenantId, broadcast_id: uuid.UUID) -> None:
     """Background entrypoint — builds its own container (no request scope)."""
     container = get_container()
     use_case = SendBroadcast(
-        container.unit_of_work(), container.whatsapp_sender, _status_callback_url()
+        container.unit_of_work(),
+        container.whatsapp_sender,
+        _status_callback_url(),
+        bridge=container.whatsapp_bridge,
     )
     await use_case.execute(tenant_id, broadcast_id)
 
@@ -103,16 +110,85 @@ async def _load(uow, tenant_id: TenantId, broadcast_id: uuid.UUID) -> Broadcast:
 
 
 async def _decorate(uow, tenant_id: TenantId, broadcast: Broadcast) -> BroadcastResponse:
+    """Attach the display names a campaign row needs.
+
+    The from-number lives in a different table per sender kind, so this resolves
+    whichever one applies rather than assuming a Cloud API channel.
+    """
     bot = await uow.chatbots.get(tenant_id, broadcast.chatbot_id)
-    channel = await uow.whatsapp_channels.get(tenant_id, broadcast.whatsapp_channel_id)
+    from_number = ""
+    if broadcast.sender_kind == "cloud_api" and broadcast.whatsapp_channel_id:
+        channel = await uow.whatsapp_channels.get(tenant_id, broadcast.whatsapp_channel_id)
+        from_number = channel.phone_number if channel else ""
+    elif broadcast.whatsapp_session_id:
+        session = await uow.whatsapp_web_sessions.get(tenant_id, broadcast.whatsapp_session_id)
+        from_number = session.phone_number if session else ""
     return _to_response(
         broadcast,
         bot.name if bot else "Unknown assistant",
-        channel.phone_number if channel else "",
+        from_number,
     )
 
 
-# --- CRUD ---
+@router.get("/senders", response_model=list[CampaignSenderResponse])
+async def list_senders(
+    principal: AdminPrincipalDep, container: ContainerDep
+) -> list[CampaignSenderResponse]:
+    """Every WhatsApp number this workspace can send a campaign from.
+
+    Both kinds in one list, each flagged with whether it can actually send right
+    now. Unavailable senders are listed rather than hidden — "my number isn't
+    there" is a much harder problem to debug than "my number says it needs
+    re-linking".
+    """
+    bridge_ready = container.whatsapp_bridge.enabled
+    senders: list[CampaignSenderResponse] = []
+
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        channels = await uow.whatsapp_channels.list_for_tenant(principal.tenant_id)
+        sessions = await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
+        names: dict[str, str] = {}
+        for bot in await uow.chatbots.list_for_tenant(principal.tenant_id):
+            names[str(bot.id)] = bot.name
+
+    for channel in channels:
+        senders.append(
+            CampaignSenderResponse(
+                id=channel.id,
+                kind="cloud_api",
+                label=f"{channel.phone_number} · Cloud API",
+                phone_number=channel.phone_number,
+                available=True,
+                chatbot_id=channel.chatbot_id,
+                chatbot_name=names.get(str(channel.chatbot_id), ""),
+            )
+        )
+
+    for session in sessions:
+        linked = session.status == "linked"
+        reason = ""
+        if not bridge_ready:
+            reason = "The WhatsApp bridge isn't running on this server."
+        elif not linked:
+            reason = "This phone isn't linked — scan the QR under WhatsApp Numbers."
+        senders.append(
+            CampaignSenderResponse(
+                id=session.id,
+                kind="personal",
+                label=(
+                    f"{session.phone_number or session.display_name or 'Personal WhatsApp'}"
+                    " · Phone WhatsApp"
+                ),
+                phone_number=session.phone_number,
+                available=linked and bridge_ready,
+                unavailable_reason=reason,
+                chatbot_id=session.chatbot_id,
+                chatbot_name=names.get(str(session.chatbot_id), ""),
+            )
+        )
+
+    return senders
 
 
 @router.post("", response_model=BroadcastResponse, status_code=201)
@@ -126,20 +202,47 @@ async def create_broadcast(
         bot = await uow.chatbots.get(principal.tenant_id, ChatbotId(body.chatbot_id))
         if bot is None:
             raise HTTPException(status_code=404, detail="Chatbot not found")
-        channel = await uow.whatsapp_channels.get_by_chatbot(
-            principal.tenant_id, ChatbotId(body.chatbot_id)
-        )
-        if channel is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Connect this assistant to a WhatsApp number before broadcasting "
-                "(Channels → Connect WhatsApp).",
+        channel_id: uuid.UUID | None = None
+        session_id: uuid.UUID | None = None
+        sender_kind = body.sender_kind or "cloud_api"
+
+        if body.sender_id is not None and body.sender_kind == "personal":
+            session = await uow.whatsapp_web_sessions.get(principal.tenant_id, body.sender_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="That WhatsApp number wasn't found.")
+            if session.status != "linked":
+                raise HTTPException(
+                    status_code=400,
+                    detail="That phone isn't linked right now — scan the QR under "
+                    "WhatsApp Numbers, then try again.",
+                )
+            session_id = session.id
+        elif body.sender_id is not None:
+            channel = await uow.whatsapp_channels.get(principal.tenant_id, body.sender_id)
+            if channel is None:
+                raise HTTPException(status_code=404, detail="That WhatsApp number wasn't found.")
+            channel_id = channel.id
+        else:
+            # No sender chosen — use the one already bound to this assistant,
+            # which is how campaigns worked before senders were selectable.
+            channel = await uow.whatsapp_channels.get_by_chatbot(
+                principal.tenant_id, ChatbotId(body.chatbot_id)
             )
+            if channel is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Choose a WhatsApp number to send from, or connect one to this "
+                    "assistant first (Phone Numbers → Connect WhatsApp).",
+                )
+            channel_id = channel.id
 
         broadcast = Broadcast(
             tenant_id=principal.tenant_id,
             chatbot_id=ChatbotId(body.chatbot_id),
-            whatsapp_channel_id=channel.id,
+            whatsapp_channel_id=channel_id,
+            whatsapp_session_id=session_id,
+            sender_kind=sender_kind,
+            mode=body.mode,
             name=body.name.strip(),
             message_template=body.message_template.strip(),
         )

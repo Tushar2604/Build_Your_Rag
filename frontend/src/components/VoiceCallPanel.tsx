@@ -63,7 +63,7 @@ const SILENCE_BEFORE_CHECK_IN_MS = 45000;
 export default function VoiceCallPanel({
   adapter,
   botName,
-  theme = "#4f46e5",
+  theme = "#0d9488",
 }: {
   adapter: VoiceCallAdapter;
   botName: string;
@@ -265,13 +265,13 @@ export default function VoiceCallPanel({
   return (
     <div className="flex flex-col h-full items-center">
       {/* Orb */}
-      <div className="flex flex-col items-center pt-10 pb-6 flex-shrink-0">
+      <div className="flex flex-col items-center pt-6 pb-4 flex-shrink-0">
         <button
           type="button"
           onClick={orbTap}
           disabled={state === "connecting" || state === "thinking" || ended}
           aria-label={active ? "Voice call in progress" : ended ? "Call ended" : "Start voice call"}
-          className={`relative w-28 h-28 rounded-full flex items-center justify-center text-white shadow-lg transition-transform ${ringClass} ${
+          className={`relative w-16 h-16 rounded-full flex items-center justify-center text-white shadow-lg transition-transform ${ringClass} ${
             state === "idle" && !ended ? "hover:scale-105" : ""
           }`}
           style={{ backgroundColor: ended ? "#10b981" : theme }}
@@ -282,7 +282,7 @@ export default function VoiceCallPanel({
               style={{ backgroundColor: theme }}
             />
           )}
-          <svg className="w-10 h-10 relative" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+          <svg className="w-6 h-6 relative" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
             {ended ? (
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
             ) : state === "thinking" ? (
@@ -299,7 +299,7 @@ export default function VoiceCallPanel({
             )}
           </svg>
         </button>
-        <p className="text-sm text-gray-600 mt-4 font-medium">
+        <p className="text-[13px] text-gray-600 mt-3 font-medium">
           {ended ? "Call complete — thank you!" : STATE_LABEL[state]}
         </p>
         {active && (

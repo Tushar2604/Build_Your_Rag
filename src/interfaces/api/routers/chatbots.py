@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
+import structlog
 from fastapi import APIRouter, HTTPException
+from sse_starlette.sse import EventSourceResponse
 
 from src.application.use_cases.generate_assistant import (
     USE_CASE_HINTS,
@@ -30,17 +33,19 @@ from src.interfaces.api.schemas import (
     AssistantKnowledgeDocument,
     AssistantKnowledgeResponse,
     AssistantOptionsResponse,
+    AttachAssistantKnowledgeRequest,
+    ChatbotCardCounts,
     ChatbotResponse,
     CreateChatbotRequest,
     FlowSectionSchema,
     GenerateAssistantRequest,
     RegenerateFlowRequest,
-    SetAssistantKnowledgeRequest,
     UpdateChatbotRequest,
     WidgetConfigSchema,
 )
 
 router = APIRouter(prefix="/chatbots", tags=["chatbots"])
+log = structlog.get_logger(__name__)
 
 # Labels for the use-case chips under the create box. Paired with the hint text
 # in `USE_CASE_HINTS` so a chip can never exist without a generator hint.
@@ -62,10 +67,18 @@ def public_url(public_key: str) -> str:
     return f"{get_settings().public_frontend_base}/c/{public_key}"
 
 
-def _to_response(bot: Chatbot, *, ai_generated: bool = True) -> ChatbotResponse:
+def _to_response(
+    bot: Chatbot,
+    *,
+    ai_generated: bool = True,
+    counts: ChatbotCardCounts | None = None,
+) -> ChatbotResponse:
     return ChatbotResponse(
         id=bot.id,
+        display_id=bot.display_id,
         name=bot.name,
+        counts=counts
+        or ChatbotCardCounts(knowledge_files=len(bot.allowed_document_ids)),
         channel=bot.channel,
         system_prompt=bot.system_prompt,
         flow_sections=[
@@ -155,6 +168,65 @@ async def generate_chatbot(
     return _to_response(bot, ai_generated=blueprint.ai_generated)
 
 
+@router.post("/generate/stream")
+async def generate_chatbot_stream(
+    body: GenerateAssistantRequest, principal: PrincipalDep, container: ContainerDep
+) -> EventSourceResponse:
+    """`/generate`, but the flow arrives section by section as it is written.
+
+    Watching the assistant take shape is the difference between "the machine did
+    something" and "I can see what it decided" — and each section landing is a
+    natural point to notice one is wrong. The assistant is still only saved once,
+    at the end, from the validated blueprint.
+
+    Events: `meta` (name, direction, welcome message), `section` per section,
+    then `done` carrying the saved assistant exactly as `/generate` returns it.
+    """
+    use_case = GenerateAssistantUseCase(container.llm)
+
+    async def event_generator():  # type: ignore[no-untyped-def]
+        blueprint = None
+        try:
+            async for kind, payload in use_case.stream(
+                body.description, use_case=body.use_case
+            ):
+                if kind == "blueprint":
+                    blueprint = payload
+                    break
+                yield {"event": kind, "data": json.dumps(payload)}
+        except Exception:  # noqa: BLE001
+            log.warning("assistant.generate_stream_failed", exc_info=True)
+            yield {"event": "error", "data": json.dumps({"detail": "Generation failed."})}
+            return
+
+        if blueprint is None:  # pragma: no cover - stream always ends with one
+            yield {"event": "error", "data": json.dumps({"detail": "Generation failed."})}
+            return
+
+        bot = Chatbot(
+            tenant_id=principal.tenant_id,
+            name=blueprint.name,
+            channel=body.channel,
+            retrieval=RetrievalConfig(top_k=get_settings().retrieval_top_k),
+            widget=WidgetConfig(display_name=blueprint.name),
+            assistant=AssistantConfig(
+                direction=blueprint.direction,
+                welcome_message=blueprint.welcome_message,
+            ).normalized(),
+        )
+        bot.apply_flow_sections(blueprint.sections)
+
+        async with container.unit_of_work() as uow:
+            uow.set_tenant_scope(principal.tenant_id)
+            await uow.chatbots.add(bot)
+            await uow.commit()
+
+        response = _to_response(bot, ai_generated=blueprint.ai_generated)
+        yield {"event": "done", "data": response.model_dump_json()}
+
+    return EventSourceResponse(event_generator())
+
+
 @router.post("/{chatbot_id}/flow/generate", response_model=ChatbotResponse)
 async def regenerate_flow(
     chatbot_id: uuid.UUID,
@@ -213,6 +285,27 @@ async def create_chatbot(
     return _to_response(bot)
 
 
+async def _card_counts(uow, tenant_id, bot: Chatbot, integrations: int) -> ChatbotCardCounts:
+    """The at-a-glance numbers on an assistant card.
+
+    `integrations` is passed in rather than looked up per assistant: connections
+    are held per workspace, so counting them inside the loop would be the same
+    query repeated once per card.
+    """
+    post_call = await uow.post_call_configs.list_for_chatbot(tenant_id, bot.id)
+    return ChatbotCardCounts(
+        knowledge_files=len(bot.allowed_document_ids),
+        post_call_actions=len(post_call),
+        integrations=integrations,
+    )
+
+
+async def _connected_integrations(uow, tenant_id) -> int:
+    connections = await uow.tenant_integrations.list_for_tenant(tenant_id)
+    oauth = await uow.oauth_connections.list_for_tenant(tenant_id)
+    return len(connections) + len(oauth)
+
+
 @router.get("", response_model=list[ChatbotResponse])
 async def list_chatbots(
     principal: PrincipalDep, container: ContainerDep
@@ -220,7 +313,11 @@ async def list_chatbots(
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         bots = await uow.chatbots.list_for_tenant(principal.tenant_id)
-    return [_to_response(b) for b in bots]
+        integrations = await _connected_integrations(uow, principal.tenant_id)
+        counts = [
+            await _card_counts(uow, principal.tenant_id, b, integrations) for b in bots
+        ]
+    return [_to_response(b, counts=n) for b, n in zip(bots, counts, strict=True)]
 
 
 @router.get("/{chatbot_id}", response_model=ChatbotResponse)
@@ -230,9 +327,15 @@ async def get_chatbot(
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         bot = await uow.chatbots.get(principal.tenant_id, ChatbotId(chatbot_id))
-    if bot is None:
-        raise HTTPException(status_code=404, detail="Chatbot not found")
-    return _to_response(bot)
+        if bot is None:
+            raise HTTPException(status_code=404, detail="Chatbot not found")
+        counts = await _card_counts(
+            uow,
+            principal.tenant_id,
+            bot,
+            await _connected_integrations(uow, principal.tenant_id),
+        )
+    return _to_response(bot, counts=counts)
 
 
 @router.patch("/{chatbot_id}", response_model=ChatbotResponse)
@@ -316,7 +419,8 @@ async def update_chatbot(
 
 
 def _knowledge_response(bot: Chatbot, documents: list) -> AssistantKnowledgeResponse:
-    attached = {str(d) for d in bot.allowed_document_ids}
+    """Render only the documents attached to this assistant, in its own order."""
+    by_id = {str(d.id): d for d in documents}
     rows = [
         AssistantKnowledgeDocument(
             id=doc.id,
@@ -324,15 +428,14 @@ def _knowledge_response(bot: Chatbot, documents: list) -> AssistantKnowledgeResp
             status=doc.status.value,
             chunk_count=doc.chunk_count,
             error=doc.error,
-            attached=str(doc.id) in attached,
         )
-        for doc in documents
+        for doc in (by_id.get(str(d)) for d in bot.allowed_document_ids)
+        if doc is not None
     ]
     return AssistantKnowledgeResponse(
         documents=rows,
-        attached_count=len(attached),
+        total_count=len(rows),
         ready_count=sum(1 for r in rows if r.status == "ready"),
-        scope_is_all=not attached,
     )
 
 
@@ -340,12 +443,11 @@ def _knowledge_response(bot: Chatbot, documents: list) -> AssistantKnowledgeResp
 async def get_knowledge(
     chatbot_id: uuid.UUID, principal: PrincipalDep, container: ContainerDep
 ) -> AssistantKnowledgeResponse:
-    """This assistant's knowledge base: every tenant document, flagged with
-    whether this assistant may retrieve from it.
+    """This assistant's own knowledge base.
 
-    The whole tenant list is returned, not just the attached subset, because the
-    tab's job is picking — showing only what's already attached would make
-    adding a source require a trip to another page.
+    Only its documents — files uploaded for a different assistant are neither
+    listed nor retrievable here. A document that has since been deleted from the
+    workspace simply drops out of the list rather than rendering as a broken row.
     """
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
@@ -356,20 +458,19 @@ async def get_knowledge(
     return _knowledge_response(bot, documents)
 
 
-@router.put("/{chatbot_id}/knowledge", response_model=AssistantKnowledgeResponse)
-async def set_knowledge(
+@router.post("/{chatbot_id}/knowledge", response_model=AssistantKnowledgeResponse)
+async def attach_knowledge(
     chatbot_id: uuid.UUID,
-    body: SetAssistantKnowledgeRequest,
+    body: AttachAssistantKnowledgeRequest,
     principal: PrincipalDep,
     container: ContainerDep,
 ) -> AssistantKnowledgeResponse:
-    """Replace the assistant's document set.
+    """Add freshly uploaded documents to this assistant.
 
-    Ids are intersected with the tenant's own documents before saving — an id
-    from another tenant would otherwise sit in the allowlist forever, and a
-    deleted document would leave a dangling reference that quietly narrows
-    retrieval. An empty list means "search everything", which is the default an
-    assistant starts on.
+    Additive rather than a replace: uploads arrive one batch at a time and two
+    concurrent uploads finishing together would otherwise have the second
+    overwrite the first. Ids are intersected with the tenant's own documents, so
+    a foreign or already-deleted id can never enter the list.
     """
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
@@ -379,11 +480,41 @@ async def set_knowledge(
 
         documents = await uow.documents.list_for_tenant(principal.tenant_id)
         owned = {str(d.id) for d in documents}
-        requested = [d for d in body.document_ids if str(d) in owned]
-        bot.allowed_document_ids = [DocumentId(d) for d in requested]
+        existing = [str(d) for d in bot.allowed_document_ids]
+        merged = list(
+            dict.fromkeys(existing + [str(d) for d in body.document_ids if str(d) in owned])
+        )
+        bot.allowed_document_ids = [DocumentId(uuid.UUID(d)) for d in merged]
 
         await uow.chatbots.update(bot)
         await uow.commit()
+    return _knowledge_response(bot, documents)
+
+
+@router.delete("/{chatbot_id}/knowledge/{document_id}", response_model=AssistantKnowledgeResponse)
+async def detach_knowledge(
+    chatbot_id: uuid.UUID,
+    document_id: uuid.UUID,
+    principal: PrincipalDep,
+    container: ContainerDep,
+) -> AssistantKnowledgeResponse:
+    """Remove one document from this assistant's knowledge base.
+
+    The file itself is left in the workspace — another assistant may be using
+    it, and "stop answering from this" is a different intent from "delete it".
+    """
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        bot = await uow.chatbots.get(principal.tenant_id, ChatbotId(chatbot_id))
+        if bot is None:
+            raise HTTPException(status_code=404, detail="Chatbot not found")
+
+        bot.allowed_document_ids = [
+            d for d in bot.allowed_document_ids if str(d) != str(document_id)
+        ]
+        await uow.chatbots.update(bot)
+        await uow.commit()
+        documents = await uow.documents.list_for_tenant(principal.tenant_id)
     return _knowledge_response(bot, documents)
 
 

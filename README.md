@@ -100,6 +100,16 @@ An LLM turns the description into a name, a welcome message, and a
 payment-arrangement flow, a recruiting one gets a candidate-qualification flow.
 Nothing is templated, and everything is editable afterwards.
 
+`POST /api/v1/chatbots/generate/stream` does the same thing as SSE, and is what
+the UI uses: `meta` (name, direction, welcome message), one `section` event per
+section as the model finishes writing it, then `done` with the saved assistant.
+The builder renders each section as it lands, so you watch the flow being
+written rather than staring at a spinner — and each section arriving is a
+natural moment to notice one is wrong. Sections are parsed out of the reply
+while it is still being written (`SectionStreamParser`), by string-aware brace
+matching; the completed reply is still validated normally, so what displays and
+what persists cannot diverge.
+
 Two invariants survive whatever the model returns
 (`src/application/use_cases/generate_assistant.py`):
 
@@ -137,16 +147,27 @@ fixed string costs latency and is the one thing models are least reliable at.
 ### Per-assistant knowledge base
 
 ```
-GET /api/v1/chatbots/{id}/knowledge                        -> every doc, flagged attached
-PUT /api/v1/chatbots/{id}/knowledge   { document_ids: [] }  -> replace the selection
+GET    /api/v1/chatbots/{id}/knowledge                          -> this assistant's documents
+POST   /api/v1/chatbots/{id}/knowledge   { document_ids: [] }   -> attach (additive)
+DELETE /api/v1/chatbots/{id}/knowledge/{document_id}            -> detach, file stays
 ```
 
-An empty selection means "search every ready document in the workspace", which
-is what an assistant starts on. An assistant with **no** knowledge base still
-works — it answers from its Conversational Flow alone — so the UI nudges toward
-uploading one rather than blocking. Submitted ids are intersected with the
-tenant's own documents before saving, so a foreign or deleted id can't sit in
-the allowlist quietly narrowing retrieval.
+Each assistant owns its knowledge base. It retrieves from its own documents and
+nothing else — a file uploaded for one assistant is neither listed nor searched
+by another, so there is no workspace picker to mis-click. Uploading happens on
+the assistant's own tab and attaches automatically.
+
+An assistant with **no** documents still works — it answers from its
+Conversational Flow alone — so the tab nudges rather than blocks. Attaching is
+additive so two concurrent uploads can't overwrite each other, and submitted ids
+are intersected with the tenant's own documents, so a foreign or deleted id
+can't sit in the list quietly narrowing retrieval.
+
+`allowed_document_ids = []` used to mean "search everything". It now means
+"nothing attached", and `ChunkRepository.search` distinguishes `None`
+(unscoped) from `[]` (no knowledge) rather than collapsing both to "search
+all". Migration **0019** pins the previously-implicit set onto every assistant
+built under the old rule, so none of them silently lost their sources.
 
 ## Conversational Flow
 
@@ -189,6 +210,29 @@ as a background task and is idempotent — a `(config, session)` unique constrai
 means a repeated "end session" call can't double-post into a customer's ATS.
 
 ## WhatsApp broadcast campaigns
+
+A campaign chooses two things before it sends:
+
+**Mode** — `broadcast` announces and stops; `broadcast_reply` hands the
+conversation to the assistant. The difference is one flag on the conversation
+row (`whatsapp_conversations.auto_reply`), which both inbound paths read, so an
+announce-only campaign still *records* a reply in the funnel and the chat log —
+it just doesn't answer it.
+
+**Sender** — a Cloud API business number (`whatsapp_channels`) or a QR-linked
+personal account (`whatsapp_web_sessions`). `GET /api/v1/broadcasts/senders`
+lists both, each flagged with whether it can send right now and why not;
+unavailable numbers are listed rather than hidden, because "my number isn't
+there" is harder to debug than "my number needs re-linking". `SendBroadcast`
+picks the transport per campaign and returns the same
+`(ok, message_id, error)` shape either way. The personal bridge has no delivery
+receipts, so its campaigns never advance past `sent`.
+
+Migration **0021** also drops a foreign key that had been rejecting every
+personal-WhatsApp conversation: `whatsapp_conversations.whatsapp_channel_id`
+holds *either* a channel id or a web-session id, and the constraint only
+allowed the former.
+
 
 Outbound sends to a contact list, where every reply is then handled by the
 assistant's normal auto-reply pipeline (the campaign owns *delivery*; the

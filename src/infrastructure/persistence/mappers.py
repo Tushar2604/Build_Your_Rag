@@ -124,6 +124,7 @@ def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
         id=ChatbotId(row.id),
         tenant_id=TenantId(row.tenant_id),
         name=row.name,
+        display_id=row.display_id,
         channel=row.channel or "text",  # type: ignore[arg-type]
         system_prompt=row.system_prompt,
         flow_sections=[
@@ -370,6 +371,7 @@ def whatsapp_channel_to_domain(row: m.WhatsAppChannelModel) -> WhatsAppChannel:
 
 def whatsapp_conversation_to_domain(row: m.WhatsAppConversationModel) -> WhatsAppConversation:
     return WhatsAppConversation(
+        auto_reply=row.auto_reply,
         id=row.id,
         whatsapp_channel_id=row.whatsapp_channel_id,
         phone_number=row.phone_number,
@@ -426,6 +428,9 @@ def broadcast_to_domain(row: m.BroadcastModel) -> Broadcast:
         tenant_id=TenantId(row.tenant_id),
         chatbot_id=ChatbotId(row.chatbot_id),
         whatsapp_channel_id=row.whatsapp_channel_id,
+        whatsapp_session_id=row.whatsapp_session_id,
+        sender_kind=row.sender_kind,  # type: ignore[arg-type]
+        mode=row.mode,  # type: ignore[arg-type]
         name=row.name,
         message_template=row.message_template,
         status=row.status,  # type: ignore[arg-type]

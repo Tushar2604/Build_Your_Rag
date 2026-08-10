@@ -153,10 +153,17 @@ async def whatsapp_webhook(request: Request, container: ContainerDep) -> Respons
             await uow.whatsapp_conversations.add(conversation)
             await uow.commit()
         session_id = conversation.session_id
+        auto_reply = conversation.auto_reply
 
     # If this number is on a broadcast, their reply advances the campaign funnel.
     # No-op otherwise, so ordinary inbound contacts are unaffected.
     await mark_replied(container, session_id)
+
+    if not auto_reply:
+        # An announce-only campaign. The reply is recorded above and shows in
+        # the campaign funnel and the chat log; the assistant just stays quiet,
+        # which is the whole difference between Broadcast and Broadcast + Reply.
+        return _twiml("")
 
     use_case = AskChatbot(container.unit_of_work(), container.embedder, container.llm)
     try:

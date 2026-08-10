@@ -1,24 +1,26 @@
-// Knowledge Base — the documents this one assistant may retrieve from.
+// Knowledge Base — the documents this one assistant answers from.
 //
-// An assistant works fine with nothing attached: it falls back to searching
-// every ready document in the workspace, and if there are none it simply
-// answers from its Conversational Flow alone. That is a legitimate
-// configuration, not an error — so this tab nudges rather than blocks, and says
-// plainly what the current setting means for answers.
+// Its own documents and nothing else. There is no workspace picker: files
+// uploaded for a different assistant are not this assistant's knowledge, and
+// listing them would invite attaching a pricing sheet to a recruiting bot by
+// accident. Upload here, and it belongs to this assistant.
+//
+// An assistant with an empty knowledge base still works — it answers from its
+// Conversational Flow alone — so this nudges rather than blocks.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { CheckCircle2, FileText, Info, Loader2, Upload } from "lucide-react";
+import { CheckCircle2, FileText, Info, Loader2, Trash2, Upload } from "lucide-react";
 import {
   AssistantKnowledge,
+  attachAssistantKnowledge,
+  detachAssistantKnowledge,
   getAssistantKnowledge,
-  setAssistantKnowledge,
 } from "../../api/chatbots";
 import { completeUpload, createUpload, uploadFile } from "../../api/documents";
 import { ApiError } from "../../api/client";
 
 const UPLOAD_CONCURRENCY = 4;
 /** Documents mid-ingestion settle within seconds; poll until they do. */
-const POLL_MS = 4000;
+const POLL_MS = 3000;
 
 interface UploadRow {
   filename: string;
@@ -53,9 +55,10 @@ function StatusPill({ status, error }: { status: string; error: string | null })
 export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
   const [data, setData] = useState<AssistantKnowledge | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploads, setUploads] = useState<UploadRow[]>([]);
+  const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
@@ -86,39 +89,23 @@ export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
     return () => clearInterval(timer);
   }, [pending, load]);
 
-  async function toggle(documentId: string) {
-    if (!data) return;
-    const next = data.documents.some((d) => d.id === documentId && d.attached)
-      ? data.documents.filter((d) => d.attached && d.id !== documentId).map((d) => d.id)
-      : [...data.documents.filter((d) => d.attached).map((d) => d.id), documentId];
-
-    setSaving(true);
-    setError(null);
-    try {
-      setData(await setAssistantKnowledge(chatbotId, next));
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not save the selection.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleFiles(files: FileList | null) {
-    if (!files?.length) return;
+  async function handleFiles(files: FileList | File[] | null) {
+    if (!files) return;
     const list = Array.from(files);
+    if (!list.length) return;
+
     const start = uploads.length;
     setUploads((prev) => [
       ...prev,
       ...list.map((f) => ({ filename: f.name, status: "uploading" as const })),
     ]);
+    setError(null);
 
     function updateRow(i: number, patch: Partial<UploadRow>) {
       setUploads((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
     }
 
-    // Uploaded files are attached to this assistant automatically — a file
-    // dropped on an assistant's own Knowledge tab was clearly meant for it.
-    const attachedIds: string[] = [];
+    const uploadedIds: string[] = [];
     let cursor = 0;
     async function worker() {
       for (;;) {
@@ -133,7 +120,7 @@ export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
           );
           await uploadFile(upload_url, file);
           await completeUpload(document_id);
-          attachedIds.push(document_id);
+          uploadedIds.push(document_id);
           updateRow(start + i, { status: "done" });
         } catch (err) {
           updateRow(start + i, {
@@ -147,17 +134,30 @@ export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
       Array.from({ length: Math.min(UPLOAD_CONCURRENCY, list.length) }, worker),
     );
 
-    if (attachedIds.length) {
-      const already = (data?.documents ?? []).filter((d) => d.attached).map((d) => d.id);
+    if (uploadedIds.length) {
       try {
-        setData(await setAssistantKnowledge(chatbotId, [...already, ...attachedIds]));
+        // Attaching is additive server-side, so two batches finishing together
+        // can't overwrite each other.
+        setData(await attachAssistantKnowledge(chatbotId, uploadedIds));
       } catch {
         await load(true);
       }
-    } else {
-      await load(true);
     }
+    // Clear finished rows once they're represented in the list below.
+    setTimeout(() => setUploads((prev) => prev.filter((r) => r.status === "failed")), 1500);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function remove(documentId: string) {
+    setBusyId(documentId);
+    setError(null);
+    try {
+      setData(await detachAssistantKnowledge(chatbotId, documentId));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not remove the document.");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   if (loading) {
@@ -171,49 +171,40 @@ export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
   }
 
   const docs = data?.documents ?? [];
-  const scopeIsAll = data?.scope_is_all ?? true;
   const readyCount = data?.ready_count ?? 0;
 
   return (
     <div className="space-y-5">
-      {/* Scope explanation — the two meanings of "nothing attached" differ a lot. */}
+      {/* What the current state means for answers */}
       <div
         className={`rounded-xl border px-4 py-3.5 flex items-start gap-3 ${
-          readyCount === 0
+          docs.length === 0
             ? "border-amber-200 bg-amber-50"
-            : scopeIsAll
-              ? "border-blue-200 bg-blue-50"
-              : "border-emerald-200 bg-emerald-50"
+            : "border-emerald-200 bg-emerald-50"
         }`}
       >
         <Info
           className={`w-4 h-4 mt-0.5 flex-shrink-0 ${
-            readyCount === 0 ? "text-amber-700" : scopeIsAll ? "text-blue-700" : "text-emerald-700"
+            docs.length === 0 ? "text-amber-700" : "text-emerald-700"
           }`}
           strokeWidth={2}
         />
         <div className="text-[13px] leading-relaxed">
-          {readyCount === 0 ? (
+          {docs.length === 0 ? (
             <p className="text-amber-900">
               <strong className="font-semibold">No knowledge base yet.</strong> This
-              assistant still works — it answers from its Conversational Flow alone —
-              but it can't quote prices, policies, or product detail. Upload a
-              document below and its answers get specific and checkable.
-            </p>
-          ) : scopeIsAll ? (
-            <p className="text-blue-900">
-              <strong className="font-semibold">Searching all {readyCount} documents.</strong>{" "}
-              Nothing is attached, so this assistant retrieves from every ready
-              document in the workspace. Tick specific files to narrow it.
+              assistant works without one — it answers from its Conversational Flow
+              alone — but it can't quote prices, policies, or product detail. Upload a
+              document and its answers get specific and checkable.
             </p>
           ) : (
             <p className="text-emerald-900">
               <strong className="font-semibold">
-                Scoped to {data?.attached_count} document
-                {data?.attached_count === 1 ? "" : "s"}.
+                Answering from {readyCount} document{readyCount === 1 ? "" : "s"}.
               </strong>{" "}
-              This assistant only retrieves from the ticked files. Untick them all to
-              search everything again.
+              Only these files — nothing uploaded for another assistant is used here.
+              {readyCount < docs.length &&
+                ` ${docs.length - readyCount} still processing.`}
             </p>
           )}
         </div>
@@ -221,8 +212,22 @@ export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
 
       {/* Upload */}
       <label
-        className="flex items-center gap-3 rounded-xl border-2 border-dashed border-gray-200 bg-surface
-                   px-5 py-5 cursor-pointer transition-colors hover:border-brand-500/50 hover:bg-surface-2"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          handleFiles(e.dataTransfer.files);
+        }}
+        className={`flex items-center gap-3 rounded-xl border-2 border-dashed px-5 py-6 cursor-pointer
+                    transition-colors ${
+                      dragging
+                        ? "border-brand-500 bg-brand-500/[0.06]"
+                        : "border-gray-200 bg-surface hover:border-brand-500/50 hover:bg-surface-2"
+                    }`}
       >
         <Upload className="w-5 h-5 flex-shrink-0 text-brand-400" strokeWidth={1.75} />
         <span className="min-w-0">
@@ -230,8 +235,8 @@ export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
             Upload documents for this assistant
           </span>
           <span className="block text-xs text-gray-500 mt-0.5">
-            PDF, DOCX, TXT, MD, or an image — screenshots and scans are transcribed
-            automatically. Files land attached to this assistant.
+            Drop files here or click to browse — PDF, DOCX, TXT, MD, or an image
+            (screenshots and scans are transcribed automatically).
           </span>
         </span>
         <input
@@ -259,7 +264,7 @@ export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
                 }
               >
                 {u.status === "uploading" && "Uploading…"}
-                {u.status === "done" && "✓ Attached"}
+                {u.status === "done" && "✓ Added"}
                 {u.status === "failed" && (u.error || "Failed")}
               </span>
             </li>
@@ -273,61 +278,46 @@ export default function KnowledgeBaseTab({ chatbotId }: { chatbotId: string }) {
         </div>
       )}
 
-      {/* Document list */}
-      <section className="rounded-2xl border border-gray-200 bg-surface overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200">
-          <h2 className="text-[14px] font-semibold text-gray-900">
-            Workspace documents
-            {docs.length > 0 && <span className="text-gray-500 font-normal"> · {docs.length}</span>}
-          </h2>
-          {saving && <span className="text-xs text-gray-500">Saving…</span>}
-        </div>
-
-        {docs.length === 0 ? (
-          <div className="px-5 py-10 text-center">
-            <FileText className="w-8 h-8 text-gray-400 mx-auto" strokeWidth={1.5} />
-            <p className="text-sm text-gray-500 mt-3">
-              No documents in this workspace yet. Upload one above, or add them from{" "}
-              <Link to="/knowledge" className="link">
-                Files
-              </Link>
-              .
-            </p>
+      {/* This assistant's documents */}
+      {docs.length > 0 && (
+        <section className="rounded-2xl border border-gray-200 bg-surface overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-gray-200">
+            <h2 className="text-[14px] font-semibold text-gray-900">
+              This assistant's documents
+              <span className="text-gray-500 font-normal"> · {docs.length}</span>
+            </h2>
           </div>
-        ) : (
+
           <ul className="divide-y divide-gray-100">
             {docs.map((doc) => (
-              <li key={doc.id}>
-                <label
-                  className={`flex items-center gap-3 px-5 py-3 transition-colors ${
-                    doc.status === "ready"
-                      ? "cursor-pointer hover:bg-surface-2"
-                      : "opacity-60 cursor-not-allowed"
-                  }`}
+              <li key={doc.id} className="flex items-center gap-3 px-5 py-3">
+                <FileText className="w-4 h-4 text-gray-500 flex-shrink-0" strokeWidth={1.75} />
+                <span className="text-[13.5px] text-gray-900 truncate flex-1 min-w-0">
+                  {doc.filename}
+                </span>
+                <span className="text-xs text-gray-500 tabular-nums whitespace-nowrap">
+                  {doc.chunk_count} chunks
+                </span>
+                <StatusPill status={doc.status} error={doc.error} />
+                <button
+                  onClick={() => remove(doc.id)}
+                  disabled={busyId === doc.id}
+                  aria-label={`Remove ${doc.filename} from this assistant`}
+                  title="Remove from this assistant"
+                  className="w-8 h-8 flex items-center justify-center rounded text-gray-500
+                             hover:text-red-500 disabled:opacity-40"
                 >
-                  <input
-                    type="checkbox"
-                    // Attaching a document that has not finished ingesting would
-                    // scope the assistant to something with no chunks to search.
-                    disabled={doc.status !== "ready" || saving}
-                    checked={doc.attached}
-                    onChange={() => toggle(doc.id)}
-                    className="w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-                  />
-                  <FileText className="w-4 h-4 text-gray-500 flex-shrink-0" strokeWidth={1.75} />
-                  <span className="text-[13.5px] text-gray-900 truncate flex-1 min-w-0">
-                    {doc.filename}
-                  </span>
-                  <span className="text-xs text-gray-500 tabular-nums whitespace-nowrap">
-                    {doc.chunk_count} chunks
-                  </span>
-                  <StatusPill status={doc.status} error={doc.error} />
-                </label>
+                  {busyId === doc.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2} />
+                  ) : (
+                    <Trash2 className="w-4 h-4" strokeWidth={1.75} />
+                  )}
+                </button>
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      )}
     </div>
   );
 }

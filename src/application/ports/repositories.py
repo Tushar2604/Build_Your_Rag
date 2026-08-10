@@ -374,6 +374,8 @@ class WhatsAppConversation:
     whatsapp_channel_id: uuid.UUID
     phone_number: str  # the external sender's number
     session_id: SessionId
+    # False for announce-only campaigns: the reply is recorded, not answered.
+    auto_reply: bool = True
     id: uuid.UUID = field(default_factory=new_id)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))

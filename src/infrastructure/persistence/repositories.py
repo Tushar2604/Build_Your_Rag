@@ -340,7 +340,11 @@ class ChunkRepositoryImpl:
         import math
 
         stmt = select(m.ChunkModel).where(m.ChunkModel.tenant_id == tenant_id)
-        if document_ids:
+        # `None` and `[]` mean different things and must not be collapsed:
+        # None = unscoped (search the whole tenant), [] = an assistant with an
+        # empty knowledge base, which must retrieve nothing rather than
+        # everything. `IN ()` yields no rows, which is exactly right.
+        if document_ids is not None:
             stmt = stmt.where(m.ChunkModel.document_id.in_(document_ids))
 
         rows = (await self._s.execute(stmt)).scalars().all()
@@ -380,7 +384,13 @@ class ChatbotRepositoryImpl:
         self._s = session
 
     async def add(self, chatbot: Chatbot) -> None:
-        self._s.add(_chatbot_to_row(chatbot))
+        row = _chatbot_to_row(chatbot)
+        self._s.add(row)
+        # Flush so the sequence-assigned display_id comes back now rather
+        # than after commit — the create response carries it, and the UI
+        # shows it on the card the moment the assistant appears.
+        await self._s.flush()
+        chatbot.display_id = row.display_id
 
     async def get(self, tenant_id: TenantId, chatbot_id: ChatbotId) -> Chatbot | None:
         row = (
@@ -1122,6 +1132,7 @@ class WhatsAppConversationRepositoryImpl:
                 whatsapp_channel_id=conversation.whatsapp_channel_id,
                 phone_number=conversation.phone_number,
                 session_id=conversation.session_id,
+                auto_reply=conversation.auto_reply,
                 created_at=conversation.created_at,
                 updated_at=conversation.updated_at,
             )
@@ -1275,6 +1286,9 @@ class BroadcastRepositoryImpl:
                 tenant_id=broadcast.tenant_id,
                 chatbot_id=broadcast.chatbot_id,
                 whatsapp_channel_id=broadcast.whatsapp_channel_id,
+                whatsapp_session_id=broadcast.whatsapp_session_id,
+                sender_kind=broadcast.sender_kind,
+                mode=broadcast.mode,
                 name=broadcast.name,
                 message_template=broadcast.message_template,
                 status=broadcast.status,

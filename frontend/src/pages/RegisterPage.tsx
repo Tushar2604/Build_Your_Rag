@@ -102,7 +102,7 @@ export default function RegisterPage() {
             <Link to="/login" className="link">Sign in</Link>
           </p>
 
-          <div className="card shadow-modal backdrop-blur-sm bg-white/90 p-6 mt-6">
+          <div className="card shadow-modal p-6 mt-6">
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
               <div>
                 <label htmlFor="tenantName" className="label">Organisation name</label>

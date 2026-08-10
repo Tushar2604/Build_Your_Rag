@@ -1,13 +1,16 @@
-// Broadcast campaigns — list + create. A campaign is created in `queued` and
-// sends nothing until it's opened and started, so an operator can review the
-// contact list before 500 people get a message.
+// Broadcast campaigns — the list. Creating one is its own page
+// (BroadcastCreatePage): choosing a mode, a number, a message and a contact
+// list is too much to review inside a modal.
+//
+// A campaign is created in `queued` and sends nothing until it is opened and
+// started, so an operator can check the contact list before 500 people get a
+// message.
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   Broadcast,
   BroadcastStatus,
-  createBroadcast,
   deleteBroadcast,
   listBroadcasts,
 } from "../api/broadcasts";
@@ -28,137 +31,11 @@ function StatusPill({ status }: { status: BroadcastStatus }) {
   );
 }
 
-function CreateModal({
-  chatbots,
-  onClose,
-  onCreated,
-}: {
-  chatbots: Chatbot[];
-  onClose: () => void;
-  onCreated: (b: Broadcast) => void;
-}) {
-  const [chatbotId, setChatbotId] = useState(chatbots[0]?.id ?? "");
-  const [name, setName] = useState("");
-  const [message, setMessage] = useState("");
-  const [contacts, setContacts] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-    try {
-      const created = await createBroadcast({
-        chatbot_id: chatbotId,
-        name,
-        message_template: message,
-        recipients_text: contacts,
-      });
-      onCreated(created);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to create the campaign.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <form
-        onSubmit={submit}
-        className="card w-full max-w-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
-      >
-        <h2 className="section-title">New broadcast campaign</h2>
-
-        <div>
-          <label className="label">Assistant *</label>
-          <select
-            className="input"
-            value={chatbotId}
-            onChange={(e) => setChatbotId(e.target.value)}
-            required
-          >
-            {chatbots.map((b) => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-          <p className="text-xs text-gray-400 mt-1">
-            Must already be connected to a WhatsApp number under Channels.
-            Replies are answered by this assistant.
-          </p>
-        </div>
-
-        <div>
-          <label className="label">Campaign name *</label>
-          <input
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="BIM Structure — India"
-            maxLength={160}
-            required
-          />
-        </div>
-
-        <div>
-          <label className="label">Message *</label>
-          <textarea
-            className="input resize-none"
-            rows={4}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            maxLength={1600}
-            placeholder="Hi {{first_name}}, this is the HR Assistant from ENGISOFT Engineering…"
-            required
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            Placeholders: <code>{"{{name}}"}</code>, <code>{"{{first_name}}"}</code>,{" "}
-            <code>{"{{phone}}"}</code> · {message.length}/1600
-          </p>
-        </div>
-
-        <div>
-          <label className="label">Contacts</label>
-          <textarea
-            className="input resize-none font-mono text-xs"
-            rows={6}
-            value={contacts}
-            onChange={(e) => setContacts(e.target.value)}
-            placeholder={"+917502163963, Mohammed Yacoob\n+971553752665, Aisha\n+918143227567"}
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            One per line, or paste a CSV. Numbers must include a country code —
-            anything that can't be read is reported back rather than skipped.
-            You can add more later.
-          </p>
-        </div>
-
-        {error && (
-          <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-3 pt-2">
-          <button type="button" onClick={onClose} className="btn-secondary text-sm">
-            Cancel
-          </button>
-          <button type="submit" disabled={saving || !chatbotId} className="btn-primary text-sm">
-            {saving ? "Creating…" : "Create campaign"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export default function BroadcastsPage() {
   const navigate = useNavigate();
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [chatbots, setChatbots] = useState<Chatbot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -191,14 +68,13 @@ export default function BroadcastsPage() {
               : `${broadcasts.length} campaign${broadcasts.length !== 1 ? "s" : ""}`}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCreate(true)}
-          disabled={chatbots.length === 0}
-          className="btn-primary text-sm"
+        <Link
+          to="/broadcasts/new"
+          className={`btn-primary text-sm ${chatbots.length === 0 ? "pointer-events-none opacity-50" : ""}`}
+          aria-disabled={chatbots.length === 0}
         >
           New campaign
-        </button>
+        </Link>
       </div>
 
       {error && (
@@ -231,8 +107,14 @@ export default function BroadcastsPage() {
                   </Link>
                   <StatusPill status={b.status} />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  {b.chatbot_name} · from {b.from_number || "—"}
+                <p className="text-xs text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
+                  <span>{b.chatbot_name} · from {b.from_number || "—"}</span>
+                  <span className="rounded-full border border-gray-200 px-2 py-0.5 text-[10px] font-semibold">
+                    {b.mode === "broadcast_reply" ? "Broadcast + Reply" : "Broadcast"}
+                  </span>
+                  <span className="rounded-full border border-gray-200 px-2 py-0.5 text-[10px] font-semibold">
+                    {b.sender_kind === "personal" ? "Phone WhatsApp" : "Cloud API"}
+                  </span>
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -272,17 +154,6 @@ export default function BroadcastsPage() {
           </div>
         ))}
       </div>
-
-      {showCreate && (
-        <CreateModal
-          chatbots={chatbots}
-          onClose={() => setShowCreate(false)}
-          onCreated={(b) => {
-            setShowCreate(false);
-            navigate(`/broadcasts/${b.id}`);
-          }}
-        />
-      )}
     </div>
   );
 }

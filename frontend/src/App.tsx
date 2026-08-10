@@ -17,6 +17,7 @@ import BulkInterviewPage  from "./pages/BulkInterviewPage";
 import InterviewDetailPage from "./pages/InterviewDetailPage";
 import ChannelsPage       from "./pages/ChannelsPage";
 import BroadcastsPage     from "./pages/BroadcastsPage";
+import BroadcastCreatePage from "./pages/BroadcastCreatePage";
 import BroadcastDetailPage from "./pages/BroadcastDetailPage";
 import IntegrationsPage   from "./pages/IntegrationsPage";
 import CloneVoicePage     from "./pages/CloneVoicePage";
@@ -67,6 +68,8 @@ export default function App() {
                 <Route path="/channels"  element={<ChannelsPage />}      />
                 <Route path="/integrations"   element={<IntegrationsPage />}    />
                 <Route path="/broadcasts"     element={<BroadcastsPage />}      />
+                {/* Registered before /:id so "new" is a page, not an id. */}
+                <Route path="/broadcasts/new" element={<BroadcastCreatePage />} />
                 <Route path="/broadcasts/:id" element={<BroadcastDetailPage />} />
                 <Route path="/hiring-agent" element={<HiringAgentPage />}  />
                 <Route path="/team"       element={<TeamPage />}           />

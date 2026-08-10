@@ -21,6 +21,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -139,6 +140,11 @@ class ChatbotModel(Base):
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(120))
+    # Short, human-quotable id shown in the UI as #236637. Assigned by a
+    # Postgres sequence (migration 0020), never by the application.
+    display_id: Mapped[int] = mapped_column(
+        Integer, server_default=text("nextval('chatbot_display_id_seq')"), unique=True
+    )
     channel: Mapped[str] = mapped_column(String(16), default="text")
     system_prompt: Mapped[str] = mapped_column(Text)
     # Ordered [{id, title, body, enabled}] — the authored form of system_prompt.
@@ -378,13 +384,18 @@ class WhatsAppConversationModel(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    whatsapp_channel_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("whatsapp_channels.id", ondelete="CASCADE"), index=True
-    )
+    # Holds EITHER a whatsapp_channels.id (Cloud API) or a
+    # whatsapp_web_sessions.id (QR-linked personal account), so it carries no
+    # foreign key — migration 0021 drops the one that was rejecting every
+    # personal-WhatsApp conversation.
+    whatsapp_channel_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
     phone_number: Mapped[str] = mapped_column(String(32))
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="CASCADE")
     )
+    # False for announce-only campaigns: the reply is still recorded, the
+    # assistant just does not answer it.
+    auto_reply: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
@@ -458,9 +469,17 @@ class BroadcastModel(Base):
     chatbot_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="CASCADE"), index=True
     )
-    whatsapp_channel_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("whatsapp_channels.id", ondelete="CASCADE")
+    # Exactly one of these is set, per `sender_kind` — see migration 0021.
+    whatsapp_channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("whatsapp_channels.id", ondelete="CASCADE"), nullable=True
     )
+    whatsapp_session_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("whatsapp_web_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sender_kind: Mapped[str] = mapped_column(String(16), server_default="cloud_api")
+    mode: Mapped[str] = mapped_column(String(20), server_default="broadcast_reply")
     name: Mapped[str] = mapped_column(String(160))
     message_template: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="queued")
