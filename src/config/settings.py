@@ -191,20 +191,59 @@ class Settings(BaseSettings):
 
     def oauth_redirect_uri(self, provider_id: str) -> str:
         """Where the vendor sends the browser back to. One path per provider, so
-        each can be registered separately in the vendor's console."""
-        return (
-            f"{self.app_base_url.rstrip('/')}/api/v1/integrations/oauth/{provider_id}/callback"
-        )
+        each can be registered separately in the vendor's console.
+
+        Every redirect URI is computed here and nowhere else: they have to match
+        what is registered in the vendor console character for character, and a
+        second place that builds them is a second place to get them wrong.
+        """
+        base = self.app_base_url.rstrip("/")
+        if provider_id == "google_login":
+            # Signing in is not an integration — it stores no tokens and belongs
+            # to /auth, so its callback lives there too.
+            return f"{base}/api/v1/auth/google/callback"
+        return f"{base}/api/v1/integrations/oauth/{provider_id}/callback"
+
+    def oauth_popup_origins(self) -> set[str]:
+        """Origins an OAuth popup may hand its result back to.
+
+        This is a security boundary, not a convenience list: the popup posts an
+        access token (for sign-in) or a connection result to whichever origin is
+        named here, so anything that gets into this set can receive a session.
+        Only origins this deployment actually serves are included.
+
+        In development the rule relaxes to any localhost port, because the Vite
+        dev server runs on :5173 while the API runs on :8000 and requiring an
+        env var to be kept in sync between them is a foot-gun that silently
+        breaks the popup handshake.
+        """
+        origins = {
+            base.rstrip("/")
+            for base in (self.app_base_url, self.frontend_base_url, self.widget_base_url)
+            if base
+        }
+        return {o for o in origins if o}
+
+    def is_allowed_popup_origin(self, origin: str) -> bool:
+        candidate = (origin or "").rstrip("/")
+        if not candidate:
+            return False
+        if candidate in self.oauth_popup_origins():
+            return True
+        if not self.is_production:
+            host = urlsplit(candidate).hostname
+            return host in ("localhost", "127.0.0.1", "::1")
+        return False
 
     def oauth_credentials(self, provider_id: str) -> dict[str, str]:
         """Client credentials for one OAuth provider.
 
-        Both Google integrations intentionally share one OAuth app — they are
-        the same Google Cloud project, differing only in the scopes requested,
-        and asking an operator to register two clients for one vendor would be
-        busywork.
+        All three Google providers intentionally share one OAuth app — sign-in,
+        Calendar and Sheets are the same Google Cloud project differing only in
+        the scopes requested, and asking an operator to register a client per
+        scope-set would be busywork.
         """
-        if provider_id in ("google_calendar", "google_sheets"):
+        if provider_id in ("google_login", "google_calendar", "google_sheets"):
             return {
                 "client_id": self.google_oauth_client_id,
                 "client_secret": self.google_oauth_client_secret,

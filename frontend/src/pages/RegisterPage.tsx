@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Sparkles, AlertCircle } from "lucide-react";
 import { useAuth } from "../store/auth";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 import { ApiError } from "../api/client";
 
 const STATS = [
@@ -13,7 +14,7 @@ const STATS = [
 ];
 
 export default function RegisterPage() {
-  const { register } = useAuth();
+  const { register, applySession } = useAuth();
   const navigate     = useNavigate();
   const [tenantName, setTenantName] = useState("");
   const [email,      setEmail]      = useState("");
@@ -103,7 +104,15 @@ export default function RegisterPage() {
           </p>
 
           <div className="card shadow-modal p-6 mt-6">
-            <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            <GoogleSignInButton
+              intent="signup"
+              onSignedIn={(session) => {
+                applySession(session);
+                navigate("/home", { replace: true });
+              }}
+            />
+
+            <form onSubmit={handleSubmit} noValidate className="space-y-4 mt-4">
               <div>
                 <label htmlFor="tenantName" className="label">Organisation name</label>
                 <input

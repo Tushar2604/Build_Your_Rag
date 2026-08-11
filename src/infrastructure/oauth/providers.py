@@ -53,6 +53,22 @@ class OAuthProviderSpec:
 
 
 PROVIDER_SPECS: dict[str, OAuthProviderSpec] = {
+    # Sign in with Google. The odd one out: it proves who someone is and then
+    # throws the tokens away, where every other provider here stores them to act
+    # on the user's behalf later. It reuses this machinery because the consent
+    # dance is identical — only the scopes and what happens afterwards differ.
+    #
+    # No `access_type: offline` and no `prompt: consent`: a refresh token would
+    # be a long-lived credential we have no use for, and re-prompting someone
+    # who is already signed in to Google turns one click into three.
+    "google_login": OAuthProviderSpec(
+        id="google_login",
+        name="Google",
+        authorize_url=_GOOGLE_AUTH,
+        token_url=_GOOGLE_TOKEN,
+        scopes=("openid", "email", "profile"),
+        identity_url=_GOOGLE_USERINFO,
+    ),
     "google_calendar": OAuthProviderSpec(
         id="google_calendar",
         name="Google Calendar",
@@ -168,6 +184,24 @@ class OAuthClient:
         )
         tokens.account_label = await self._fetch_identity(tokens.access_token)
         return tokens
+
+    async def fetch_profile(self, access_token: str) -> dict:
+        """The full identity payload, for sign-in.
+
+        Unlike `_fetch_identity` this one is allowed to fail loudly: signing
+        somebody in *is* the identity lookup, so a failure here must abort rather
+        than produce a session for an unknown person.
+        """
+        if not self._spec.identity_url:
+            return {}
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                self._spec.identity_url,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        return payload if isinstance(payload, dict) else {}
 
     async def _fetch_identity(self, access_token: str) -> str:
         """Who authorised, for the "Connected as …" line.

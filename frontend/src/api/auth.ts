@@ -27,3 +27,12 @@ export function login(
 ): Promise<TokenResponse> {
   return api.post<TokenResponse>("/auth/login", { email, password });
 }
+
+/** Sign-in methods this deployment offers beyond email + password. */
+export interface AuthProviders {
+  google: boolean;
+}
+
+export function getAuthProviders(): Promise<AuthProviders> {
+  return api.get<AuthProviders>("/auth/providers");
+}

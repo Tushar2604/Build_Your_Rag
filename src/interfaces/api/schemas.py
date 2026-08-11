@@ -29,6 +29,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class AuthProvidersResponse(BaseModel):
+    """Sign-in methods this deployment offers, beyond email + password."""
+
+    google: bool = False
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

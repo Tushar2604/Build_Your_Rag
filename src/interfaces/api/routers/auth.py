@@ -8,9 +8,26 @@ from src.application.dtos import RegisterTenantInput
 from src.application.use_cases.authenticate import AuthenticateUser, LoginInput
 from src.application.use_cases.register_tenant import RegisterTenant
 from src.interfaces.api.deps import ContainerDep
-from src.interfaces.api.schemas import LoginRequest, RegisterRequest, TokenResponse
+from src.interfaces.api.schemas import (
+    AuthProvidersResponse,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/providers", response_model=AuthProvidersResponse)
+async def providers(container: ContainerDep) -> AuthProvidersResponse:
+    """Which sign-in methods this deployment actually offers.
+
+    Served so the login page can hide a Google button that would only fail —
+    a visible button that 400s is worse than no button, and the SPA has no
+    other way to know whether the server has an OAuth app registered.
+    """
+    client = container.oauth.get("google_login")
+    return AuthProvidersResponse(google=bool(client and client.enabled))
 
 
 @router.post("/register", response_model=TokenResponse, status_code=201)

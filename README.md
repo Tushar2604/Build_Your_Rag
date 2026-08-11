@@ -209,6 +209,40 @@ Webhooks are signed like Stripe's: verify `X-Signature` as
 as a background task and is idempotent — a `(config, session)` unique constraint
 means a repeated "end session" call can't double-post into a customer's ATS.
 
+## Signing in
+
+Two ways in, and they converge on the same account:
+
+* **Email + password** — `POST /api/v1/auth/register` and `/auth/login`.
+* **Google** — the button appears on the login and sign-up pages only when
+  `GET /api/v1/auth/providers` reports Google is configured, so a deployment
+  without credentials never shows a button that would fail.
+
+Google sign-in and Google sign-up are one flow: the email *is* the identity, so
+a known address is signed in and an unknown one gets a workspace (named from the
+person's Google name, with a default assistant, exactly as password sign-up
+does). There is no "link your accounts?" step.
+
+The rule that makes that safe is `email_verified`. Google reports whether it has
+verified the address, and a sign-in without it is refused — otherwise anyone able
+to create a Google account claiming an address could walk into the existing
+account on it. Accounts created this way store an empty `password_hash`, which
+`AuthenticateUser` treats as "SSO only" and refuses to check a password against.
+
+### The popup handshake
+
+Both sign-in and integration connects run in a popup and report back with
+`postMessage` (see `interfaces/api/oauth_popup.py`). Two consequences worth
+knowing:
+
+* **Tokens never enter a URL.** A redirect carrying `?access_token=` would land
+  in browser history, the referrer header, and every proxy log in between.
+* **The target origin is verified, never `"*"`.** It is checked when the flow
+  starts, carried inside the signed `state`, and re-checked before use. In
+  development any localhost port is trusted, so the Vite dev server on `:5173`
+  works against an API on `:8000` with no extra configuration; in production
+  only the origins this deployment actually serves are accepted.
+
 ## WhatsApp broadcast campaigns
 
 A campaign chooses two things before it sends:

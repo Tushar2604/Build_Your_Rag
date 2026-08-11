@@ -26,6 +26,15 @@ class AuthenticateUser:
             user = await uow.users.get_by_email(data.email)
             if user is None or not user.is_active:
                 raise PermissionDeniedError("Invalid credentials.")
+            if not user.password_hash:
+                # An SSO-only account (created by Google sign-in) has no password
+                # to check. Refusing explicitly matters: it stops any hasher whose
+                # verify() is lenient about empty input from admitting a caller
+                # who supplied nothing, and it tells the person which button to
+                # press instead of leaving them retrying a password they never set.
+                raise PermissionDeniedError(
+                    "This account signs in with Google — use Continue with Google."
+                )
             if not self._hasher.verify(data.password, user.password_hash):
                 raise PermissionDeniedError("Invalid credentials.")
 

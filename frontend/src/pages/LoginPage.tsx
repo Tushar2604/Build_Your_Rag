@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Sparkles, Check, AlertCircle } from "lucide-react";
 import { useAuth } from "../store/auth";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 import { ApiError } from "../api/client";
 
 const FEATURES = [
@@ -13,7 +14,7 @@ const FEATURES = [
 ];
 
 export default function LoginPage() {
-  const { login }   = useAuth();
+  const { login, applySession } = useAuth();
   const navigate    = useNavigate();
   const [email,     setEmail]    = useState("");
   const [password,  setPassword] = useState("");
@@ -109,7 +110,15 @@ export default function LoginPage() {
           </p>
 
           <div className="card shadow-modal p-6 mt-6">
-            <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            <GoogleSignInButton
+              intent="signin"
+              onSignedIn={(session) => {
+                applySession(session);
+                navigate("/home", { replace: true });
+              }}
+            />
+
+            <form onSubmit={handleSubmit} noValidate className="space-y-4 mt-4">
               <div>
                 <label htmlFor="email" className="label">Work email</label>
                 <input

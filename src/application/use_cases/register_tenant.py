@@ -2,21 +2,11 @@
 
 from __future__ import annotations
 
-import re
-
 from src.application.dtos import AuthOutput, RegisterTenantInput
 from src.application.ports.repositories import UnitOfWork
 from src.application.ports.services import PasswordHasher, TokenService
-from src.domain.chatbot.entities import Chatbot
+from src.application.use_cases.provisioning import provision_tenant, slugify
 from src.domain.shared.errors import ConflictError
-from src.domain.tenant.entities import Role, Tenant, User
-from src.domain.tenant.events import TenantProvisioned
-
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _slugify(name: str) -> str:
-    return _SLUG_RE.sub("-", name.lower()).strip("-")[:60] or "tenant"
 
 
 class RegisterTenant:
@@ -30,31 +20,20 @@ class RegisterTenant:
             if await uow.users.get_by_email(data.owner_email):
                 raise ConflictError("A user with this email already exists.")
 
-            slug = _slugify(data.tenant_name)
+            # Strict rather than auto-uniquifying: this caller *did* type a name,
+            # so a clash is worth telling them about instead of silently handing
+            # them "acme-3f9c". Google sign-up, which never asks for a name, uses
+            # `unique_slug` instead.
+            slug = slugify(data.tenant_name)
             if await uow.tenants.get_by_slug(slug):
                 raise ConflictError("A tenant with a similar name already exists.")
 
-            tenant = Tenant(name=data.tenant_name, slug=slug)
-            uow.set_tenant_scope(tenant.id)
-            await uow.tenants.add(tenant)
-
-            user = User(
-                email=data.owner_email,
+            tenant, user = await provision_tenant(
+                uow,
+                tenant_name=data.tenant_name,
+                owner_email=data.owner_email,
                 password_hash=self._hasher.hash(data.password),
-                tenant_id=tenant.id,
-                role=Role.OWNER,
-            )
-            await uow.users.add(user)
-            await uow.flush()  # persist tenant before chatbot FK check
-
-            # Seed a ready-to-use default chatbot so the tenant has something to
-            # talk to the moment their first document finishes ingesting.
-            await uow.chatbots.add(Chatbot(tenant_id=tenant.id, name="Default Assistant"))
-
-            uow.collect_event(
-                TenantProvisioned(
-                    tenant_id=tenant.id, tenant_name=tenant.name, owner_email=user.email
-                )
+                slug=slug,
             )
             await uow.commit()
 

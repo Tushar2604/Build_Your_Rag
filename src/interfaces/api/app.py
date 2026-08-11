@@ -27,6 +27,7 @@ from src.interfaces.api.routers import (
     agent,
     analytics,
     auth,
+    auth_google,
     broadcasts,
     chat,
     chatbots,
@@ -170,6 +171,7 @@ def create_app() -> FastAPI:
 
     api_prefix = "/api/v1"
     app.include_router(auth.router, prefix=api_prefix)
+    app.include_router(auth_google.router, prefix=api_prefix)
     app.include_router(documents.router, prefix=api_prefix)
     app.include_router(chatbots.router, prefix=api_prefix)
     app.include_router(analytics.router, prefix=api_prefix)
