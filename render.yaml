@@ -37,7 +37,25 @@ services:
         sync: false
       # Set to your service's public URL after the first deploy so widget/share
       # links resolve (e.g. https://rag-platform.onrender.com).
+      #
+      # This one is load-bearing beyond links: in production the OAuth popup
+      # will only deliver its result to an origin derived from this value, and
+      # every Google redirect URI is built from it. Wrong here = sign-in and the
+      # Connect buttons fail with a redirect_uri_mismatch.
       - key: APP_BASE_URL
+        sync: false
+      # --- Optional: Google sign-in + Calendar/Sheets connect ---
+      # One OAuth client covers all three. Blank = the Google button is hidden
+      # on the login page and both integration cards read "not configured";
+      # nothing else changes. Register these redirect URIs on the client, using
+      # your APP_BASE_URL:
+      #   <APP_BASE_URL>/api/v1/auth/google/callback
+      #   <APP_BASE_URL>/api/v1/integrations/oauth/google_calendar/callback
+      #   <APP_BASE_URL>/api/v1/integrations/oauth/google_sheets/callback
+      #   <APP_BASE_URL>/api/v1/integrations/google/callback   (legacy)
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
       # --- Optional: Cloudflare R2 for durable uploads (else local-disk, ephemeral) ---
       - key: R2_ENDPOINT_URL
