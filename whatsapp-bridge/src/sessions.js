@@ -86,6 +86,14 @@ export class SessionManager {
     sock.ev.on("creds.update", auth.saveCreds);
 
     sock.ev.on("connection.update", async (update) => {
+      // Ignore events from a socket we have already replaced or deliberately
+      // stopped. Baileys delivers `close` asynchronously after `end()`, so
+      // without this a stop would schedule a reconnect and resurrect itself,
+      // and a restart (start() begins with stop()) would leave the outgoing
+      // socket's timer to re-enter start() a couple of seconds later — which
+      // rotates the QR out from under whoever is scanning it.
+      if (this.sockets.get(sessionId)?.sock !== sock) return;
+
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {

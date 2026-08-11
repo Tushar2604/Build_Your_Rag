@@ -57,6 +57,17 @@ services:
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
+      # --- Optional: personal WhatsApp linking by QR ("Phone WhatsApp") ---
+      # Shared secret between the API and the Node whatsapp-bridge sidecar that
+      # runs alongside it in this same container. Render generates it; both
+      # processes read the one value, which is all the pairing needs. Blank =
+      # the bridge never starts and the Channels card reads "not configured".
+      #
+      # NOTE: this links a PERSONAL WhatsApp account over the unofficial
+      # multi-device protocol, against Meta's terms — the number can be banned.
+      # Use a number you can afford to lose; Business numbers go via Twilio.
+      - key: BRIDGE_TOKEN
+        generateValue: true
       # --- Optional: Cloudflare R2 for durable uploads (else local-disk, ephemeral) ---
       - key: R2_ENDPOINT_URL
         sync: false
