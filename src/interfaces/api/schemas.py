@@ -890,5 +890,79 @@ class BridgeEventRequest(BaseModel):
     text: str = ""
     message_id: str = ""
     pushname: str = ""
+    # "in" from the contact, "out" for a message the operator typed on the phone
+    # itself. Outbound messages are recorded so the inbox matches WhatsApp, but
+    # never answered — that is how the assistant avoids replying to itself.
+    direction: Literal["in", "out"] = "in"
+    # What the thread list shows: the caption, or a label like "Photo".
+    preview: str = ""
+    # Attachment metadata. `media_storage_key` is set once the bridge has
+    # uploaded the bytes; `media_error` explains an attachment we know arrived
+    # but could not store (too large, download failed).
+    media_kind: str = ""
+    media_mime_type: str = ""
+    media_filename: str = ""
+    media_size_bytes: int = 0
+    media_storage_key: str = ""
+    media_error: str = ""
 
     model_config = {"populate_by_name": True}
+
+
+class BridgeMediaResponse(BaseModel):
+    storage_key: str
+
+
+# --- WhatsApp inbox ---
+
+
+class InboxConversationResponse(BaseModel):
+    """One thread in the inbox list. Everything here is denormalized onto
+    `whatsapp_conversations`, so the list renders without a message query per
+    row."""
+
+    id: uuid.UUID
+    phone_number: str
+    display_name: str
+    last_message_at: datetime | None
+    last_message_preview: str
+    unread_count: int
+    has_attachment: bool
+    # False means a human has taken the conversation over and the assistant is
+    # staying quiet.
+    auto_reply: bool
+
+
+class InboxConversationPageResponse(BaseModel):
+    conversations: list[InboxConversationResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class InboxMessageResponse(BaseModel):
+    id: uuid.UUID
+    # "in" from the contact, "out" from the assistant or a human operator.
+    direction: Literal["in", "out"]
+    content: str
+    created_at: datetime
+    media_kind: str = ""
+    media_mime_type: str = ""
+    media_filename: str = ""
+    media_size_bytes: int = 0
+    # True when the attachment's bytes are retrievable; false when WhatsApp sent
+    # one but it could not be stored, so the UI can say so instead of offering a
+    # download that will fail.
+    media_available: bool = False
+
+
+class InboxSendRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4096)
+
+
+class InboxConversationUpdate(BaseModel):
+    """Both fields optional: the inbox marks a thread read on open, and toggles
+    takeover separately."""
+
+    auto_reply: bool | None = None
+    mark_read: bool | None = None

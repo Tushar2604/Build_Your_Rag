@@ -230,6 +230,12 @@ def message_to_domain(row: m.ChatMessageModel) -> Message:
         tokens_used=row.tokens_used,
         provider=row.provider,
         created_at=row.created_at,
+        media_kind=row.media_kind,
+        media_mime_type=row.media_mime_type,
+        media_filename=row.media_filename,
+        media_storage_key=row.media_storage_key,
+        media_size_bytes=row.media_size_bytes,
+        provider_message_id=row.provider_message_id,
     )
 
 
@@ -376,6 +382,12 @@ def whatsapp_conversation_to_domain(row: m.WhatsAppConversationModel) -> WhatsAp
         whatsapp_channel_id=row.whatsapp_channel_id,
         phone_number=row.phone_number,
         session_id=SessionId(row.session_id),
+        tenant_id=TenantId(row.tenant_id),
+        display_name=row.display_name,
+        last_message_at=row.last_message_at,
+        last_message_preview=row.last_message_preview,
+        unread_count=row.unread_count,
+        has_attachment=row.has_attachment,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

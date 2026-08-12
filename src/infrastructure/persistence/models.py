@@ -198,6 +198,15 @@ class ChatMessageModel(Base):
     tokens_used: Mapped[int] = mapped_column(Integer, default=0)
     provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # WhatsApp attachments. Separate columns rather than riding in `citations`,
+    # which the mapper reads as Citation dicts with unguarded key access.
+    media_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    media_mime_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    media_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    media_storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    media_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # WhatsApp's message id, for deduplicating socket redeliveries on reconnect.
+    provider_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class RagRequestLogModel(Base):
@@ -396,6 +405,19 @@ class WhatsAppConversationModel(Base):
     # False for announce-only campaigns: the reply is still recorded, the
     # assistant just does not answer it.
     auto_reply: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # Added in 0022. The table originally had no tenant of its own — it was
+    # scoped through its channel — but the inbox queries it directly, so it
+    # needs to be scopable and RLS-guarded on its own.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    # Denormalized so the thread list renders in one query instead of a message
+    # lookup per conversation.
+    display_name: Mapped[str] = mapped_column(String(160), server_default="")
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_message_preview: Mapped[str] = mapped_column(String(300), server_default="")
+    unread_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    has_attachment: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

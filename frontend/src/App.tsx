@@ -18,6 +18,7 @@ import InterviewDetailPage from "./pages/InterviewDetailPage";
 import ChannelsPage       from "./pages/ChannelsPage";
 import BroadcastsPage     from "./pages/BroadcastsPage";
 import BroadcastCreatePage from "./pages/BroadcastCreatePage";
+import WhatsAppInboxPage from "./pages/WhatsAppInboxPage";
 import BroadcastDetailPage from "./pages/BroadcastDetailPage";
 import IntegrationsPage   from "./pages/IntegrationsPage";
 import CloneVoicePage     from "./pages/CloneVoicePage";
@@ -66,6 +67,8 @@ export default function App() {
                 <Route path="/interviews/bulk" element={<BulkInterviewPage />} />
                 <Route path="/interviews/:id" element={<InterviewDetailPage />} />
                 <Route path="/channels"  element={<ChannelsPage />}      />
+                {/* The chat window for one QR-linked number. */}
+                <Route path="/channels/whatsapp/:sessionId/inbox" element={<WhatsAppInboxPage />} />
                 <Route path="/integrations"   element={<IntegrationsPage />}    />
                 <Route path="/broadcasts"     element={<BroadcastsPage />}      />
                 {/* Registered before /:id so "new" is a page, not an id. */}

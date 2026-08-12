@@ -19,6 +19,7 @@ const HOST = process.env.BRIDGE_HOST || "127.0.0.1";
 const TOKEN = process.env.BRIDGE_TOKEN || "";
 const API_BASE = (process.env.BRIDGE_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
 const EVENT_PATH = "/api/v1/whatsapp-web/bridge-events";
+const MEDIA_PATH = "/api/v1/whatsapp-web/bridge-media";
 
 if (!TOKEN) {
   log.error("BRIDGE_TOKEN is unset — refusing to start an unauthenticated bridge.");
@@ -110,7 +111,37 @@ async function notify(sessionId, event, payload) {
   }
 }
 
-const manager = new SessionManager({ pool, notify });
+/**
+ * Ship media bytes to the API, which owns the storage backend.
+ *
+ * Multipart rather than base64 inside the JSON event: `express.json` here is
+ * capped at 1mb and the API's own body limits are no larger, so anything but a
+ * thumbnail would be rejected. Returns the storage key the API assigned.
+ */
+async function uploadMedia(sessionId, messageId, media, buffer) {
+  const form = new FormData();
+  form.append("session_id", sessionId);
+  form.append("message_id", messageId);
+  form.append("media_kind", media.kind);
+  form.append(
+    "file",
+    new Blob([buffer], { type: media.mime_type || "application/octet-stream" }),
+    media.filename || `${media.kind}-${messageId}`,
+  );
+  const res = await fetch(`${API_BASE}${MEDIA_PATH}`, {
+    method: "POST",
+    headers: { "X-Bridge-Token": TOKEN },
+    body: form,
+  });
+  if (!res.ok) {
+    log.warn({ sessionId, status: res.status }, "api rejected media upload");
+    return null;
+  }
+  const body = await res.json().catch(() => null);
+  return body?.storage_key || null;
+}
+
+const manager = new SessionManager({ pool, notify, uploadMedia });
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));

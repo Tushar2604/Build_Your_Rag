@@ -15,13 +15,23 @@ const DIRECT = "917502163963@s.whatsapp.net";
 const GROUP = "120363000000000000@g.us";
 
 /** A manager that records notifications instead of making network calls. */
-function harness() {
+function harness({ uploadMedia, fetchMedia } = {}) {
   const events = [];
   const manager = new SessionManager({
     pool: { query: async () => ({ rows: [] }) },
     notify: async (sessionId, event, payload) => {
       events.push({ sessionId, event, payload });
     },
+    // Defaults to "storage unavailable" so tests that do not care about media
+    // still exercise the graceful path rather than a network call.
+    uploadMedia,
+    // The real one reaches WhatsApp's CDN. Default to a successful tiny
+    // download so tests exercise the surrounding logic, and let the size-cap
+    // test fall through to the real implementation's guard.
+    fetchMedia: fetchMedia || (async (_msg, media, opts) =>
+      media.size_bytes > (opts?.maxBytes ?? Infinity)
+        ? { skipped: `too large (${Math.round(media.size_bytes / 1024 / 1024)}MB)` }
+        : { buffer: Buffer.from("stub-bytes") }),
   });
   return { manager, events };
 }
@@ -82,11 +92,20 @@ test("a direct text message is forwarded to the API", async () => {
   assert.equal(payload.pushname, "Yacoob");
 });
 
-test("our own echoed messages are ignored", async () => {
-  // Without this the assistant would reply to itself, forever.
+test("our own messages are reported as outbound, not dropped", async () => {
+  // The inbox has to agree with what WhatsApp shows on the phone, so a reply
+  // typed there must appear in the thread. `direction` is what keeps the
+  // assistant from answering its own words — see the API side.
   const { manager, events } = harness();
   await manager.handleInbound(SESSION, inbound({ key: { fromMe: true } }));
-  assert.equal(events.length, 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.direction, "out");
+});
+
+test("messages from the contact are reported as inbound", async () => {
+  const { manager, events } = harness();
+  await manager.handleInbound(SESSION, inbound());
+  assert.equal(events[0].payload.direction, "in");
 });
 
 test("group messages are dropped", async () => {
@@ -105,9 +124,66 @@ test("status broadcasts are dropped", async () => {
   assert.equal(events.length, 0);
 });
 
-test("media with no caption is dropped rather than answered blindly", async () => {
+test("media with no caption is captured, not dropped", async () => {
+  // Previously this returned early, so a customer sending a photo was invisible
+  // end to end. The inbox needs it, and needs a label to show in the list.
   const { manager, events } = harness();
-  await manager.handleInbound(SESSION, inbound({ message: { audioMessage: {} } }));
+  await manager.handleInbound(
+    SESSION,
+    inbound({ message: { audioMessage: { mimetype: "audio/ogg", fileLength: 2048 } } }),
+  );
+  assert.equal(events.length, 1);
+  const { payload } = events[0];
+  assert.equal(payload.media_kind, "audio");
+  assert.equal(payload.media_mime_type, "audio/ogg");
+  assert.equal(payload.text, "");
+  assert.equal(payload.preview, "Voice message");
+});
+
+test("an image caption becomes the message text and the preview", async () => {
+  const { manager, events } = harness();
+  await manager.handleInbound(
+    SESSION,
+    inbound({ message: { imageMessage: { caption: "my invoice", mimetype: "image/jpeg" } } }),
+  );
+  const { payload } = events[0];
+  assert.equal(payload.media_kind, "image");
+  assert.equal(payload.text, "my invoice");
+  assert.equal(payload.preview, "my invoice");
+});
+
+test("oversized media is recorded without its bytes", async () => {
+  // Losing the file is bad; losing the fact that a customer sent something is
+  // worse. The message still arrives, flagged with why the file is missing.
+  const { manager, events } = harness();
+  await manager.handleInbound(
+    SESSION,
+    inbound({
+      message: { videoMessage: { mimetype: "video/mp4", fileLength: 500 * 1024 * 1024 } },
+    }),
+  );
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.media_kind, "video");
+  assert.match(events[0].payload.media_error, /too large/);
+  assert.equal(events[0].payload.media_storage_key, undefined);
+});
+
+test("a stored attachment carries its storage key", async () => {
+  const { manager, events } = harness({
+    uploadMedia: async () => "whatsapp/session/MSG1",
+  });
+  await manager.handleInbound(
+    SESSION,
+    inbound({ message: { documentMessage: { mimetype: "application/pdf", fileName: "x.pdf" } } }),
+  );
+  assert.equal(events[0].payload.media_storage_key, "whatsapp/session/MSG1");
+  assert.equal(events[0].payload.media_filename, "x.pdf");
+});
+
+test("reactions and receipts are still dropped", async () => {
+  // No text and no media means there is nothing to show in a thread.
+  const { manager, events } = harness();
+  await manager.handleInbound(SESSION, inbound({ message: { reactionMessage: {} } }));
   assert.equal(events.length, 0);
 });
 

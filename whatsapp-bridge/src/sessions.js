@@ -15,6 +15,9 @@ import QRCode from "qrcode";
 import pino from "pino";
 
 import { useDbAuthState } from "./authStore.js";
+import { describeMedia, extractText, fetchMedia, MAX_MEDIA_BYTES, previewFor } from "./media.js";
+
+export { extractText };
 
 const logger = pino({ level: process.env.BRIDGE_LOG_LEVEL || "warn" });
 
@@ -32,26 +35,16 @@ export function jidToPhone(jid) {
   return bare.startsWith("+") ? bare : `+${bare}`;
 }
 
-/** Pull display text out of the many shapes a WhatsApp message can take. */
-export function extractText(message) {
-  const m = message?.message;
-  if (!m) return "";
-  return (
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    m.documentMessage?.caption ||
-    m.buttonsResponseMessage?.selectedDisplayText ||
-    m.listResponseMessage?.title ||
-    m.templateButtonReplyMessage?.selectedDisplayText ||
-    ""
-  ).trim();
-}
-
 export class SessionManager {
-  constructor({ pool, notify }) {
+  constructor({ pool, notify, uploadMedia, fetchMedia: fetchMediaFn }) {
     this.pool = pool;
+    // Injected rather than imported: the manager owns WhatsApp sockets and
+    // knows nothing about where files live. Tests pass a stub.
+    this.uploadMediaFn = uploadMedia;
+    // The download talks to WhatsApp's CDN, so it is the one step that cannot
+    // run without a live socket. Injecting it keeps the surrounding decisions
+    // — size caps, what happens when a fetch fails — testable.
+    this.fetchMediaFn = fetchMediaFn || fetchMedia;
     // notify(sessionId, event, payload) -> POSTs to the API's bridge webhook.
     this.notify = notify;
     this.sockets = new Map();
@@ -148,23 +141,65 @@ export class SessionManager {
   }
 
   async handleInbound(sessionId, message) {
-    // fromMe: our own outgoing messages echo back; replying to them would make
-    // the assistant talk to itself.
-    if (message.key?.fromMe) return;
-
     const jid = message.key?.remoteJid || "";
     if (!jid.endsWith(DIRECT_CHAT_SUFFIX)) return; // groups, status, broadcasts
 
-    const text = extractText(message);
-    if (!text) return; // media with no caption, reactions, receipts
+    // Messages the operator sent from the phone itself echo back here. They are
+    // reported (so the inbox agrees with what WhatsApp shows) but marked
+    // outbound, which is what stops the assistant answering its own words.
+    const outbound = Boolean(message.key?.fromMe);
 
-    await this.notify(sessionId, "message", {
+    const text = extractText(message);
+    const media = describeMedia(message);
+    // Reactions, receipts and protocol messages carry neither — nothing to show.
+    if (!text && !media) return;
+
+    const payload = {
       from: jidToPhone(jid),
       jid,
       text,
+      direction: outbound ? "out" : "in",
       message_id: message.key?.id || "",
       pushname: message.pushName || "",
-    });
+      preview: previewFor(text, media),
+    };
+
+    if (media) {
+      payload.media_kind = media.kind;
+      payload.media_mime_type = media.mime_type;
+      payload.media_filename = media.filename;
+      payload.media_size_bytes = media.size_bytes;
+
+      const result = await this.fetchMediaFn(message, media, {
+        logger,
+        maxBytes: MAX_MEDIA_BYTES(),
+      });
+      if (result.buffer) {
+        // Uploaded before the event is reported, so the API can attach the
+        // storage key to the message row in one write rather than patching it
+        // afterwards and racing the assistant's reply.
+        const key = await this.uploadMedia(sessionId, payload.message_id, media, result.buffer);
+        if (key) payload.media_storage_key = key;
+        else payload.media_error = "upload failed";
+      } else {
+        payload.media_error = result.skipped;
+        logger.warn({ sessionId, reason: result.skipped }, "media not stored");
+      }
+    }
+
+    await this.notify(sessionId, "message", payload);
+  }
+
+  /** Hand media bytes to the API, which owns the storage backend (R2 or disk).
+   * Returns the storage key, or null when the upload could not be completed. */
+  async uploadMedia(sessionId, messageId, media, buffer) {
+    if (!this.uploadMediaFn) return null;
+    try {
+      return await this.uploadMediaFn(sessionId, messageId, media, buffer);
+    } catch (err) {
+      logger.error({ sessionId, err: err.message }, "media upload failed");
+      return null;
+    }
   }
 
   /** Exponential backoff — a tight reconnect loop against WhatsApp reads as

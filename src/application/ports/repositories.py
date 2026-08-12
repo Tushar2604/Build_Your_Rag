@@ -150,7 +150,18 @@ class ChatRepository(Protocol):
         self, tenant_id: TenantId, session_id: SessionId
     ) -> ChatSession | None: ...
     async def add_message(self, message: Message) -> None: ...
-    async def list_messages(self, tenant_id: TenantId, session_id: SessionId) -> list[Message]: ...
+    async def list_messages(
+        self,
+        tenant_id: TenantId,
+        session_id: SessionId,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Message]: ...
+    async def count_messages(self, tenant_id: TenantId, session_id: SessionId) -> int: ...
+    async def message_exists(
+        self, tenant_id: TenantId, session_id: SessionId, provider_message_id: str
+    ) -> bool: ...
 
 
 @runtime_checkable
@@ -374,11 +385,45 @@ class WhatsAppConversation:
     whatsapp_channel_id: uuid.UUID
     phone_number: str  # the external sender's number
     session_id: SessionId
+    # Owning tenant. Added in 0022: the table used to be scoped only through its
+    # channel, which the inbox cannot rely on because it queries this table
+    # directly. Defaulted so existing constructor calls keep working; the
+    # inbound paths set it explicitly.
+    tenant_id: TenantId | None = None
     # False for announce-only campaigns: the reply is recorded, not answered.
+    # Also what the inbox flips to hand a conversation to a human.
     auto_reply: bool = True
+    # --- Denormalized for the thread list (one query, not one per thread) ---
+    display_name: str = ""
+    last_message_at: datetime | None = None
+    last_message_preview: str = ""
+    unread_count: int = 0
+    has_attachment: bool = False
     id: uuid.UUID = field(default_factory=new_id)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def note_message(self, *, preview: str, has_media: bool, inbound: bool) -> None:
+        """Fold a newly stored message into the list metadata.
+
+        Unread counts only inbound messages — an assistant answer or an operator
+        reply is not something the operator needs to be told about.
+        """
+        self.last_message_at = datetime.now(UTC)
+        self.last_message_preview = (preview or "").strip()[:300]
+        if has_media:
+            self.has_attachment = True
+        if inbound:
+            self.unread_count += 1
+        self.updated_at = datetime.now(UTC)
+
+    def mark_read(self) -> None:
+        self.unread_count = 0
+        self.updated_at = datetime.now(UTC)
+
+    def set_auto_reply(self, enabled: bool) -> None:
+        self.auto_reply = enabled
+        self.updated_at = datetime.now(UTC)
 
 
 @runtime_checkable
@@ -387,6 +432,32 @@ class WhatsAppConversationRepository(Protocol):
         self, whatsapp_channel_id: uuid.UUID, phone_number: str
     ) -> WhatsAppConversation | None: ...
     async def add(self, conversation: WhatsAppConversation) -> None: ...
+    async def update(self, conversation: WhatsAppConversation) -> None: ...
+    async def get_by_id(
+        self, tenant_id: TenantId, conversation_id: uuid.UUID
+    ) -> WhatsAppConversation | None: ...
+    async def list_for_owner(
+        self,
+        tenant_id: TenantId,
+        owner_id: uuid.UUID,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        auto_reply: bool | None = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[WhatsAppConversation]: ...
+    async def count_for_owner(
+        self,
+        tenant_id: TenantId,
+        owner_id: uuid.UUID,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        auto_reply: bool | None = None,
+    ) -> int: ...
 
 
 @runtime_checkable

@@ -41,6 +41,11 @@ class CreateUploadOutput(BaseModel):
 
 class AskInput(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
+    # WhatsApp stores the inbound message itself, because it must be kept even
+    # when no assistant answers it and because it may carry an attachment this
+    # use case knows nothing about. Letting it be re-added here would show every
+    # such message twice in the inbox.
+    persist_user_message: bool = True
 
 
 class CitationOut(BaseModel):

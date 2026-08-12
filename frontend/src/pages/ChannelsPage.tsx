@@ -1,4 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
+import { Link } from "react-router-dom";
 import {
   listWhatsAppChannels, connectWhatsAppChannel, disconnectWhatsAppChannel, WhatsAppChannel,
 } from "../api/whatsapp";
@@ -312,6 +313,14 @@ function WebSessionRow({
             >
               Show QR
             </button>
+          )}
+          {session.status === "linked" && (
+            <Link
+              to={`/channels/whatsapp/${session.id}/inbox`}
+              className="btn-secondary text-xs px-3 py-1.5 h-auto"
+            >
+              Open inbox
+            </Link>
           )}
           <button
             type="button"

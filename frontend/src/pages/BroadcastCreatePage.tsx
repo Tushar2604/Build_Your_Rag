@@ -9,7 +9,7 @@
 // the Start button — so a mistyped message costs an edit, not a thousand
 // messages.
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   AlertTriangle, ArrowLeft, Check, Loader2, MessageSquare, Radio, Smartphone, Users,
 } from "lucide-react";
@@ -79,7 +79,13 @@ export default function BroadcastCreatePage() {
   const [senderId, setSenderId] = useState("");
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
-  const [contacts, setContacts] = useState("");
+  // Arrives when the WhatsApp inbox hands over a set of selected threads, so
+  // the operator does not retype numbers they were just looking at.
+  const handover = (useLocation().state ?? {}) as {
+    contacts?: string;
+    senderSessionId?: string;
+  };
+  const [contacts, setContacts] = useState(handover.contacts ?? "");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,11 +96,17 @@ export default function BroadcastCreatePage() {
         setAssistants(bots);
         setSenders(availableSenders);
         if (bots[0]) setChatbotId(bots[0].id);
-        const firstUsable = availableSenders.find((s) => s.available);
-        if (firstUsable) setSenderId(`${firstUsable.kind}:${firstUsable.id}`);
+        // Prefer the number the contacts came from; the campaign should send
+        // from the same WhatsApp the operator was reading.
+        const handedOver = handover.senderSessionId
+          ? availableSenders.find((s) => s.id === handover.senderSessionId && s.available)
+          : undefined;
+        const chosen = handedOver ?? availableSenders.find((s) => s.available);
+        if (chosen) setSenderId(`${chosen.kind}:${chosen.id}`);
       })
       .catch(() => setError("Could not load assistants and numbers."))
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedSender = useMemo(

@@ -102,14 +102,15 @@ class AskChatbot:
             # turns only — the current message is passed separately as `data.message`.
             history_text = format_message_history(await uow.chats.list_messages(tenant_id, session_id))
 
-            await uow.chats.add_message(
-                Message(
-                    session_id=session_id,
-                    tenant_id=tenant_id,
-                    role=MessageRole.USER,
-                    content=data.message,
+            if data.persist_user_message:
+                await uow.chats.add_message(
+                    Message(
+                        session_id=session_id,
+                        tenant_id=tenant_id,
+                        role=MessageRole.USER,
+                        content=data.message,
+                    )
                 )
-            )
             await uow.commit()
 
         # --- 2. Retrieve (embedding + vector search, own short txn) ---

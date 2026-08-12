@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -513,23 +513,80 @@ class ChatRepositoryImpl:
                 tokens_used=message.tokens_used,
                 provider=message.provider,
                 created_at=message.created_at,
+                media_kind=message.media_kind,
+                media_mime_type=message.media_mime_type,
+                media_filename=message.media_filename,
+                media_storage_key=message.media_storage_key,
+                media_size_bytes=message.media_size_bytes,
+                provider_message_id=message.provider_message_id,
             )
         )
 
     async def list_messages(
-        self, tenant_id: TenantId, session_id: SessionId
+        self,
+        tenant_id: TenantId,
+        session_id: SessionId,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[Message]:
-        rows = (
+        """Oldest-first history. `limit` takes the *newest* N and returns them
+        still in reading order — a thread view wants the tail, not the head,
+        and prompt-history callers pass no limit and are unaffected."""
+        stmt = select(m.ChatMessageModel).where(
+            m.ChatMessageModel.tenant_id == tenant_id,
+            m.ChatMessageModel.session_id == session_id,
+        )
+        if limit is None:
+            rows = list(
+                (await self._s.execute(stmt.order_by(m.ChatMessageModel.created_at.asc())))
+                .scalars()
+                .all()
+            )
+        else:
+            rows = list(
+                (
+                    await self._s.execute(
+                        stmt.order_by(m.ChatMessageModel.created_at.desc())
+                        .limit(limit)
+                        .offset(offset)
+                    )
+                )
+                .scalars()
+                .all()
+            )[::-1]
+        return [map_.message_to_domain(r) for r in rows]
+
+    async def count_messages(self, tenant_id: TenantId, session_id: SessionId) -> int:
+        return int(
+            (
+                await self._s.execute(
+                    select(func.count())
+                    .select_from(m.ChatMessageModel)
+                    .where(
+                        m.ChatMessageModel.tenant_id == tenant_id,
+                        m.ChatMessageModel.session_id == session_id,
+                    )
+                )
+            ).scalar_one()
+        )
+
+    async def message_exists(
+        self, tenant_id: TenantId, session_id: SessionId, provider_message_id: str
+    ) -> bool:
+        """Guards against the WhatsApp socket redelivering on reconnect, which
+        would otherwise duplicate every message in the thread."""
+        if not provider_message_id:
+            return False
+        return (
             await self._s.execute(
-                select(m.ChatMessageModel)
-                .where(
+                select(m.ChatMessageModel.id).where(
                     m.ChatMessageModel.tenant_id == tenant_id,
                     m.ChatMessageModel.session_id == session_id,
+                    m.ChatMessageModel.provider_message_id == provider_message_id,
                 )
-                .order_by(m.ChatMessageModel.created_at.asc())
             )
-        ).scalars()
-        return [map_.message_to_domain(r) for r in rows]
+        ).first() is not None
 
 
 class UsageRepositoryImpl:
@@ -1132,10 +1189,137 @@ class WhatsAppConversationRepositoryImpl:
                 whatsapp_channel_id=conversation.whatsapp_channel_id,
                 phone_number=conversation.phone_number,
                 session_id=conversation.session_id,
+                tenant_id=conversation.tenant_id,
                 auto_reply=conversation.auto_reply,
+                display_name=conversation.display_name,
+                last_message_at=conversation.last_message_at,
+                last_message_preview=conversation.last_message_preview,
+                unread_count=conversation.unread_count,
+                has_attachment=conversation.has_attachment,
                 created_at=conversation.created_at,
                 updated_at=conversation.updated_at,
             )
+        )
+
+    async def update(self, conversation: WhatsAppConversation) -> None:
+        await self._s.execute(
+            update(m.WhatsAppConversationModel)
+            .where(m.WhatsAppConversationModel.id == conversation.id)
+            .values(
+                auto_reply=conversation.auto_reply,
+                display_name=conversation.display_name,
+                last_message_at=conversation.last_message_at,
+                last_message_preview=conversation.last_message_preview,
+                unread_count=conversation.unread_count,
+                has_attachment=conversation.has_attachment,
+                updated_at=conversation.updated_at,
+            )
+        )
+
+    async def get_by_id(
+        self, tenant_id: TenantId, conversation_id: uuid.UUID
+    ) -> WhatsAppConversation | None:
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppConversationModel).where(
+                    m.WhatsAppConversationModel.id == conversation_id,
+                    m.WhatsAppConversationModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.whatsapp_conversation_to_domain(row) if row else None
+
+    def _owner_filters(
+        self,
+        tenant_id: TenantId,
+        owner_id: uuid.UUID,
+        search: str,
+        has_attachment: bool | None,
+        unread_only: bool,
+        auto_reply: bool | None,
+    ) -> list:
+        """Shared WHERE clauses so the page query and its count can never drift
+        apart — a mismatch there shows the wrong page total, which reads as data
+        loss to whoever is looking at the inbox."""
+        conditions = [
+            m.WhatsAppConversationModel.tenant_id == tenant_id,
+            m.WhatsAppConversationModel.whatsapp_channel_id == owner_id,
+        ]
+        if search:
+            like = f"%{search.strip()}%"
+            conditions.append(
+                or_(
+                    m.WhatsAppConversationModel.phone_number.ilike(like),
+                    m.WhatsAppConversationModel.display_name.ilike(like),
+                    m.WhatsAppConversationModel.last_message_preview.ilike(like),
+                )
+            )
+        if has_attachment is not None:
+            conditions.append(m.WhatsAppConversationModel.has_attachment.is_(has_attachment))
+        if unread_only:
+            conditions.append(m.WhatsAppConversationModel.unread_count > 0)
+        if auto_reply is not None:
+            conditions.append(m.WhatsAppConversationModel.auto_reply.is_(auto_reply))
+        return conditions
+
+    async def list_for_owner(
+        self,
+        tenant_id: TenantId,
+        owner_id: uuid.UUID,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        auto_reply: bool | None = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[WhatsAppConversation]:
+        rows = (
+            (
+                await self._s.execute(
+                    select(m.WhatsAppConversationModel)
+                    .where(
+                        *self._owner_filters(
+                            tenant_id, owner_id, search, has_attachment, unread_only, auto_reply
+                        )
+                    )
+                    # Newest activity first, and threads that have never had a
+                    # message sink to the bottom rather than sorting randomly.
+                    .order_by(
+                        m.WhatsAppConversationModel.last_message_at.desc().nullslast(),
+                        m.WhatsAppConversationModel.created_at.desc(),
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [map_.whatsapp_conversation_to_domain(r) for r in rows]
+
+    async def count_for_owner(
+        self,
+        tenant_id: TenantId,
+        owner_id: uuid.UUID,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        auto_reply: bool | None = None,
+    ) -> int:
+        return int(
+            (
+                await self._s.execute(
+                    select(func.count())
+                    .select_from(m.WhatsAppConversationModel)
+                    .where(
+                        *self._owner_filters(
+                            tenant_id, owner_id, search, has_attachment, unread_only, auto_reply
+                        )
+                    )
+                )
+            ).scalar_one()
         )
 
 

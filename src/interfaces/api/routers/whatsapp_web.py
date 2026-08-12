@@ -16,25 +16,45 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
+import structlog
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+)
+from fastapi.responses import Response
 
 from src.application.dtos import AskInput
 from src.application.ports.repositories import WhatsAppConversation
 from src.application.use_cases.ask_chatbot import AskChatbot
 from src.config.container import get_container
 from src.config.settings import get_settings
-from src.domain.chat.entities import ChatSession
+from src.domain.chat.entities import ChatSession, Message, MessageRole
 from src.domain.shared.identifiers import ChatbotId, SessionId, TenantId
 from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
+from src.interfaces.api.routers.broadcasts import mark_replied
 from src.interfaces.api.schemas import (
     AttachAssistantRequest,
     BridgeEventRequest,
+    BridgeMediaResponse,
+    InboxConversationPageResponse,
+    InboxConversationResponse,
+    InboxConversationUpdate,
+    InboxMessageResponse,
+    InboxSendRequest,
     WhatsAppWebOptionsResponse,
     WhatsAppWebSessionResponse,
 )
 
 router = APIRouter(prefix="/whatsapp-web", tags=["whatsapp-web"])
+
+log = structlog.get_logger(__name__)
 
 # A linked personal account is deliberately inbound-only: it answers people who
 # message it. Bulk outbound belongs on the official Twilio path, where the
@@ -220,12 +240,316 @@ async def unlink(
         await uow.commit()
 
 
+# --- Inbox (browser-facing) ---
+
+
+def _conversation_response(c: WhatsAppConversation) -> InboxConversationResponse:
+    return InboxConversationResponse(
+        id=c.id,
+        phone_number=c.phone_number,
+        display_name=c.display_name,
+        last_message_at=c.last_message_at,
+        last_message_preview=c.last_message_preview,
+        unread_count=c.unread_count,
+        has_attachment=c.has_attachment,
+        auto_reply=c.auto_reply,
+    )
+
+
+async def _owned_conversation(
+    uow, tenant_id: TenantId, conversation_id: uuid.UUID
+) -> WhatsAppConversation:
+    conversation = await uow.whatsapp_conversations.get_by_id(tenant_id, conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
+
+
+@router.get("/sessions/{session_id}/conversations", response_model=InboxConversationPageResponse)
+async def list_conversations(
+    session_id: uuid.UUID,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+    search: str = Query("", max_length=120),
+    has_attachment: bool | None = None,
+    unread_only: bool = False,
+    auto_reply: bool | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(30, ge=1, le=100),
+) -> InboxConversationPageResponse:
+    """The inbox thread list for one linked number."""
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        # Confirms the session belongs to this tenant before it is used as the
+        # owner id — `whatsapp_conversations` is keyed by a polymorphic owner,
+        # so an unchecked id would read another tenant's threads.
+        ws = await uow.whatsapp_web_sessions.get(principal.tenant_id, session_id)
+        if ws is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        filters = {
+            "search": search.strip(),
+            "has_attachment": has_attachment,
+            "unread_only": unread_only,
+            "auto_reply": auto_reply,
+        }
+        total = await uow.whatsapp_conversations.count_for_owner(
+            principal.tenant_id, session_id, **filters
+        )
+        conversations = await uow.whatsapp_conversations.list_for_owner(
+            principal.tenant_id,
+            session_id,
+            **filters,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+        )
+    return InboxConversationPageResponse(
+        conversations=[_conversation_response(c) for c in conversations],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/conversations/{conversation_id}/messages", response_model=list[InboxMessageResponse])
+async def list_conversation_messages(
+    conversation_id: uuid.UUID,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> list[InboxMessageResponse]:
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        conversation = await _owned_conversation(uow, principal.tenant_id, conversation_id)
+        messages = await uow.chats.list_messages(
+            principal.tenant_id, conversation.session_id, limit=limit, offset=offset
+        )
+    return [
+        InboxMessageResponse(
+            id=msg.id,
+            direction="in" if msg.role == MessageRole.USER else "out",
+            content=msg.content,
+            created_at=msg.created_at,
+            media_kind=msg.media_kind or "",
+            media_mime_type=msg.media_mime_type or "",
+            media_filename=msg.media_filename or "",
+            media_size_bytes=msg.media_size_bytes or 0,
+            # An attachment WhatsApp delivered but we could not store has the
+            # metadata and no key; the UI shows it as unavailable rather than
+            # offering a download that would 404.
+            media_available=bool(msg.media_storage_key),
+        )
+        for msg in messages
+    ]
+
+
+@router.post(
+    "/conversations/{conversation_id}/messages",
+    response_model=InboxMessageResponse,
+    status_code=201,
+)
+async def send_conversation_message(
+    conversation_id: uuid.UUID,
+    body: InboxSendRequest,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+) -> InboxMessageResponse:
+    """Reply by hand, as the operator.
+
+    Does not reuse the campaign takeover endpoint: that one resolves a Twilio
+    channel unconditionally and rejects anything sent from a QR-linked number.
+    """
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        conversation = await _owned_conversation(uow, principal.tenant_id, conversation_id)
+        ws = await uow.whatsapp_web_sessions.get(
+            principal.tenant_id, conversation.whatsapp_channel_id
+        )
+        if ws is None or ws.status != "linked":
+            raise HTTPException(
+                status_code=400, detail="This WhatsApp number is not currently linked."
+            )
+
+    jid = f"{conversation.phone_number.lstrip('+')}@s.whatsapp.net"
+    ok, error = await container.whatsapp_bridge.send_text(
+        str(conversation.whatsapp_channel_id), jid, body.message
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail=error)
+
+    message = Message(
+        session_id=conversation.session_id,
+        tenant_id=principal.tenant_id,
+        role=MessageRole.ASSISTANT,
+        content=body.message,
+        # Marks this as a human reply rather than a generated answer.
+        provider="whatsapp:operator",
+    )
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        await uow.chats.add_message(message)
+        conversation.note_message(preview=body.message, has_media=False, inbound=False)
+        await uow.whatsapp_conversations.update(conversation)
+        await uow.commit()
+
+    return InboxMessageResponse(
+        id=message.id,
+        direction="out",
+        content=message.content,
+        created_at=message.created_at,
+    )
+
+
+@router.patch("/conversations/{conversation_id}", response_model=InboxConversationResponse)
+async def update_conversation(
+    conversation_id: uuid.UUID,
+    body: InboxConversationUpdate,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+) -> InboxConversationResponse:
+    """Take a conversation over from the assistant, or mark it read."""
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        conversation = await _owned_conversation(uow, principal.tenant_id, conversation_id)
+        if body.auto_reply is not None:
+            conversation.set_auto_reply(body.auto_reply)
+        if body.mark_read:
+            conversation.mark_read()
+        await uow.whatsapp_conversations.update(conversation)
+        await uow.commit()
+    return _conversation_response(conversation)
+
+
+@router.get("/conversations/{conversation_id}/media/{message_id}")
+async def conversation_media(
+    conversation_id: uuid.UUID,
+    message_id: uuid.UUID,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+) -> Response:
+    """Stream one attachment.
+
+    Proxied rather than handed out as a storage URL: the bytes are a tenant's
+    customer conversation, and a presigned link would be shareable by anyone who
+    saw it.
+    """
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        conversation = await _owned_conversation(uow, principal.tenant_id, conversation_id)
+        messages = await uow.chats.list_messages(principal.tenant_id, conversation.session_id)
+
+    match = next((m for m in messages if m.id == message_id and m.media_storage_key), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    try:
+        payload = await container.storage.get_bytes(match.media_storage_key)
+    except Exception as exc:  # noqa: BLE001 — R2 raises NoSuchKey, disk raises OSError
+        # Expected on this deployment: with R2 unset, attachments live on
+        # Render's ephemeral disk and do not survive a redeploy.
+        log.warning("whatsapp.media.missing", key=match.media_storage_key, error=str(exc))
+        raise HTTPException(
+            status_code=404, detail="This attachment is no longer stored."
+        ) from exc
+    headers = {}
+    if match.media_filename:
+        headers["Content-Disposition"] = f'inline; filename="{match.media_filename}"'
+    return Response(
+        content=payload,
+        media_type=match.media_mime_type or "application/octet-stream",
+        headers=headers,
+    )
+
+
 # --- Bridge-facing (shared secret, no JWT) ---
+
+
+async def _ensure_conversation(
+    uow,
+    tenant_id: TenantId,
+    chatbot_id: ChatbotId | None,
+    session_id: uuid.UUID,
+    phone: str,
+    display_name: str,
+) -> WhatsAppConversation:
+    """Find or create the thread for one contact.
+
+    Deliberately does not require an assistant: a number with nothing attached
+    still needs somewhere to put its messages, or the inbox is empty for exactly
+    the case where someone is trying to read what came in.
+    """
+    conversation = await uow.whatsapp_conversations.get(session_id, phone)
+    if conversation is not None:
+        if display_name and not conversation.display_name:
+            conversation.display_name = display_name
+        return conversation
+
+    chat = ChatSession(
+        tenant_id=tenant_id,
+        # A session must belong to a chatbot; when none is attached yet, the
+        # thread is still recorded and simply goes unanswered.
+        chatbot_id=chatbot_id,
+        title=display_name or phone,
+    )
+    await uow.chats.add_session(chat)
+    conversation = WhatsAppConversation(
+        whatsapp_channel_id=session_id,
+        phone_number=phone,
+        session_id=chat.id,
+        tenant_id=tenant_id,
+        display_name=display_name,
+    )
+    await uow.whatsapp_conversations.add(conversation)
+    return conversation
+
+
+async def _store_message(
+    uow,
+    tenant_id: TenantId,
+    conversation: WhatsAppConversation,
+    body: BridgeEventRequest,
+) -> bool:
+    """Persist one WhatsApp message. Returns False if it was a redelivery.
+
+    The socket replays messages after a reconnect, so without the provider-id
+    check a flaky connection would duplicate a whole thread.
+    """
+    if body.message_id and await uow.chats.message_exists(
+        tenant_id, conversation.session_id, body.message_id
+    ):
+        return False
+
+    inbound = body.direction == "in"
+    await uow.chats.add_message(
+        Message(
+            session_id=conversation.session_id,
+            tenant_id=tenant_id,
+            role=MessageRole.USER if inbound else MessageRole.ASSISTANT,
+            content=body.text,
+            # Distinguishes a human reply typed on the phone from an assistant
+            # answer, which otherwise share the "assistant" role.
+            provider=None if inbound else "whatsapp:device",
+            media_kind=body.media_kind or None,
+            media_mime_type=body.media_mime_type or None,
+            media_filename=body.media_filename or None,
+            media_storage_key=body.media_storage_key or None,
+            media_size_bytes=body.media_size_bytes or None,
+            provider_message_id=body.message_id or None,
+        )
+    )
+    conversation.note_message(
+        preview=body.preview or body.text,
+        has_media=bool(body.media_kind),
+        inbound=inbound,
+    )
+    await uow.whatsapp_conversations.update(conversation)
+    return True
 
 
 async def _reply_to_message(
     tenant_id: TenantId,
-    chatbot_id: ChatbotId,
+    chat_session_id: SessionId,
     session_id: uuid.UUID,
     jid: str,
     phone: str,
@@ -235,41 +559,66 @@ async def _reply_to_message(
 
     A background task, not inline: retrieval plus generation takes seconds, and
     the bridge's event POST should return immediately so its socket handler
-    isn't blocked behind the RAG pipeline.
+    isn't blocked behind the RAG pipeline. The inbound message is already
+    stored by the caller — hence `persist_user_message=False`, which stops it
+    being written a second time.
     """
     container = get_container()
-
-    # Reuse the existing WhatsApp conversation machinery so a linked personal
-    # number gets the same multi-turn memory as a Twilio number, keyed on the
-    # session id standing in for a channel id.
-    async with container.unit_of_work() as uow:
-        uow.set_tenant_scope(tenant_id)
-        conversation = await uow.whatsapp_conversations.get(session_id, phone)
-        if conversation is None:
-            chat = ChatSession(tenant_id=tenant_id, chatbot_id=chatbot_id, title=phone)
-            await uow.chats.add_session(chat)
-            conversation = WhatsAppConversation(
-                whatsapp_channel_id=session_id,
-                phone_number=phone,
-                session_id=chat.id,
-            )
-            await uow.whatsapp_conversations.add(conversation)
-            await uow.commit()
-        chat_session_id: SessionId = conversation.session_id
-        auto_reply = conversation.auto_reply
-
-    if not auto_reply:
-        # Announce-only campaign — the reply is kept, not answered.
-        return
-
     use_case = AskChatbot(container.unit_of_work(), container.embedder, container.llm)
     try:
-        result = await use_case.execute(tenant_id, chat_session_id, AskInput(message=text))
+        result = await use_case.execute(
+            tenant_id, chat_session_id, AskInput(message=text, persist_user_message=False)
+        )
         answer = result.answer
     except Exception:  # noqa: BLE001 — always answer, even on a pipeline failure
         answer = "Sorry, something went wrong on our end. Please try again shortly."
 
     await container.whatsapp_bridge.send_text(str(session_id), jid, answer)
+
+    # Keep the thread list in step with what the contact actually sees.
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(tenant_id)
+        conversation = await uow.whatsapp_conversations.get(session_id, phone)
+        if conversation is None:
+            return
+        conversation.note_message(preview=answer, has_media=False, inbound=False)
+        await uow.whatsapp_conversations.update(conversation)
+        await uow.commit()
+
+
+@router.post("/bridge-media", include_in_schema=False, response_model=BridgeMediaResponse)
+async def bridge_media(
+    container: ContainerDep,
+    session_id: str = Form(...),
+    message_id: str = Form(...),
+    media_kind: str = Form(""),
+    file: UploadFile = File(...),
+    x_bridge_token: str = Header(default=""),
+) -> BridgeMediaResponse:
+    """Take an attachment's bytes from the bridge and put them in object storage.
+
+    Multipart rather than base64 on the event: the bridge's JSON body limit is
+    1mb and real attachments are larger. Storing here rather than in the bridge
+    keeps one storage backend (R2, or local disk in development) and one set of
+    credentials, on the side that already has them.
+    """
+    settings = get_settings()
+    if not settings.bridge_token or x_bridge_token != settings.bridge_token:
+        raise HTTPException(status_code=403, detail="Invalid bridge token")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Empty upload")
+
+    # Keyed by session and WhatsApp message id: stable, collision-free, and it
+    # makes orphaned media for a deleted session easy to find.
+    safe_message_id = "".join(c for c in message_id if c.isalnum() or c in "-_")[:64]
+    key = f"whatsapp/{session_id}/{safe_message_id or uuid.uuid4().hex}"
+    await container.storage.put_bytes(
+        key, payload, file.content_type or "application/octet-stream"
+    )
+    log.info("whatsapp.media.stored", session_id=session_id, kind=media_kind, bytes=len(payload))
+    return BridgeMediaResponse(storage_key=key)
 
 
 @router.post("/bridge-events", include_in_schema=False)
@@ -291,23 +640,53 @@ async def bridge_events(
         return {"status": "unknown_session"}
 
     if body.event == "message":
+        phone = body.from_ or body.phone_number
         ws.heartbeat()
+
+        # Store first, decide second. Every early return below used to happen
+        # BEFORE anything was written, so a number with no assistant attached —
+        # or a conversation a human had taken over — recorded nothing at all and
+        # the inbox had nothing to show.
         async with container.unit_of_work() as uow:
             uow.set_tenant_scope(ws.tenant_id)
             await uow.whatsapp_web_sessions.update(ws)
+            conversation = await _ensure_conversation(
+                uow, ws.tenant_id, ws.chatbot_id, ws.id, phone, body.pushname
+            )
+            stored = await _store_message(uow, ws.tenant_id, conversation, body)
             await uow.commit()
+            chat_session_id = conversation.session_id
+            auto_reply = conversation.auto_reply
+
+        if not stored:
+            # A redelivery after a socket reconnect; already in the thread.
+            return {"status": "duplicate"}
+
+        if body.direction == "out":
+            # Typed by the operator on the phone. Recorded so the inbox matches
+            # WhatsApp, never answered — that would be talking to ourselves.
+            return {"status": "stored"}
+
+        # A reply on a campaign thread advances that recipient's funnel. The
+        # Twilio path has always done this; the personal path never did, so
+        # personal-sender campaigns reported zero replies.
+        await mark_replied(container, chat_session_id)
+
         if not ws.is_live():
             # Linked but no assistant attached — receiving is fine, replying
             # would be answering on the user's behalf without them asking.
             return {"status": "no_assistant"}
-        assert ws.chatbot_id is not None
+        if not auto_reply:
+            # A human has taken this conversation over.
+            return {"status": "paused"}
+
         background.add_task(
             _reply_to_message,
             ws.tenant_id,
-            ws.chatbot_id,
+            chat_session_id,
             ws.id,
             body.jid,
-            body.from_ or body.phone_number,
+            phone,
             body.text,
         )
         return {"status": "queued"}
