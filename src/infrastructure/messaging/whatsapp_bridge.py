@@ -15,7 +15,11 @@ from src.config.settings import Settings
 
 log = structlog.get_logger(__name__)
 
-TIMEOUT_SECONDS = 20
+# Longer than the bridge's own database timeout, deliberately. Starting a
+# session makes the bridge load auth state, which on a suspended managed
+# database waits out a cold start. Giving up first turns a slow pairing into a
+# 502 with an empty error message — the bridge was still working on it.
+TIMEOUT_SECONDS = 45
 _DISABLED = (
     "Personal WhatsApp linking isn't configured on this server. Set BRIDGE_TOKEN "
     "and run the whatsapp-bridge service."

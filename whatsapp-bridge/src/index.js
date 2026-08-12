@@ -41,7 +41,11 @@ const pool = new pg.Pool({
   // connections first means we reconnect on demand instead of handing out a
   // socket the server has already closed.
   idleTimeoutMillis: 10_000,
-  connectionTimeoutMillis: 10_000,
+  // Generous on purpose. A suspended Neon compute can take 10-20s to accept its
+  // first connection, and a timeout shorter than that cold start turns a slow
+  // wake-up into "Connection terminated due to connection timeout" — a failure
+  // that looks like a dead database but is really an impatient client.
+  connectionTimeoutMillis: Number(process.env.BRIDGE_DB_CONNECT_TIMEOUT_MS || 30_000),
   keepAlive: true,
   ssl: /sslmode=require/.test(process.env.DATABASE_URL || "")
     ? { rejectUnauthorized: false }
@@ -54,6 +58,25 @@ const pool = new pg.Pool({
 pool.on("error", (err) => {
   log.warn({ err: err.message }, "idle database client error");
 });
+
+/**
+ * Take the cold start once, at boot, instead of on someone's first scan.
+ *
+ * Pairing is the latency-sensitive path: the QR is only valid for ~20s, so a
+ * 15s database wake-up inside that window is the difference between a code that
+ * scans and one that has already expired. Waking the database here moves that
+ * cost to a moment when nobody is waiting.
+ */
+async function warmDatabase() {
+  try {
+    await pool.query("SELECT 1");
+    log.info("database reachable");
+  } catch (err) {
+    // Not fatal: the bridge still serves, and the retry path will wake the
+    // database on demand. Worth logging loudly because it predicts slow pairing.
+    log.warn({ err: err.message }, "database not reachable at boot");
+  }
+}
 
 /** Report an event to the API. Never throws — a momentarily unreachable API
  * must not kill the WhatsApp socket that produced the event. */
@@ -71,7 +94,16 @@ async function notify(sessionId, event, payload) {
       log.warn({ sessionId, event, status: res.status }, "api rejected bridge event");
       return null;
     }
-    return await res.json().catch(() => null);
+    const body = await res.json().catch(() => null);
+    // The API already tells us when a session row is gone; until now nothing
+    // acted on it, so an unlinked session kept its socket and its reconnect
+    // timer forever — retrying a link that can never be restored, and filling
+    // the logs with failures for a session the user deleted minutes ago.
+    if (body?.status === "unknown_session") {
+      log.info({ sessionId }, "session no longer exists — stopping socket");
+      manager.stop(sessionId, { keepAuth: false }).catch(() => {});
+    }
+    return body;
   } catch (err) {
     log.warn({ sessionId, event, err: err.message }, "could not reach api");
     return null;
@@ -161,6 +193,7 @@ async function resumeLinkedSessions() {
 
 const server = app.listen(PORT, HOST, async () => {
   log.info({ host: HOST, port: PORT }, "whatsapp bridge listening");
+  await warmDatabase();
   await resumeLinkedSessions();
 });
 

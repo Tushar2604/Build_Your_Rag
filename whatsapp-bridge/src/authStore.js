@@ -25,13 +25,24 @@ const CREDS_KEY = "creds";
 const TRANSIENT_DB_ERROR =
   /Connection terminated|ECONNRESET|socket hang up|server closed the connection|Client has encountered a connection error/i;
 
-async function query(pool, text, params) {
-  try {
-    return await pool.query(text, params);
-  } catch (err) {
-    if (!TRANSIENT_DB_ERROR.test(err?.message || "")) throw err;
-    return await pool.query(text, params);
+async function query(pool, text, params, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await pool.query(text, params);
+    } catch (err) {
+      if (!TRANSIENT_DB_ERROR.test(err?.message || "")) throw err;
+      lastError = err;
+      // Back off before retrying. An immediate retry lands inside the same cold
+      // start that failed the first attempt, so it just burns the budget the
+      // caller was waiting on; a short pause gives a waking compute time to
+      // start accepting connections.
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      }
+    }
   }
+  throw lastError;
 }
 
 export async function useDbAuthState(pool, sessionId) {
