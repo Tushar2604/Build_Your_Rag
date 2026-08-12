@@ -15,6 +15,7 @@ Twilio webhooks already use.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import (
@@ -42,6 +43,9 @@ from src.interfaces.api.routers.broadcasts import mark_replied
 from src.interfaces.api.schemas import (
     AttachAssistantRequest,
     BridgeEventRequest,
+    BridgeHistoryMessage,
+    BridgeHistoryRequest,
+    BridgeHistoryResponse,
     BridgeMediaResponse,
     InboxConversationPageResponse,
     InboxConversationResponse,
@@ -619,6 +623,128 @@ async def bridge_media(
     )
     log.info("whatsapp.media.stored", session_id=session_id, kind=media_kind, bytes=len(payload))
     return BridgeMediaResponse(storage_key=key)
+
+
+@router.post(
+    "/bridge-history", include_in_schema=False, response_model=BridgeHistoryResponse
+)
+async def bridge_history(
+    body: BridgeHistoryRequest,
+    container: ContainerDep,
+    x_bridge_token: str = Header(default=""),
+) -> BridgeHistoryResponse:
+    """Import a chunk of the history WhatsApp pushed after linking.
+
+    Idempotent by WhatsApp message id, because the phone re-sends overlapping
+    chunks and a re-link starts the whole sync again.
+
+    Nothing here answers anybody: imported conversations are historical, and
+    running an archive through the assistant would message people about
+    conversations they finished months ago.
+    """
+    settings = get_settings()
+    if not settings.bridge_token or x_bridge_token != settings.bridge_token:
+        raise HTTPException(status_code=403, detail="Invalid bridge token")
+
+    async with container.unit_of_work() as uow:
+        ws = await uow.whatsapp_web_sessions.get_unscoped(body.session_id)
+    if ws is None:
+        return BridgeHistoryResponse(
+            contacts_imported=0, messages_imported=0, skipped_duplicates=0
+        )
+
+    contacts_imported = 0
+    messages_imported = 0
+    skipped = 0
+
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(ws.tenant_id)
+
+        # Contacts first: a name makes the thread findable even when the import
+        # brings no messages for it, which is the whole point of "search for the
+        # printer and get their number".
+        for contact in body.contacts:
+            conversation = await _ensure_conversation(
+                uow, ws.tenant_id, ws.chatbot_id, ws.id, contact.phone, contact.name
+            )
+            if contact.name and conversation.display_name != contact.name:
+                conversation.display_name = contact.name
+            await uow.whatsapp_conversations.update(conversation)
+            contacts_imported += 1
+
+        # Messages grouped by contact so each thread costs one dedupe query
+        # rather than one per message.
+        by_phone: dict[str, list[BridgeHistoryMessage]] = {}
+        for msg in body.messages:
+            by_phone.setdefault(msg.phone, []).append(msg)
+
+        for phone, items in by_phone.items():
+            named = next((i.pushname for i in items if i.pushname), "")
+            conversation = await _ensure_conversation(
+                uow, ws.tenant_id, ws.chatbot_id, ws.id, phone, named
+            )
+            already = await uow.chats.existing_provider_ids(
+                ws.tenant_id,
+                conversation.session_id,
+                [i.message_id for i in items if i.message_id],
+            )
+
+            fresh: list[Message] = []
+            for item in items:
+                if item.message_id and item.message_id in already:
+                    skipped += 1
+                    continue
+                inbound = item.direction == "in"
+                fresh.append(
+                    Message(
+                        session_id=conversation.session_id,
+                        tenant_id=ws.tenant_id,
+                        role=MessageRole.USER if inbound else MessageRole.ASSISTANT,
+                        content=item.text,
+                        provider=None if inbound else "whatsapp:device",
+                        created_at=item.timestamp or datetime.now(UTC),
+                        media_kind=item.media_kind or None,
+                        media_mime_type=item.media_mime_type or None,
+                        media_filename=item.media_filename or None,
+                        # Deliberately no storage key: WhatsApp expires media
+                        # server-side, so historical files are metadata only.
+                        media_size_bytes=item.media_size_bytes or None,
+                        provider_message_id=item.message_id or None,
+                    )
+                )
+
+            if fresh:
+                await uow.chats.add_messages(fresh)
+                messages_imported += len(fresh)
+                # Recomputed from the actual newest message rather than "now",
+                # so an imported thread sorts by when it really happened.
+                newest = max(fresh, key=lambda msg: msg.created_at)
+                if (
+                    conversation.last_message_at is None
+                    or newest.created_at > conversation.last_message_at
+                ):
+                    conversation.last_message_at = newest.created_at
+                    conversation.last_message_preview = (
+                        newest.content or newest.media_kind or ""
+                    )[:300]
+                if any(msg.media_kind for msg in fresh):
+                    conversation.has_attachment = True
+            await uow.whatsapp_conversations.update(conversation)
+
+        await uow.commit()
+
+    log.info(
+        "whatsapp.history.imported",
+        session_id=str(body.session_id),
+        contacts=contacts_imported,
+        messages=messages_imported,
+        duplicates=skipped,
+    )
+    return BridgeHistoryResponse(
+        contacts_imported=contacts_imported,
+        messages_imported=messages_imported,
+        skipped_duplicates=skipped,
+    )
 
 
 @router.post("/bridge-events", include_in_schema=False)

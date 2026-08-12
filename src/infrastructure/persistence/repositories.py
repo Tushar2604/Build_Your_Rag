@@ -557,6 +557,52 @@ class ChatRepositoryImpl:
             )[::-1]
         return [map_.message_to_domain(r) for r in rows]
 
+    async def add_messages(self, messages: list[Message]) -> None:
+        """Bulk insert. Importing history one row at a time turns a few thousand
+        messages into a few thousand round trips against a managed database."""
+        if not messages:
+            return
+        self._s.add_all(
+            [
+                m.ChatMessageModel(
+                    id=msg.id,
+                    tenant_id=msg.tenant_id,
+                    session_id=msg.session_id,
+                    role=msg.role.value,
+                    content=msg.content,
+                    citations=map_.citations_to_jsonb(msg.citations),
+                    tokens_used=msg.tokens_used,
+                    provider=msg.provider,
+                    created_at=msg.created_at,
+                    media_kind=msg.media_kind,
+                    media_mime_type=msg.media_mime_type,
+                    media_filename=msg.media_filename,
+                    media_storage_key=msg.media_storage_key,
+                    media_size_bytes=msg.media_size_bytes,
+                    provider_message_id=msg.provider_message_id,
+                )
+                for msg in messages
+            ]
+        )
+
+    async def existing_provider_ids(
+        self, tenant_id: TenantId, session_id: SessionId, provider_ids: list[str]
+    ) -> set[str]:
+        """Which of these are already stored — one query instead of one per
+        message, which is what makes re-running an import cheap."""
+        if not provider_ids:
+            return set()
+        rows = (
+            await self._s.execute(
+                select(m.ChatMessageModel.provider_message_id).where(
+                    m.ChatMessageModel.tenant_id == tenant_id,
+                    m.ChatMessageModel.session_id == session_id,
+                    m.ChatMessageModel.provider_message_id.in_(provider_ids),
+                )
+            )
+        ).scalars()
+        return {r for r in rows if r}
+
     async def count_messages(self, tenant_id: TenantId, session_id: SessionId) -> int:
         return int(
             (

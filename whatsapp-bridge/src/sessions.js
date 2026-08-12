@@ -16,6 +16,7 @@ import pino from "pino";
 
 import { useDbAuthState } from "./authStore.js";
 import { describeMedia, extractText, fetchMedia, MAX_MEDIA_BYTES, previewFor } from "./media.js";
+import { CHUNK_SIZES, chunk, toContactRows, toMessageRows } from "./history.js";
 
 export { extractText };
 
@@ -36,7 +37,10 @@ export function jidToPhone(jid) {
 }
 
 export class SessionManager {
-  constructor({ pool, notify, uploadMedia, fetchMedia: fetchMediaFn }) {
+  constructor({ pool, notify, uploadMedia, fetchMedia: fetchMediaFn, syncHistory }) {
+    // Receives batches of imported contacts/messages. Injected for the same
+    // reason as the others: this class should not know about HTTP.
+    this.syncHistoryFn = syncHistory;
     this.pool = pool;
     // Injected rather than imported: the manager owns WhatsApp sockets and
     // knows nothing about where files live. Tests pass a stub.
@@ -72,6 +76,12 @@ export class SessionManager {
       markOnlineOnConnect: false,
       // Shows up in the user's Linked Devices list, so it should name us.
       browser: ["Assistant Platform", "Chrome", "1.0.0"],
+      // Ask the phone for the widest history it will give. Without this a newly
+      // linked device sees only messages that arrive from now on, so the inbox
+      // opens empty against an account with years of conversations. Even with
+      // it, WhatsApp caps what it sends — this widens the window, it does not
+      // transfer everything.
+      syncFullHistory: true,
     });
 
     this.sockets.set(sessionId, { sock, auth });
@@ -84,6 +94,12 @@ export class SessionManager {
       auth.saveCreds().catch((err) =>
         logger.error({ sessionId, err: err.message }, "could not persist creds"),
       );
+    });
+
+    // The phone pushes history asynchronously after linking, in several chunks
+    // over minutes. Each arrives here.
+    sock.ev.on("messaging-history.set", async (payload) => {
+      await this.importHistory(sessionId, payload);
     });
 
     sock.ev.on("connection.update", async (update) => {
@@ -188,6 +204,37 @@ export class SessionManager {
     }
 
     await this.notify(sessionId, "message", payload);
+  }
+
+  /**
+   * Push one chunk of synced history to the API.
+   *
+   * Never throws: history is a bonus on top of a working live feed, and a
+   * failed import must not take down the socket that is delivering today's
+   * messages.
+   */
+  async importHistory(sessionId, { contacts = [], messages = [], progress, isLatest } = {}) {
+    if (!this.syncHistoryFn) return;
+    try {
+      const contactRows = toContactRows(contacts);
+      const messageRows = toMessageRows(messages, describeMedia, extractText);
+      if (!contactRows.length && !messageRows.length) return;
+
+      logger.info(
+        { sessionId, contacts: contactRows.length, messages: messageRows.length, progress },
+        "importing whatsapp history",
+      );
+
+      for (const batch of chunk(contactRows, CHUNK_SIZES.CONTACT_CHUNK)) {
+        await this.syncHistoryFn(sessionId, { contacts: batch });
+      }
+      for (const batch of chunk(messageRows, CHUNK_SIZES.MESSAGE_CHUNK)) {
+        await this.syncHistoryFn(sessionId, { messages: batch });
+      }
+      if (isLatest) logger.info({ sessionId }, "whatsapp history sync complete");
+    } catch (err) {
+      logger.error({ sessionId, err: err.message }, "history import failed");
+    }
   }
 
   /** Hand media bytes to the API, which owns the storage backend (R2 or disk).

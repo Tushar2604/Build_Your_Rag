@@ -913,6 +913,42 @@ class BridgeMediaResponse(BaseModel):
     storage_key: str
 
 
+class BridgeHistoryContact(BaseModel):
+    phone: str
+    name: str = ""
+
+
+class BridgeHistoryMessage(BaseModel):
+    phone: str
+    text: str = ""
+    # The message's real time on WhatsApp. Without it an import would stamp a
+    # whole archive with the same instant and destroy thread ordering.
+    timestamp: datetime | None = None
+    direction: Literal["in", "out"] = "in"
+    message_id: str = ""
+    pushname: str = ""
+    preview: str = ""
+    media_kind: str = ""
+    media_mime_type: str = ""
+    media_filename: str = ""
+    media_size_bytes: int = 0
+
+
+class BridgeHistoryRequest(BaseModel):
+    """One chunk of the history WhatsApp pushes after a device links. Contacts
+    and messages arrive in separate batches, so both lists are optional."""
+
+    session_id: uuid.UUID
+    contacts: list[BridgeHistoryContact] = Field(default_factory=list)
+    messages: list[BridgeHistoryMessage] = Field(default_factory=list)
+
+
+class BridgeHistoryResponse(BaseModel):
+    contacts_imported: int
+    messages_imported: int
+    skipped_duplicates: int
+
+
 # --- WhatsApp inbox ---
 
 

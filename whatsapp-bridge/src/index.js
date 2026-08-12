@@ -20,6 +20,7 @@ const TOKEN = process.env.BRIDGE_TOKEN || "";
 const API_BASE = (process.env.BRIDGE_API_BASE || "http://127.0.0.1:8000").replace(/\/$/, "");
 const EVENT_PATH = "/api/v1/whatsapp-web/bridge-events";
 const MEDIA_PATH = "/api/v1/whatsapp-web/bridge-media";
+const HISTORY_PATH = "/api/v1/whatsapp-web/bridge-history";
 
 if (!TOKEN) {
   log.error("BRIDGE_TOKEN is unset — refusing to start an unauthenticated bridge.");
@@ -141,7 +142,27 @@ async function uploadMedia(sessionId, messageId, media, buffer) {
   return body?.storage_key || null;
 }
 
-const manager = new SessionManager({ pool, notify, uploadMedia });
+/** Post one batch of imported history. Returns false rather than throwing so a
+ * rejected chunk does not abort the rest of the sync. */
+async function syncHistory(sessionId, batch) {
+  try {
+    const res = await fetch(`${API_BASE}${HISTORY_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Bridge-Token": TOKEN },
+      body: JSON.stringify({ session_id: sessionId, ...batch }),
+    });
+    if (!res.ok) {
+      log.warn({ sessionId, status: res.status }, "api rejected history batch");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    log.warn({ sessionId, err: err.message }, "could not deliver history batch");
+    return false;
+  }
+}
+
+const manager = new SessionManager({ pool, notify, uploadMedia, syncHistory });
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
