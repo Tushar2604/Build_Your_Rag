@@ -19,6 +19,8 @@ import ChannelsPage       from "./pages/ChannelsPage";
 import BroadcastsPage     from "./pages/BroadcastsPage";
 import BroadcastCreatePage from "./pages/BroadcastCreatePage";
 import WhatsAppInboxPage from "./pages/WhatsAppInboxPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import BroadcastDetailPage from "./pages/BroadcastDetailPage";
 import IntegrationsPage   from "./pages/IntegrationsPage";
 import CloneVoicePage     from "./pages/CloneVoicePage";
@@ -37,6 +39,9 @@ export default function App() {
           {/* Public routes */}
           <Route path="/login"    element={<LoginPage />}    />
           <Route path="/register" element={<RegisterPage />} />
+          {/* Public: reached from an emailed link, so no session exists yet. */}
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password"  element={<ResetPasswordPage />} />
 
           {/* Public widget — unauthenticated share link */}
           <Route path="/c/:publicKey"     element={<WidgetChatPage />} />

@@ -44,6 +44,9 @@ INTER_SEND_DELAY_SECONDS = 0.35
 class ParsedContacts:
     recipients: list[tuple[str, str]] = field(default_factory=list)  # (phone, name)
     invalid: list[str] = field(default_factory=list)
+    # Numbers that appeared more than once. Reported rather than silently
+    # collapsed so a list that looks short is explained, not just wrong.
+    duplicates: list[str] = field(default_factory=list)
 
 
 def parse_contacts(text: str) -> ParsedContacts:
@@ -84,6 +87,7 @@ def parse_contacts(text: str) -> ParsedContacts:
         assert phone is not None
         name = next((c for c in cells if c is not phone_cell and not normalize_phone(c)), "")
         if phone in seen:
+            result.duplicates.append(phone)
             continue
         seen.add(phone)
         result.recipients.append((phone, name[:160]))

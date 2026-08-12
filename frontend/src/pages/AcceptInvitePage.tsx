@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../store/auth";
 import { getInviteBootstrap, acceptInvite, InviteBootstrap } from "../api/team";
+import PasswordInput from "../components/PasswordInput";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Admin", member: "Member", viewer: "Viewer",
@@ -93,11 +94,13 @@ export default function AcceptInvitePage() {
                 <form onSubmit={handleSubmit} noValidate className="space-y-4">
                   <div>
                     <label htmlFor="password" className="label">Set a password</label>
-                    <input
-                      id="password" type="password" name="new-password" autoComplete="new-password"
-                      required minLength={8}
-                      value={password} onChange={(e) => setPassword(e.target.value)}
-                      className="input" placeholder="Min. 8 characters"
+                    <PasswordInput
+                      id="password"
+                      value={password}
+                      onChange={setPassword}
+                      autoComplete="new-password"
+                      minLength={8}
+                      placeholder="Min. 8 characters"
                     />
                   </div>
 

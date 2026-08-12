@@ -9,15 +9,18 @@ import { useState, useEffect, useRef, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
-  ArrowDownUp, ArrowUpRight, Bot, Brain, FileText, Mic, Settings2, Sparkles, Zap,
+  ArrowDownUp, ArrowUpRight, Bot, Brain, FileText, Mic, MoreVertical, Settings2, Sparkles,
+  Trash2, Zap,
 } from "lucide-react";
 import {
   listChatbots,
+  deleteChatbot,
   generateAssistantStream,
   getAssistantOptions,
   Chatbot,
   AssistantOptions,
 } from "../api/chatbots";
+import { ApiError } from "../api/client";
 import FlowWritingView, { WritingSection } from "../components/assistant/FlowWritingView";
 
 const MAX_DESCRIPTION = 4000;
@@ -193,7 +196,120 @@ function CardStat({
   );
 }
 
-function AssistantCard({ bot, index }: { bot: Chatbot; index: number }) {
+/** Per-card overflow menu. One item today (delete), but built as a menu because
+ * "duplicate", "publish" and the rest belong here rather than as more buttons
+ * competing for room on the card. */
+function CardMenu({ bot, onDeleted }: { bot: Chatbot; onDeleted: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on an outside click or Escape — a menu that only closes by re-clicking
+  // its own trigger feels stuck.
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteChatbot(bot.id);
+      onDeleted(bot.id);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not delete this assistant.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="relative flex-shrink-0" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={`Actions for ${bot.name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+      >
+        <MoreVertical className="w-4 h-4" strokeWidth={2} />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-7 z-20 w-56 rounded-lg border border-gray-200 bg-surface shadow-pop p-1"
+        >
+          {!confirming ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => setConfirming(true)}
+              className="w-full text-left rounded px-2.5 py-1.5 text-[13px] text-red-600 hover:bg-red-50 flex items-center gap-2"
+            >
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={2} />
+              Delete assistant
+            </button>
+          ) : (
+            <div className="p-2">
+              <p className="text-[12.5px] text-gray-700 mb-1">
+                Delete <span className="font-semibold">{bot.name}</span>?
+              </p>
+              {/* Named explicitly: "are you sure" tells nobody what they lose. */}
+              <p className="text-[11px] text-gray-500 mb-2.5">
+                Its conversations and logs go too. A linked WhatsApp number stays paired, it just
+                stops having an assistant. This cannot be undone.
+              </p>
+              {error && <p className="text-[11px] text-red-600 mb-2">{error}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={remove}
+                  disabled={busy}
+                  className="btn-danger text-xs px-2.5 py-1 h-auto disabled:opacity-50"
+                >
+                  {busy ? "Deleting…" : "Delete"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(false)}
+                  disabled={busy}
+                  className="btn-secondary text-xs px-2.5 py-1 h-auto"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssistantCard({
+  bot,
+  index,
+  onDeleted,
+}: {
+  bot: Chatbot;
+  index: number;
+  onDeleted: (id: string) => void;
+}) {
   const live = bot.is_public;
   // The voice label carries a provider prefix ("Cartesia - Riya") that the card
   // has no room for and the operator already chose; the provider is the part
@@ -222,6 +338,7 @@ function AssistantCard({ bot, index }: { bot: Chatbot; index: number }) {
             <span className={live ? "dot-live mr-1" : "dot-draft mr-1"} />
             {live ? "Live" : "Draft"}
           </span>
+          <CardMenu bot={bot} onDeleted={onDeleted} />
         </div>
         <p className="text-[12.5px] text-gray-500 mt-1 ml-[26px] truncate">
           {bot.assistant.languages.join(", ")}
@@ -322,7 +439,12 @@ export default function AssistantsPage() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {bots.map((bot, i) => (
-              <AssistantCard key={bot.id} bot={bot} index={i} />
+              <AssistantCard
+                key={bot.id}
+                bot={bot}
+                index={i}
+                onDeleted={(id) => setBots((prev) => prev.filter((b) => b.id !== id))}
+              />
             ))}
           </div>
         )}

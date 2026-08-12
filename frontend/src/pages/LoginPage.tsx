@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Sparkles, Check, AlertCircle } from "lucide-react";
 import { useAuth } from "../store/auth";
 import GoogleSignInButton from "../components/GoogleSignInButton";
+import PasswordInput from "../components/PasswordInput";
 import { ApiError } from "../api/client";
 
 const FEATURES = [
@@ -129,12 +130,17 @@ export default function LoginPage() {
                 />
               </div>
               <div>
-                <label htmlFor="password" className="label">Password</label>
-                <input
-                  id="password" type="password" name="password" autoComplete="current-password"
-                  required
-                  value={password} onChange={(e) => setPassword(e.target.value)}
-                  className="input" placeholder="••••••••"
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="password" className="label mb-0">Password</label>
+                  <Link to="/forgot-password" className="text-xs text-brand-600 hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
+                <PasswordInput
+                  id="password"
+                  value={password}
+                  onChange={setPassword}
+                  autoComplete="current-password"
                 />
               </div>
 

@@ -100,6 +100,15 @@ class UserRepositoryImpl:
         row = await self._s.get(m.UserModel, user_id)
         return map_.user_to_domain(row) if row else None
 
+    async def set_password_hash(self, user_id: UserId, password_hash: str) -> None:
+        """Narrower than a general `update` on purpose: a password reset should
+        not be able to change a role or reactivate a disabled account."""
+        await self._s.execute(
+            update(m.UserModel)
+            .where(m.UserModel.id == user_id)
+            .values(password_hash=password_hash)
+        )
+
     async def get_by_email(self, email: str) -> User | None:
         row = (
             await self._s.execute(select(m.UserModel).where(m.UserModel.email == email))
@@ -426,6 +435,18 @@ class ChatbotRepositoryImpl:
             )
         ).scalar_one_or_none()
         return map_.chatbot_to_domain(row) if row else None
+
+    async def delete(self, tenant_id: TenantId, chatbot_id: ChatbotId) -> None:
+        """Tenant-scoped so a guessed id cannot reach another workspace's
+        assistant. Chat sessions, request logs and per-assistant config cascade;
+        a linked WhatsApp number is only detached (SET NULL), because deleting
+        an assistant should not silently unlink someone's phone."""
+        await self._s.execute(
+            delete(m.ChatbotModel).where(
+                m.ChatbotModel.id == chatbot_id,
+                m.ChatbotModel.tenant_id == tenant_id,
+            )
+        )
 
     async def update(self, chatbot: Chatbot) -> None:
         row = await self._s.get(m.ChatbotModel, chatbot.id)

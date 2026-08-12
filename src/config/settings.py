@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     jwt_access_ttl_minutes: int = 30
     jwt_refresh_ttl_days: int = 14
     jwt_algorithm: str = "HS256"
+    # How long a password-reset link stays usable. Short by design: the link
+    # lives in an inbox, and the token is single-use only because it is tied to
+    # the password hash it was issued against.
+    password_reset_ttl_minutes: int = 30
 
     # --- Database ---
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"

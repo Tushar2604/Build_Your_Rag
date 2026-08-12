@@ -237,3 +237,9 @@ export function generateAssistantStream(
     handlers.onError,
   );
 }
+
+/** Delete an assistant. Its conversations and logs go with it; a linked
+ * WhatsApp number is detached, not unlinked. */
+export function deleteChatbot(id: string): Promise<void> {
+  return api.delete<void>(`/chatbots/${id}`);
+}

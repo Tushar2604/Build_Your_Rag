@@ -645,6 +645,54 @@ class AddRecipientsRequest(BaseModel):
     recipients_text: str = Field(default="", max_length=500_000)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Always the same shape, whether or not the address exists.
+
+    Reporting "no such account" would turn this endpoint into a way to test
+    which email addresses are registered. `email_sent` reflects only whether
+    this deployment has email configured at all.
+    """
+
+    detail: str
+    email_sent: bool
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=10)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class PreviewContactsRequest(BaseModel):
+    recipients_text: str = Field(default="", max_length=500_000)
+
+
+class PreviewedContact(BaseModel):
+    phone_number: str
+    display_name: str = ""
+
+
+class PreviewContactsResponse(BaseModel):
+    """A dry run of the contact parser.
+
+    Exists so the list can be checked before a campaign is created. Previously
+    the only way to learn that half a file failed to parse was to create the
+    campaign and read the counts afterwards, by which point fixing it means
+    editing recipients on a campaign that already exists.
+    """
+
+    contacts: list[PreviewedContact]
+    # Lines that could not be read as a number, verbatim, so the offending row
+    # is recognisable in the original file.
+    invalid: list[str]
+    duplicates: list[str]
+    total_valid: int
+    truncated: bool = False
+
+
 class BroadcastRecipientResponse(BaseModel):
     id: uuid.UUID
     phone_number: str

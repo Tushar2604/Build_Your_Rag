@@ -86,6 +86,28 @@ export interface AddRecipientsResult {
   invalid: string[];
 }
 
+export interface PreviewedContact {
+  phone_number: string;
+  display_name: string;
+}
+
+export interface ContactPreview {
+  contacts: PreviewedContact[];
+  /** Lines that could not be read as a number, verbatim. */
+  invalid: string[];
+  duplicates: string[];
+  total_valid: number;
+  truncated: boolean;
+}
+
+/** Parse a contact blob without saving it, so a bad file is caught in the
+ * editor rather than discovered as a short send. */
+export function previewContacts(recipientsText: string): Promise<ContactPreview> {
+  return api.post<ContactPreview>("/broadcasts/preview-contacts", {
+    recipients_text: recipientsText,
+  });
+}
+
 export interface CreateBroadcastInput {
   chatbot_id: string;
   name: string;

@@ -15,7 +15,11 @@ import uuid
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 
-from src.application.use_cases.broadcast import AddBroadcastRecipients, SendBroadcast
+from src.application.use_cases.broadcast import (
+    AddBroadcastRecipients,
+    SendBroadcast,
+    parse_contacts,
+)
 from src.config.container import get_container
 from src.config.settings import get_settings
 from src.domain.broadcast.entities import Broadcast
@@ -31,6 +35,9 @@ from src.interfaces.api.schemas import (
     BroadcastResponse,
     CampaignSenderResponse,
     CreateBroadcastRequest,
+    PreviewContactsRequest,
+    PreviewContactsResponse,
+    PreviewedContact,
     RecipientPageResponse,
     SendManualMessageRequest,
 )
@@ -315,6 +322,30 @@ async def add_recipients(
         text_blob=body.recipients_text,
     )
     return AddRecipientsResponse(added=added, duplicates=duplicates, invalid=invalid[:50])
+
+
+@router.post("/preview-contacts", response_model=PreviewContactsResponse)
+async def preview_contacts(
+    body: PreviewContactsRequest,
+    principal: AdminPrincipalDep,
+) -> PreviewContactsResponse:
+    """Parse a contact blob without saving anything.
+
+    Deliberately campaign-free: the point is to check a pasted list or an
+    uploaded file *before* committing to it, so a malformed export is fixed in
+    the editor rather than discovered as a short send afterwards.
+    """
+    parsed = parse_contacts(body.recipients_text)
+    # Capped because this feeds a preview table; the count is reported in full
+    # so a large file still shows an honest total.
+    shown = parsed.recipients[:500]
+    return PreviewContactsResponse(
+        contacts=[PreviewedContact(phone_number=p, display_name=n) for p, n in shown],
+        invalid=parsed.invalid[:100],
+        duplicates=parsed.duplicates[:100],
+        total_valid=len(parsed.recipients),
+        truncated=len(parsed.recipients) > len(shown),
+    )
 
 
 @router.get("/{broadcast_id}/recipients", response_model=RecipientPageResponse)

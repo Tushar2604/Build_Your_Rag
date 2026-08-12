@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Sparkles, AlertCircle } from "lucide-react";
 import { useAuth } from "../store/auth";
 import GoogleSignInButton from "../components/GoogleSignInButton";
+import PasswordInput from "../components/PasswordInput";
 import { ApiError } from "../api/client";
 
 const STATS = [
@@ -133,11 +134,13 @@ export default function RegisterPage() {
               </div>
               <div>
                 <label htmlFor="password" className="label">Password</label>
-                <input
-                  id="password" type="password" name="new-password" autoComplete="new-password"
-                  required minLength={8}
-                  value={password} onChange={(e) => setPassword(e.target.value)}
-                  className="input" placeholder="Min. 8 characters"
+                <PasswordInput
+                  id="password"
+                  value={password}
+                  onChange={setPassword}
+                  autoComplete="new-password"
+                  minLength={8}
+                  placeholder="Min. 8 characters"
                 />
               </div>
 

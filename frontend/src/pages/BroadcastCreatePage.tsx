@@ -21,6 +21,7 @@ import {
 } from "../api/broadcasts";
 import { Chatbot, listChatbots } from "../api/chatbots";
 import { ApiError } from "../api/client";
+import ContactPicker from "../components/ContactPicker";
 
 const MAX_MESSAGE = 1600;
 
@@ -40,14 +41,6 @@ const MODES: { id: BroadcastMode; label: string; description: string; icon: type
     icon: MessageSquare,
   },
 ];
-
-/** Count the contacts the server will accept, so the page and the result agree. */
-function countContacts(text: string): number {
-  return text
-    .split(/[\n,;]+/)
-    .map((line) => line.trim())
-    .filter((line) => /\d{7,}/.test(line)).length;
-}
 
 function Field({
   label,
@@ -113,7 +106,6 @@ export default function BroadcastCreatePage() {
     () => senders.find((s) => `${s.kind}:${s.id}` === senderId) ?? null,
     [senders, senderId],
   );
-  const contactCount = useMemo(() => countContacts(contacts), [contacts]);
   const usableSenders = senders.filter((s) => s.available);
 
   const canSubmit =
@@ -346,22 +338,20 @@ export default function BroadcastCreatePage() {
       <section className="rounded-2xl border border-gray-200 bg-surface p-5">
         <Field
           label="Contacts"
-          hint="One per line, or paste a CSV as `phone, name`. Numbers must include the country code — a local-looking number is skipped rather than guessed at, because a wrong guess messages a stranger."
+          hint="Paste them, upload a CSV, or pick from a linked WhatsApp. Numbers must include the country code — a local-looking number is skipped rather than guessed at, because a wrong guess messages a stranger."
         >
-          <textarea
-            className="input resize-y font-mono text-xs bg-surface-2"
-            rows={8}
+          <ContactPicker
             value={contacts}
-            onChange={(e) => setContacts(e.target.value)}
-            placeholder={"+919876543210, Asha Menon\n+14155550123, Sam Rivera"}
+            onChange={setContacts}
+            sessionId={handover.senderSessionId}
           />
         </Field>
-        <p className="text-[13px] text-gray-500 mt-2 flex items-center gap-1.5">
-          <Users className="w-3.5 h-3.5" strokeWidth={1.75} />
-          {contactCount === 0
-            ? "No contacts yet — you can add them on the next screen too."
-            : `${contactCount} contact${contactCount === 1 ? "" : "s"} detected`}
-        </p>
+        {!contacts.trim() && (
+          <p className="text-[13px] text-gray-500 mt-2 flex items-center gap-1.5">
+            <Users className="w-3.5 h-3.5" strokeWidth={1.75} />
+            No contacts yet — you can add them on the next screen too.
+          </p>
+        )}
       </section>
 
       {error && (

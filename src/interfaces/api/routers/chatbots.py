@@ -338,6 +338,28 @@ async def get_chatbot(
     return _to_response(bot, counts=counts)
 
 
+@router.delete("/{chatbot_id}", status_code=204)
+async def delete_chatbot(
+    chatbot_id: uuid.UUID,
+    principal: PrincipalDep,
+    container: ContainerDep,
+) -> None:
+    """Delete an assistant and everything scoped to it.
+
+    Its conversations, request logs and per-assistant config go with it. A
+    WhatsApp number linked to this assistant is detached rather than unlinked —
+    the phone stays paired, it just stops having something to answer with.
+    """
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        existing = await uow.chatbots.get(principal.tenant_id, ChatbotId(chatbot_id))
+        if existing is None:
+            # Already gone: deleting twice is not an error worth surfacing.
+            return
+        await uow.chatbots.delete(principal.tenant_id, ChatbotId(chatbot_id))
+        await uow.commit()
+
+
 @router.patch("/{chatbot_id}", response_model=ChatbotResponse)
 async def update_chatbot(
     chatbot_id: uuid.UUID,
