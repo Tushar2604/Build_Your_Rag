@@ -234,7 +234,7 @@ function TextWidgetChat({ publicKey, config }: { publicKey: string; config: Publ
             Send
           </button>
         </div>
-        <p className="text-center text-[10px] text-gray-300 mt-2">Powered by Kore AI</p>
+        <p className="text-center text-[10px] text-gray-300 mt-2">Powered by Evara AI</p>
       </form>
     </div>
   );

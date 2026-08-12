@@ -3,6 +3,7 @@ import { AuthProvider } from "./store/auth";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./components/Layout";
 
+import LandingPage        from "./pages/LandingPage";
 import LoginPage          from "./pages/LoginPage";
 import RegisterPage       from "./pages/RegisterPage";
 import WidgetChatPage     from "./pages/WidgetChatPage";
@@ -36,6 +37,11 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public marketing landing — the front door. Everything behind
+              /home is unchanged; this only occupies the previously-redirecting
+              "/" slot. */}
+          <Route path="/"         element={<LandingPage />}  />
+
           {/* Public routes */}
           <Route path="/login"    element={<LoginPage />}    />
           <Route path="/register" element={<RegisterPage />} />
@@ -55,9 +61,6 @@ export default function App() {
           {/* Authenticated routes */}
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
-              {/* Redirect root → home */}
-              <Route index element={<Navigate to="/home" replace />} />
-
               <Route path="/home"       element={<HomePage />}           />
               <Route path="/assistants" element={<AssistantsPage />}     />
               <Route path="/assistants/:id" element={<AssistantDetailPage />} />

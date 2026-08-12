@@ -41,7 +41,7 @@ export default function AcceptInvitePage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-surface">
+    <div className="min-h-screen flex aurora-shell">
       <div className="hidden lg:flex flex-col w-[480px] flex-shrink-0 bg-ink-950 px-12 py-14">
         <div className="flex items-center gap-2.5 mb-auto">
           <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center flex-shrink-0">
@@ -49,7 +49,7 @@ export default function AcceptInvitePage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
             </svg>
           </div>
-          <span className="font-semibold text-white text-sm tracking-tight">Kore AI</span>
+          <span className="font-semibold text-white text-sm tracking-tight">Evara AI</span>
         </div>
         <div className="mt-auto mb-auto">
           <h1 className="text-3xl font-semibold text-white leading-snug tracking-tight">
@@ -59,7 +59,7 @@ export default function AcceptInvitePage() {
             Set your password to join the team.
           </p>
         </div>
-        <p className="text-[11px] text-gray-600 mt-auto">&copy; {new Date().getFullYear()} Kore AI · All rights reserved</p>
+        <p className="text-[11px] text-gray-600 mt-auto">&copy; {new Date().getFullYear()} Evara AI · All rights reserved</p>
       </div>
 
       <div className="flex-1 flex items-center justify-center px-6 py-12 bg-canvas">
@@ -70,7 +70,7 @@ export default function AcceptInvitePage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
               </svg>
             </div>
-            <span className="font-semibold text-gray-900 text-sm">Kore AI</span>
+            <span className="font-semibold text-gray-900 text-sm">Evara AI</span>
           </div>
 
           {loadErr ? (

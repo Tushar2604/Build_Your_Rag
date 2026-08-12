@@ -1,5 +1,5 @@
 /*!
- * Kore AI — Embeddable chat widget  v2.0
+ * Evara AI — Embeddable chat widget  v2.0
  *
  * USAGE
  * ─────
@@ -43,7 +43,7 @@
   if (!script) return;
 
   var KEY = script.getAttribute("data-chatbot-key");
-  if (!KEY) { console.error("[kore-widget] missing data-chatbot-key"); return; }
+  if (!KEY) { console.error("[evara-widget] missing data-chatbot-key"); return; }
 
   var API_BASE = (
     script.getAttribute("data-api-base") || new URL(script.src).origin
@@ -350,7 +350,7 @@
     panel.appendChild(el("div", { class: "composer" }, [textarea, sendBtn]));
     panel.appendChild(el("div", { class: "branding" }, [
       document.createTextNode("Powered by "),
-      el("a", { href: API_BASE, target: "_blank", rel: "noopener", text: "Kore AI" }),
+      el("a", { href: API_BASE, target: "_blank", rel: "noopener", text: "Evara AI" }),
     ]));
 
     root.appendChild(panel);
@@ -631,7 +631,7 @@
     panel.appendChild(body);
     panel.appendChild(el("div", { class: "branding" }, [
       document.createTextNode("Powered by "),
-      el("a", { href: API_BASE, target: "_blank", rel: "noopener", text: "Kore AI" }),
+      el("a", { href: API_BASE, target: "_blank", rel: "noopener", text: "Evara AI" }),
     ]));
     root.appendChild(panel);
 
@@ -955,7 +955,7 @@
         else                   mountBubble(cfg);
       })
       .catch(function (e) {
-        console.error("[kore-widget] failed to load:", e.message);
+        console.error("[evara-widget] failed to load:", e.message);
       });
   }
 

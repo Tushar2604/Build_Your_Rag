@@ -14,24 +14,27 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 :root, [data-theme="dark"] {
-    --c-surface: 13 18 20;
-    --c-surface-2: 20 27 29;
-    /* Primary solid control (buttons, active toggles). Fixed teal in both
+    /* Panels are violet-black rather than neutral-black. Against the coral /
+       magenta aurora a neutral grey reads as dirty; a panel carrying a little
+       of the same violet sits *inside* the light instead of on top of it. */
+    --c-surface: 14 11 26;
+    --c-surface-2: 21 17 38;
+    /* Primary solid control (buttons, active toggles). Fixed violet in both
        themes — see .btn-primary. */
-    --c-solid: 13 148 136;
-    --c-solid-hover: 15 118 110;
-    --c-canvas: 6 9 10;
-    --c-gray-50: 18 24 26;
-    --c-gray-100: 24 31 34;
-    --c-gray-200: 32 42 45;
-    --c-gray-300: 45 58 62;
-    --c-gray-400: 110 124 128;
-    --c-gray-500: 139 154 157;
-    --c-gray-600: 168 181 184;
-    --c-gray-700: 199 209 211;
-    --c-gray-800: 223 231 232;
-    --c-gray-900: 238 244 245;
-    --c-gray-950: 250 253 253;
+    --c-solid: 124 58 237;
+    --c-solid-hover: 109 40 217;
+    --c-canvas: 6 4 13;
+    --c-gray-50: 18 15 32;
+    --c-gray-100: 25 21 43;
+    --c-gray-200: 36 30 60;
+    --c-gray-300: 52 44 82;
+    --c-gray-400: 122 113 150;
+    --c-gray-500: 150 142 178;
+    --c-gray-600: 178 171 202;
+    --c-gray-700: 206 201 226;
+    --c-gray-800: 229 225 242;
+    --c-gray-900: 243 241 251;
+    --c-gray-950: 253 252 255;
     --c-emerald-50: 7 38 29;
     --c-emerald-100: 9 52 39;
     --c-emerald-200: 12 74 55;
@@ -142,35 +145,38 @@
     --c-orange-700: 253 186 116;
     --c-orange-800: 254 215 170;
     --c-orange-900: 255 237 213;
-    --c-brand-50: 6 40 38;
-    --c-brand-100: 8 54 51;
-    --c-brand-200: 11 74 70;
-    --c-brand-300: 16 104 98;
-    --c-brand-400: 45 212 191;
-    --c-brand-500: 20 184 166;
-    --c-brand-600: 45 212 191;
-    --c-brand-700: 94 234 212;
-    --c-brand-800: 153 246 228;
-    --c-brand-900: 204 251 241;
+    /* Brand is violet — the accent that carries the whole system. */
+    --c-brand-50: 30 20 56;
+    --c-brand-100: 40 26 76;
+    --c-brand-200: 56 36 104;
+    --c-brand-300: 78 50 142;
+    --c-brand-400: 167 139 250;
+    --c-brand-500: 139 92 246;
+    --c-brand-600: 167 139 250;
+    --c-brand-700: 196 181 253;
+    --c-brand-800: 221 214 254;
+    --c-brand-900: 237 233 254;
 }
 
 [data-theme="light"] {
     --c-surface: 255 255 255;
-    --c-surface-2: 250 250 250;
-    --c-solid: 13 148 136;
-    --c-solid-hover: 15 118 110;
-    --c-canvas: 250 250 249;
-    --c-gray-50: 250 250 250;
-    --c-gray-100: 244 244 245;
-    --c-gray-200: 228 228 231;
-    --c-gray-300: 212 212 216;
-    --c-gray-400: 161 161 170;
-    --c-gray-500: 113 113 122;
-    --c-gray-600: 82 82 91;
-    --c-gray-700: 63 63 70;
-    --c-gray-800: 39 39 42;
-    --c-gray-900: 24 24 27;
-    --c-gray-950: 9 9 11;
+    --c-surface-2: 250 249 254;
+    --c-solid: 124 58 237;
+    --c-solid-hover: 109 40 217;
+    /* Faintly lavender rather than pure white, so the light theme reads as the
+       same product with the lights on rather than a different app. */
+    --c-canvas: 250 249 254;
+    --c-gray-50: 250 249 253;
+    --c-gray-100: 244 243 249;
+    --c-gray-200: 229 227 238;
+    --c-gray-300: 212 209 226;
+    --c-gray-400: 160 156 180;
+    --c-gray-500: 113 109 134;
+    --c-gray-600: 83 79 102;
+    --c-gray-700: 63 60 80;
+    --c-gray-800: 40 37 55;
+    --c-gray-900: 25 22 38;
+    --c-gray-950: 12 10 22;
     --c-emerald-50: 236 253 245;
     --c-emerald-100: 209 250 229;
     --c-emerald-200: 167 243 208;
@@ -281,16 +287,16 @@
     --c-orange-700: 194 65 12;
     --c-orange-800: 154 52 18;
     --c-orange-900: 124 45 18;
-    --c-brand-50: 240 253 250;
-    --c-brand-100: 204 251 241;
-    --c-brand-200: 153 246 228;
-    --c-brand-300: 94 234 212;
-    --c-brand-400: 45 212 191;
-    --c-brand-500: 20 184 166;
-    --c-brand-600: 13 148 136;
-    --c-brand-700: 15 118 110;
-    --c-brand-800: 17 94 89;
-    --c-brand-900: 19 78 74;
+    --c-brand-50: 245 243 255;
+    --c-brand-100: 237 233 254;
+    --c-brand-200: 221 214 254;
+    --c-brand-300: 196 181 253;
+    --c-brand-400: 167 139 250;
+    --c-brand-500: 139 92 246;
+    --c-brand-600: 124 58 237;
+    --c-brand-700: 109 40 217;
+    --c-brand-800: 91 33 182;
+    --c-brand-900: 76 29 149;
 }
 
 
@@ -305,18 +311,52 @@
   [data-theme="light"] { color-scheme: light; }
 
   body {
-    font-family: "Inter", system-ui, -apple-system, sans-serif;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
     background-color: rgb(var(--c-canvas));
     @apply text-gray-900 antialiased;
   }
   * { @apply box-border; }
 
-  h1, h2, h3, h4 { @apply tracking-tight; text-wrap: balance; }
+  /* ── Ambient aurora ──────────────────────────────────────────────────────
+     Painted once on <body>, fixed, behind everything. Every screen in the app
+     — console, login, public widget — inherits the atmosphere for free, and
+     nothing has to opt in. Panels above it are translucent, so the coral and
+     violet bleed through the gutters exactly as they do in the reference.
+     Kept deliberately soft: this is a dense data console, and a full-strength
+     gradient under a table is unreadable. Marketing moments opt *up* to the
+     stronger treatment with `.aurora-shell`. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -10%;
+    z-index: -2;
+    pointer-events: none;
+    @apply bg-aurora-soft animate-aurora-drift;
+  }
+  /* Perforated dot texture over the top — the punched-metal corners in the
+     reference. Masked to the edges so it never sits under body copy. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.5;
+    @apply bg-dot-grid bg-dot-md;
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, transparent 30%, black 100%);
+            mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, transparent 30%, black 100%);
+  }
+  [data-theme="light"] body::after { opacity: 0.35; }
+
+  h1, h2, h3, h4 {
+    @apply tracking-tight;
+    font-family: "Sora", "Plus Jakarta Sans", system-ui, sans-serif;
+    text-wrap: balance;
+  }
 
   /* Consistent, quiet focus ring for keyboard users across the app. */
   :focus-visible {
-    @apply outline-none ring-2 ring-brand-500/40 ring-offset-2;
+    @apply outline-none ring-2 ring-brand-500/50 ring-offset-2;
     --tw-ring-offset-color: rgb(var(--c-canvas));
   }
 
@@ -328,49 +368,96 @@
     border: 3px solid transparent; background-clip: content-box;
   }
   *::-webkit-scrollbar-thumb:hover { background-color: rgb(var(--c-gray-400)); }
+
+  /* Respect a reduced-motion preference: the aurora drift, float and pulse are
+     decorative, so they stop entirely rather than merely slowing down. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
 @layer components {
-  /* ── Buttons ── */
+  /* ── Buttons ───────────────────────────────────────────────────────────
+     Fully rounded. The reference's nav items, CTA and demo button are all
+     capsules, and that single radius decision does more to carry the look
+     across forty screens than any amount of colour work. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium
-           leading-none transition-all duration-150 select-none
+    @apply relative inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold
+           leading-none transition-all duration-200 select-none
            hover:-translate-y-px active:translate-y-0
            disabled:pointer-events-none disabled:opacity-50 disabled:translate-y-0;
   }
-  /* The primary solid is a fixed teal in both themes rather than "dark ink".
+  /* The primary solid is a fixed violet in both themes rather than "dark ink".
      Ink-on-canvas works in a light UI and disappears entirely in a dark one,
      and a button that vanishes when you flip the theme is not a button. */
   .btn-primary {
-    @apply btn text-white shadow-xs;
-    background-color: rgb(var(--c-solid));
+    @apply btn text-white shadow-glow-brand;
+    background-image: linear-gradient(140deg, rgb(139 92 246), rgb(109 40 217));
   }
-  .btn-primary:hover:not(:disabled) { background-color: rgb(var(--c-solid-hover)); }
+  .btn-primary:hover:not(:disabled) {
+    background-image: linear-gradient(140deg, rgb(167 139 250), rgb(124 58 237));
+  }
   .btn-accent    { @apply btn-primary; }
-  /* CTA — warm orange, reserved for primary conversion actions only. */
-  .btn-cta       { @apply btn bg-cta-500 text-white shadow-glow-cta hover:bg-cta-600 active:bg-cta-700; }
-  .btn-secondary { @apply btn border border-gray-200 bg-surface text-gray-700 shadow-xs hover:bg-gray-50 hover:border-gray-300 active:bg-gray-100; }
+  /* CTA — the warm coral note, reserved for primary conversion actions only. */
+  .btn-cta {
+    @apply btn text-white shadow-glow-cta;
+    background-image: linear-gradient(140deg, rgb(251 138 60), rgb(234 76 28));
+  }
+  .btn-cta:hover:not(:disabled) {
+    background-image: linear-gradient(140deg, rgb(253 160 90), rgb(249 104 47));
+  }
+  /* Secondary is glass, not a filled chip — it has to sit on the aurora. */
+  .btn-secondary {
+    @apply btn border border-white/10 bg-white/[0.04] text-gray-700 backdrop-blur-md
+           hover:bg-white/[0.09] hover:border-white/20 hover:text-gray-900;
+  }
+  [data-theme="light"] .btn-secondary {
+    @apply border-gray-200 bg-surface text-gray-700 shadow-xs hover:bg-gray-50 hover:border-gray-300;
+  }
   .btn-danger    { @apply btn bg-red-600 text-white shadow-xs hover:bg-red-700 active:bg-red-800; }
-  .btn-ghost     { @apply btn text-gray-600 hover:bg-gray-100 hover:text-gray-900 hover:translate-y-0; }
-  .btn-sm        { @apply px-2.5 py-1.5 text-xs gap-1.5 rounded-md; }
-  .btn-lg        { @apply px-5 py-2.5 text-[15px] rounded-lg; }
+  .btn-ghost     { @apply btn text-gray-600 hover:bg-white/[0.07] hover:text-gray-900 hover:translate-y-0; }
+  [data-theme="light"] .btn-ghost { @apply hover:bg-gray-100; }
+  .btn-sm        { @apply px-3 py-1.5 text-xs gap-1.5; }
+  .btn-lg        { @apply px-6 py-3 text-[15px]; }
 
   /* Square icon-only button — for toolbars, close buttons, row actions. */
   .icon-btn {
-    @apply inline-flex items-center justify-center w-8 h-8 rounded-md text-gray-500
-           transition-colors hover:bg-gray-100 hover:text-gray-800
+    @apply inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-500
+           transition-colors hover:bg-white/[0.07] hover:text-gray-800
            disabled:pointer-events-none disabled:opacity-40;
   }
+  [data-theme="light"] .icon-btn { @apply hover:bg-gray-100; }
 
-  /* ── Form controls ── */
+  /* Halo — the glowing aura around the hero CTA in the reference. Applied to a
+     wrapper so the glow can bleed past the button's own bounds. */
+  .glow-ring { @apply relative; }
+  .glow-ring::before {
+    content: "";
+    @apply absolute -inset-[3px] rounded-full opacity-70 blur-md transition-opacity duration-300 animate-glow-pulse;
+    background-image: linear-gradient(120deg, rgb(249 115 60), rgb(214 64 152), rgb(139 92 246));
+    z-index: -1;
+  }
+  .glow-ring:hover::before { @apply opacity-100; }
+
+  /* ── Form controls ──────────────────────────────────────────────────────
+     Inputs stay rounded-xl rather than full capsules: a pill-shaped textarea
+     or a multi-line field with round ends looks wrong, and consistency between
+     input types matters more here than matching the button radius. */
   .input {
-    @apply block w-full rounded-md border border-gray-200 bg-surface px-3 py-2 text-sm text-gray-900 shadow-xs
-           placeholder:text-gray-400 transition-colors
-           focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20
-           disabled:bg-gray-50 disabled:text-gray-500;
+    @apply block w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-gray-900
+           placeholder:text-gray-400 transition-all duration-200
+           focus:border-brand-500/70 focus:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-brand-500/25
+           disabled:opacity-50;
+  }
+  [data-theme="light"] .input {
+    @apply border-gray-200 bg-surface shadow-xs focus:bg-surface disabled:bg-gray-50 disabled:text-gray-500;
   }
   textarea.input { @apply leading-relaxed; }
-  .label      { @apply block text-[13px] font-medium text-gray-700 mb-1.5; }
+  .label      { @apply block text-[13px] font-semibold text-gray-700 mb-1.5; }
   .hint       { @apply text-xs text-gray-400 mt-1.5; }
 
   /* Toggle switch */
@@ -386,15 +473,49 @@
   }
   .switch[data-on="true"] .switch-thumb { @apply translate-x-[18px]; }
 
-  /* ── Surfaces ── */
-  .card       { @apply rounded-2xl border border-gray-200/80 bg-surface shadow-card; }
-  .card-hover { @apply transition-all duration-200 hover:shadow-lift hover:-translate-y-0.5 hover:border-brand-200/60; }
-  .divider    { @apply border-t border-gray-100; }
+  /* ── Surfaces ───────────────────────────────────────────────────────────
+     Cards are glass: translucent violet-black over the aurora, a hairline
+     white border, and an inset top highlight (from shadow-card) that reads as
+     a lit bevel. On a near-black page that bevel — not the drop shadow — is
+     what actually makes the panel look raised. */
+  .card {
+    @apply rounded-2xl border border-white/[0.08] bg-surface/70 backdrop-blur-xl shadow-card;
+  }
+  [data-theme="light"] .card { @apply border-gray-200/80 bg-surface/90; }
+  .card-hover {
+    @apply transition-all duration-300 hover:shadow-lift hover:-translate-y-0.5 hover:border-brand-400/30;
+  }
+  .divider    { @apply border-t border-white/[0.07]; }
+  [data-theme="light"] .divider { @apply border-gray-100; }
 
-  /* Gradient mesh — soft multi-tone background for marketing-ish moments
-     (login, empty states, headers). Very low saturation, near-white, slow drift. */
+  /* Frosted chrome — sidebar, top bar, popovers. Heavier blur than a card and
+     a touch more opaque, because navigation must stay legible over anything
+     that scrolls beneath it. */
+  .glass-chrome {
+    @apply border-white/[0.07] bg-ink-950/70 backdrop-blur-2xl;
+  }
+
+  /* Full-strength aurora frame — the reference's saturated border around a
+     dark panel. Opt-in, for marketing moments only (auth, empty states). */
+  .aurora-shell {
+    @apply relative isolate overflow-hidden bg-ink-950;
+  }
+  .aurora-shell::before {
+    content: "";
+    @apply absolute -inset-1/4 -z-10 bg-aurora animate-aurora-drift;
+  }
+  .aurora-shell::after {
+    content: "";
+    @apply absolute inset-0 -z-10 bg-dot-grid bg-dot-sm opacity-40;
+    -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, transparent 25%, black 100%);
+            mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, transparent 25%, black 100%);
+  }
+
+  /* Legacy aliases — still used by HomePage, KnowledgePage, Login and Register.
+     Kept so those call sites need no edit; they now render the new aurora. */
   .mesh-bg {
-    @apply bg-mesh-light bg-canvas animate-mesh-drift;
+    @apply bg-mesh-light animate-mesh-drift;
+    background-color: rgb(var(--c-canvas));
     background-size: 140% 140%, 140% 140%, 160% 160%;
   }
   .mesh-bg-navy {
@@ -412,15 +533,25 @@
 
   /* Chip — removable / selectable token */
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-surface
-           px-2 py-1 text-xs font-medium text-gray-700;
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05]
+           px-2.5 py-1 text-xs font-medium text-gray-700;
+  }
+  [data-theme="light"] .chip { @apply border-gray-200 bg-surface; }
+
+  /* Eyebrow pill — the outlined, faintly glowing "Industry's Best Software"
+     capsule that sits above the headline in the reference. */
+  .pill-glow {
+    @apply inline-flex items-center gap-2 rounded-full border border-brand-400/40 bg-brand-500/10
+           px-4 py-1.5 text-xs font-semibold text-brand-700 backdrop-blur-md;
+    box-shadow: 0 0 24px -6px rgba(139, 92, 246, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
   }
 
   /* Keyboard key hint */
   .kbd {
-    @apply inline-flex items-center rounded border border-gray-200 bg-gray-50 px-1.5 py-0.5
+    @apply inline-flex items-center rounded border border-white/10 bg-white/[0.05] px-1.5 py-0.5
            text-[11px] font-medium text-gray-500 font-mono;
   }
+  [data-theme="light"] .kbd { @apply border-gray-200 bg-gray-50; }
 
   /* ── Status dot ── */
   .dot        { @apply inline-block w-1.5 h-1.5 rounded-full; }
@@ -433,33 +564,41 @@
   .avatar {
     @apply inline-flex items-center justify-center rounded-full text-white
            font-semibold uppercase tracking-tight;
-    background-color: rgb(var(--c-solid));
+    background-image: linear-gradient(140deg, rgb(167 139 250), rgb(109 40 217));
   }
 
   /* Inline text link */
   .link { @apply text-brand-600 font-medium hover:text-brand-700 hover:underline underline-offset-2 transition-colors; }
 
   /* ── Page layout ── */
-  .page       { @apply max-w-6xl mx-auto px-6 py-8 animate-fade-in; }
-  .page-sm    { @apply max-w-3xl mx-auto px-6 py-8 animate-fade-in; }
-  .page-title { @apply text-[22px] font-semibold text-gray-900 tracking-tight; }
+  .page       { @apply relative max-w-6xl mx-auto px-6 py-8 animate-fade-in; }
+  .page-sm    { @apply relative max-w-3xl mx-auto px-6 py-8 animate-fade-in; }
+  .page-title { @apply font-display text-[24px] font-semibold text-gray-900 tracking-tight; }
   .page-subtitle { @apply text-sm text-gray-500 mt-1; }
-  .section-title { @apply text-sm font-semibold text-gray-900; }
-  .eyebrow    { @apply text-[11px] font-semibold uppercase tracking-wider text-gray-400; }
+  .section-title { @apply font-display text-sm font-semibold text-gray-900; }
+  .eyebrow    { @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400; }
 
-  /* ── Segmented control / tab bar ── */
+  /* ── Segmented control / tab bar ──────────────────────────────────────
+     The capsule-in-a-capsule nav from the reference: a translucent track with
+     a solid pill riding the active item. */
   .segmented {
-    @apply inline-flex items-center gap-0.5 rounded-lg bg-gray-100 p-0.5;
+    @apply inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.04] p-1 backdrop-blur-md;
   }
+  [data-theme="light"] .segmented { @apply border-gray-200 bg-gray-100; }
   .segmented-item {
-    @apply px-3 py-1.5 text-[13px] font-medium text-gray-500 rounded-md cursor-pointer
-           transition-colors hover:text-gray-800;
+    @apply px-3.5 py-1.5 text-[13px] font-semibold text-gray-500 rounded-full cursor-pointer
+           transition-all duration-200 hover:text-gray-900;
   }
-  .segmented-item-active { @apply segmented-item bg-surface text-gray-900 shadow-xs; }
+  .segmented-item-active {
+    @apply segmented-item text-white;
+    background-image: linear-gradient(140deg, rgb(139 92 246), rgb(109 40 217));
+    box-shadow: 0 4px 14px -4px rgba(139, 92, 246, 0.6);
+  }
 
-  .tab-bar  { @apply flex border-b border-gray-200 gap-6; }
+  .tab-bar  { @apply flex border-b border-white/[0.08] gap-6; }
+  [data-theme="light"] .tab-bar { @apply border-gray-200; }
   .tab-item {
-    @apply pb-3 pt-1 text-sm font-medium text-gray-500 hover:text-gray-800
+    @apply pb-3 pt-1 text-sm font-semibold text-gray-500 hover:text-gray-900
            border-b-2 border-transparent -mb-px cursor-pointer transition-colors;
   }
   .tab-item-active { @apply tab-item border-brand-500 text-gray-900; }
@@ -473,34 +612,45 @@
 
   /* ── Code / mono ── */
   .code-block {
-    @apply rounded-lg bg-ink-950 text-xs font-mono p-4 overflow-x-auto text-[#dbe3e4]
+    @apply rounded-xl border border-white/[0.07] bg-ink-950/80 text-xs font-mono p-4 overflow-x-auto text-[#ddd8f0]
            whitespace-pre-wrap break-all leading-relaxed;
   }
-  .code-inline { @apply rounded bg-gray-100 px-1.5 py-0.5 text-[13px] font-mono text-gray-800; }
+  .code-inline { @apply rounded bg-brand-500/10 px-1.5 py-0.5 text-[13px] font-mono text-brand-700; }
 
   /* ── Table ── */
   .data-table       { @apply w-full text-sm; }
-  .data-table thead { @apply border-b border-gray-100; }
-  .data-table th    { @apply text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400 px-4 py-2.5; }
+  .data-table thead { @apply border-b border-white/[0.07]; }
+  .data-table th    { @apply text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-400 px-4 py-3; }
   .data-table td    { @apply px-4 py-3 text-gray-700 align-middle; }
-  .data-table tbody tr { @apply border-b border-gray-50 hover:bg-brand-50/40 transition-colors; }
+  .data-table tbody tr { @apply border-b border-white/[0.05] hover:bg-brand-500/[0.07] transition-colors; }
   .data-table tbody tr:last-child { @apply border-b-0; }
+  [data-theme="light"] .data-table thead { @apply border-gray-100; }
+  [data-theme="light"] .data-table tbody tr { @apply border-gray-50; }
 
   /* ── Metric card ── */
-  /* Elevated stat card with a soft gradient top-border accent, lifts on hover. */
+  /* Glass stat card. The accent bar runs the full aurora — coral through
+     magenta into violet — so the numbers that matter carry the brand gradient
+     rather than a flat rule. */
   .metric-card {
     @apply card card-hover relative overflow-hidden p-5;
   }
   .metric-card::before {
     content: "";
-    @apply absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-brand-400 via-brand-500 to-brand-600;
+    @apply absolute top-0 left-0 right-0 h-[2px];
+    background-image: linear-gradient(90deg, rgb(249 115 60), rgb(214 64 152), rgb(139 92 246));
   }
-  .metric-card-value { @apply text-[26px] leading-none font-semibold text-gray-900 mt-2 tabular-nums; }
-  .metric-card-label { @apply text-[11px] font-semibold text-gray-400 uppercase tracking-wider; }
+  /* A violet bloom in the corner, so the card glows from within rather than
+     being a flat rectangle with a stripe on top. */
+  .metric-card::after {
+    content: "";
+    @apply pointer-events-none absolute -top-12 -right-12 w-32 h-32 rounded-full bg-brand-500/20 blur-2xl;
+  }
+  .metric-card-value { @apply font-display text-[28px] leading-none font-semibold text-gray-900 mt-2 tabular-nums; }
+  .metric-card-label { @apply text-[11px] font-semibold text-gray-400 uppercase tracking-[0.12em]; }
   .metric-card-hint  { @apply text-xs text-gray-400 mt-1.5; }
   .metric-card-icon  {
-    @apply absolute top-4 right-4 w-8 h-8 rounded-lg bg-brand-50 text-brand-600
-           flex items-center justify-center;
+    @apply absolute top-4 right-4 w-9 h-9 rounded-xl border border-brand-400/25 bg-brand-500/15 text-brand-600
+           flex items-center justify-center backdrop-blur-md;
   }
 
   /* ── Empty state / marketing moment ── */
@@ -508,7 +658,22 @@
   .empty-state-title { @apply text-[15px] font-semibold text-gray-800 mt-4; }
   .empty-state-desc  { @apply text-sm text-gray-500 mt-1.5 max-w-sm leading-relaxed; }
 
-  /* Big oversized headline for hero / marketing-style empty states. */
-  .hero-title    { @apply text-4xl md:text-5xl font-extrabold tracking-tight text-gray-900 leading-[1.05]; }
-  .hero-subtitle { @apply text-base text-gray-500 mt-3 max-w-lg leading-relaxed; }
+  /* Big oversized headline for hero / marketing-style empty states.
+     Deliberately *light* weight at large sizes — the reference headline gets
+     its presence from scale and letter-spacing, not from boldness, and Sora at
+     300–400 across 48px reads far more expensive than a heavy weight would. */
+  .hero-title {
+    @apply font-display text-4xl md:text-5xl font-light tracking-[-0.03em] text-gray-900 leading-[1.06];
+  }
+  .hero-subtitle { @apply text-base text-gray-500 mt-4 max-w-lg leading-relaxed; }
+
+  /* The emphasised span inside a hero headline — "Voice Agent" in the
+     reference. Solid white/ink against the lighter surrounding text. */
+  .hero-accent { @apply font-semibold text-gray-950; }
+
+  /* Gradient-filled text for the one word per screen that should sing. */
+  .text-aurora {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(110deg, rgb(251 146 90), rgb(232 96 176), rgb(167 139 250));
+  }
 }

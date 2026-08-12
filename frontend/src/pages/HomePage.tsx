@@ -105,8 +105,10 @@ export default function HomePage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{greeting}</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="font-display text-[32px] font-light text-gray-500 tracking-[-0.03em] leading-none">
+            {greeting.split(" ")[0]} <span className="font-semibold text-gray-950">{greeting.split(" ")[1]}</span>
+          </h1>
+          <p className="text-sm text-gray-500 mt-2.5">
             {loading
               ? "Loading platform status…"
               : `${rows.length} assistant${rows.length !== 1 ? "s" : ""} · ${liveCount} live · platform healthy`
@@ -257,18 +259,22 @@ export default function HomePage() {
 
       {/* Empty home when nothing is set up — treated as a mini marketing moment */}
       {!loading && rows.length === 0 && recentLogs.length === 0 && (
-        <div className="relative overflow-hidden rounded-2xl mesh-bg border border-gray-200/80 p-12 text-center">
+        <div className="aurora-shell rounded-3xl border border-white/[0.08] p-14 text-center">
           <div className="relative">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center mx-auto mb-5 shadow-lift">
-              <Sparkles className="w-7 h-7 text-white" strokeWidth={1.75} />
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cta-400 via-brand-500 to-brand-700 flex items-center justify-center mx-auto mb-6 shadow-[0_10px_32px_-8px_rgba(139,92,246,0.9)] animate-float">
+              <Sparkles className="w-8 h-8 text-white" strokeWidth={1.75} />
             </div>
-            <h2 className="hero-title text-2xl md:text-3xl">Welcome to Kore AI</h2>
+            <h2 className="hero-title text-3xl md:text-4xl">
+              Welcome to <span className="hero-accent">Evara AI</span>
+            </h2>
             <p className="hero-subtitle mx-auto">
               Deploy production-ready AI assistants powered by your knowledge. Start by connecting a knowledge source and creating your first assistant.
             </p>
-            <div className="flex items-center gap-3 justify-center mt-6">
+            <div className="flex items-center gap-3 justify-center mt-8">
               <Link to="/knowledge" className="btn-secondary">Connect knowledge</Link>
-              <Link to="/assistants" className="btn-cta">Create assistant</Link>
+              <div className="glow-ring">
+                <Link to="/assistants" className="btn-cta">Create assistant</Link>
+              </div>
             </div>
           </div>
         </div>

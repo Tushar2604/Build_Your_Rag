@@ -35,7 +35,8 @@ export default function ChatbotSettingsPage() {
   // editable fields
   const [isPublic, setIsPublic] = useState(false);
   const [displayName, setDisplayName] = useState("");
-  const [themeColor, setThemeColor] = useState("#4f46e5");
+  // Default only — an existing bot's saved colour overwrites this on load.
+  const [themeColor, setThemeColor] = useState("#7c3aed");
   const [welcome, setWelcome] = useState("");
   const [position, setPosition] = useState<"bottom-right" | "bottom-left">("bottom-right");
   const [originsText, setOriginsText] = useState("");

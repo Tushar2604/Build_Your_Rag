@@ -56,10 +56,12 @@ function RecordButton({
       aria-label={recording ? "Stop recording" : "Start recording"}
     >
       <svg className="absolute inset-0 -rotate-90" viewBox="0 0 100 100" aria-hidden="true">
-        <circle cx="50" cy="50" r={R} fill="none" stroke="#e5e7eb" strokeWidth="5" />
+        {/* Themed rather than hardcoded: a fixed light-grey track glares badly
+            against the dark canvas. */}
+        <circle cx="50" cy="50" r={R} fill="none" stroke="rgb(var(--c-gray-200))" strokeWidth="5" />
         <circle
           cx="50" cy="50" r={R} fill="none"
-          stroke={pct >= 1 ? "#10b981" : "#4f46e5"}
+          stroke={pct >= 1 ? "rgb(var(--c-emerald-500))" : "rgb(var(--c-brand-500))"}
           strokeWidth="5"
           strokeLinecap="round"
           strokeDasharray={circumference}

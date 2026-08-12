@@ -33,7 +33,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 bg-canvas">
+    <div className="min-h-screen flex items-center justify-center px-4 aurora-shell">
       <div className="card w-full max-w-md p-8">
         <Link
           to="/login"

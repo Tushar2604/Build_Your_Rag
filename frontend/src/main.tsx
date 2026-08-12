@@ -1,10 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource/inter/400.css";
-import "@fontsource/inter/500.css";
-import "@fontsource/inter/600.css";
-import "@fontsource/inter/700.css";
-import "@fontsource/inter/800.css";
+// Type is loaded from the <link> in index.html (Sora + Plus Jakarta Sans) so
+// the two families arrive together in one stylesheet rather than five chunks.
 import "./index.css";
 import App from "./App";
 import { ThemeProvider } from "./store/theme";

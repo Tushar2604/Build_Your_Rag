@@ -171,30 +171,37 @@ export default {
           800: "rgb(var(--c-brand-800) / <alpha-value>)",
           900: "rgb(var(--c-brand-900) / <alpha-value>)",
         },
-        // CTA — warm orange, reserved for primary conversion actions only
-        // ("New assistant", "Create workspace", "Upgrade").
+        // CTA — the warm coral end of the aurora, reserved for primary
+        // conversion actions only ("New assistant", "Create workspace").
+        // It is the single warm note in a violet system, which is exactly why
+        // it reads as "the button to press".
         cta: {
-          50:  "#fff7ed",
-          100: "#ffedd5",
-          200: "#fed7aa",
-          400: "#fb923c",
-          500: "#f97316",
-          600: "#ea580c",
-          700: "#c2410c",
+          50:  "#fff5ed",
+          100: "#ffe6d5",
+          200: "#fecdaa",
+          400: "#fb8a3c",
+          500: "#f9682f",
+          600: "#ea4c1c",
+          700: "#c23a12",
         },
-        // Ink — the chrome scale (sidebar, top bar, headings). Fixed rather
-        // than themed: the console's chrome stays dark in both themes, the way
-        // it does in the product this mirrors.
+        // Ink — the chrome scale (sidebar, top bar, modals). Fixed rather than
+        // themed: the console's chrome stays dark in both themes. Tinted violet
+        // rather than neutral so it sits inside the aurora instead of on top
+        // of it.
         ink: {
-          DEFAULT: "#05080a",
-          950: "#05080a",
-          900: "#0a1012",
-          800: "#111a1c",
-          700: "#1b2628",
+          DEFAULT: "#06040d",
+          950: "#06040d",
+          900: "#0b0817",
+          800: "#120e22",
+          700: "#1c1733",
         },
       },
       fontFamily: {
-        sans: ['"Inter"', 'system-ui', '-apple-system', 'sans-serif'],
+        // Body/UI: Plus Jakarta Sans holds up at 12–13px in dense tables.
+        sans: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
+        // Display: Sora — geometric, slightly technical, used for headlines,
+        // metric numerals and the logotype via `.font-display`.
+        display: ['"Sora"', '"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       borderRadius: {
@@ -203,18 +210,49 @@ export default {
         "3xl": "1.75rem",
       },
       boxShadow: {
-        // Soft, layered elevation — subtle at rest, a touch more on hover.
-        xs:    "0 1px 2px 0 rgba(10,10,15,0.05)",
-        card:  "0 1px 2px rgba(10,10,15,0.04), 0 1px 3px rgba(10,10,15,0.06)",
-        pop:   "0 4px 12px rgba(10,10,15,0.08), 0 2px 4px rgba(10,10,15,0.04)",
-        modal: "0 16px 48px rgba(10,10,15,0.16), 0 4px 12px rgba(10,10,15,0.08)",
-        // Colored ambient lift — used on card/row hover for the "alive" feel.
-        lift:  "0 12px 24px -8px rgba(13,148,136,0.18), 0 4px 8px rgba(10,10,15,0.06)",
-        "glow-cta": "0 8px 20px -6px rgba(234,88,12,0.35)",
+        // Elevation on a near-black canvas cannot rely on drop shadow alone —
+        // a dark shadow on a dark ground is invisible. Each level therefore
+        // pairs a shadow with a 1px inset top highlight, which is what actually
+        // separates a glass panel from the page behind it.
+        xs:    "0 1px 2px 0 rgba(0,0,0,0.4)",
+        card:  "0 1px 2px rgba(0,0,0,0.35), 0 2px 8px -2px rgba(0,0,0,0.45), inset 0 1px 0 0 rgba(255,255,255,0.05)",
+        pop:   "0 8px 24px -6px rgba(0,0,0,0.55), inset 0 1px 0 0 rgba(255,255,255,0.06)",
+        modal: "0 24px 64px -12px rgba(0,0,0,0.75), 0 8px 24px -8px rgba(124,58,237,0.22), inset 0 1px 0 0 rgba(255,255,255,0.07)",
+        // Colored ambient lift — violet bloom on card/row hover.
+        lift:  "0 16px 36px -12px rgba(139,92,246,0.42), 0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 0 rgba(255,255,255,0.08)",
+        // Halo rings — the glowing outline around the hero CTA in the design.
+        "glow-cta":   "0 0 0 1px rgba(249,104,47,0.35), 0 8px 28px -6px rgba(249,104,47,0.5)",
+        "glow-brand": "0 0 0 1px rgba(139,92,246,0.35), 0 8px 28px -6px rgba(139,92,246,0.5)",
+        "glow-sm":    "0 0 16px -4px rgba(139,92,246,0.45)",
       },
       backgroundImage: {
-        "mesh-light": "radial-gradient(at 15% 20%, rgba(94,234,212,0.25) 0, transparent 50%), radial-gradient(at 85% 15%, rgba(196,181,253,0.22) 0, transparent 50%), radial-gradient(at 50% 85%, rgba(253,186,186,0.18) 0, transparent 55%)",
-        "mesh-navy":  "radial-gradient(at 20% 15%, rgba(20,184,166,0.16) 0, transparent 45%), radial-gradient(at 80% 80%, rgba(124,58,237,0.10) 0, transparent 50%)",
+        // ── The aurora ───────────────────────────────────────────────────
+        // The signature: coral → magenta → violet bleeding in from the edges
+        // of a near-black page. Four stops rather than a two-stop linear
+        // gradient, because the reference reads as light *sources* behind the
+        // panel, not as a painted surface.
+        aurora:
+          "radial-gradient(ellipse 80% 60% at 8% 4%, rgba(249,115,60,0.55) 0, transparent 60%), " +
+          "radial-gradient(ellipse 70% 55% at 92% 10%, rgba(167,80,235,0.55) 0, transparent 62%), " +
+          "radial-gradient(ellipse 90% 60% at 78% 92%, rgba(214,64,152,0.42) 0, transparent 60%), " +
+          "radial-gradient(ellipse 70% 50% at 20% 96%, rgba(124,58,237,0.38) 0, transparent 62%)",
+        // Quieter interior wash for panels sitting inside the shell.
+        "aurora-soft":
+          "radial-gradient(ellipse 60% 50% at 0% 0%, rgba(249,115,60,0.16) 0, transparent 62%), " +
+          "radial-gradient(ellipse 60% 50% at 100% 0%, rgba(167,80,235,0.18) 0, transparent 62%), " +
+          "radial-gradient(ellipse 80% 60% at 50% 100%, rgba(124,58,237,0.14) 0, transparent 65%)",
+        // Legacy aliases — `mesh-bg` / `mesh-bg-navy` are used on six pages and
+        // keep working, now rendering the new aurora instead of the old teal.
+        "mesh-light": "radial-gradient(at 12% 16%, rgba(249,115,60,0.20) 0, transparent 52%), radial-gradient(at 88% 12%, rgba(167,80,235,0.24) 0, transparent 52%), radial-gradient(at 50% 92%, rgba(214,64,152,0.18) 0, transparent 56%)",
+        "mesh-navy":  "radial-gradient(at 16% 12%, rgba(249,115,60,0.28) 0, transparent 50%), radial-gradient(at 86% 84%, rgba(167,80,235,0.34) 0, transparent 54%)",
+        // Dot-matrix texture — the perforated corners in the reference.
+        "dot-grid":   "radial-gradient(rgba(255,255,255,0.16) 1px, transparent 1px)",
+        // Hairline top edge that fakes a lit bevel on glass.
+        "glass-edge": "linear-gradient(180deg, rgba(255,255,255,0.09) 0, rgba(255,255,255,0) 45%)",
+      },
+      backgroundSize: {
+        "dot-sm": "16px 16px",
+        "dot-md": "22px 22px",
       },
       keyframes: {
         shimmer: {
@@ -237,6 +275,21 @@ export default {
           "0%, 100%": { backgroundPosition: "0% 0%, 100% 0%, 50% 100%" },
           "50%":      { backgroundPosition: "20% 10%, 80% 20%, 40% 90%" },
         },
+        // The aurora breathes: the light sources swell and drift a little so
+        // the page never looks like a static screenshot.
+        "aurora-drift": {
+          "0%, 100%": { transform: "translate3d(0,0,0) scale(1)",        opacity: "1" },
+          "33%":      { transform: "translate3d(-2%,1.5%,0) scale(1.06)", opacity: "0.88" },
+          "66%":      { transform: "translate3d(2%,-1%,0) scale(1.03)",   opacity: "0.95" },
+        },
+        float: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%":      { transform: "translateY(-8px)" },
+        },
+        "glow-pulse": {
+          "0%, 100%": { opacity: "0.55" },
+          "50%":      { opacity: "1" },
+        },
       },
       animation: {
         shimmer:     "shimmer 1.5s ease-in-out infinite",
@@ -244,6 +297,9 @@ export default {
         "slide-up":  "slide-up 0.24s cubic-bezier(0.16,1,0.3,1)",
         "scale-in":  "scale-in 0.18s cubic-bezier(0.16,1,0.3,1)",
         "mesh-drift": "mesh-drift 24s ease-in-out infinite",
+        "aurora-drift": "aurora-drift 26s ease-in-out infinite",
+        float:        "float 7s ease-in-out infinite",
+        "glow-pulse": "glow-pulse 4s ease-in-out infinite",
       },
     },
   },

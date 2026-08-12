@@ -80,8 +80,8 @@ function ThemeToggle() {
       onClick={toggle}
       aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
       title={dark ? "Light theme" : "Dark theme"}
-      className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-white/10
-                 text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-gray-100"
+      className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-white/10
+                 text-gray-400 transition-colors hover:bg-white/[0.08] hover:text-gray-100"
     >
       {dark ? <Moon className="w-[18px] h-[18px]" strokeWidth={1.75} />
             : <Sun className="w-[18px] h-[18px]" strokeWidth={1.75} />}
@@ -137,11 +137,12 @@ function CommandSearch() {
         onKeyDown={(e) => { if (e.key === "Enter" && hits[0]) go(hits[0].to); }}
         placeholder="Search or jump to..."
         aria-label="Search or jump to a page"
-        className="w-full rounded-lg border border-white/10 bg-white/[0.04] pl-9 pr-14 py-2 text-[13px]
-                   text-gray-100 placeholder:text-gray-500 transition-colors
-                   focus:border-brand-500/60 focus:outline-none focus:bg-white/[0.07]"
+        className="w-full rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-14 py-2 text-[13px]
+                   text-gray-100 placeholder:text-gray-500 backdrop-blur-md transition-all duration-200
+                   focus:border-brand-400/60 focus:outline-none focus:bg-white/[0.09]
+                   focus:shadow-glow-sm"
       />
-      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-white/10
+      <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-white/10
                        px-1.5 py-0.5 text-[10px] font-medium text-gray-500 pointer-events-none">
         ⌘K
       </span>
@@ -149,8 +150,8 @@ function CommandSearch() {
       {open && hits.length > 0 && (
         <ul
           role="listbox"
-          className="absolute z-50 mt-1.5 w-full overflow-hidden rounded-lg border border-white/10
-                     bg-ink-900 shadow-modal py-1"
+          className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-white/10
+                     bg-ink-900/90 backdrop-blur-2xl shadow-modal p-1.5 animate-scale-in"
         >
           {hits.map((hit) => {
             const Icon = hit.icon;
@@ -158,8 +159,8 @@ function CommandSearch() {
               <li key={hit.to}>
                 <button
                   onMouseDown={() => go(hit.to)}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px]
-                             text-gray-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px]
+                             text-gray-300 transition-colors hover:bg-white/[0.08] hover:text-white"
                 >
                   <Icon className="w-4 h-4 text-gray-500" strokeWidth={1.75} />
                   {hit.label}
@@ -191,32 +192,42 @@ export default function Layout() {
 
   const initials = (email || tenantId || "TA").slice(0, 2).toUpperCase();
 
+  // Active items get a solid violet capsule with a glow — the same treatment
+  // the reference gives its selected nav pill. Idle items stay quiet so the
+  // active one is the only thing carrying colour in the rail.
   const navClass = ({ isActive }: { isActive: boolean }) =>
-    `group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium
-     transition-all duration-150 ${
+    `group relative flex items-center gap-3 rounded-full px-3 py-2 text-[13px] font-semibold
+     transition-all duration-200 ${
        isActive
-         ? "bg-brand-500/10 text-brand-400"
-         : "text-gray-400 hover:bg-white/[0.05] hover:text-gray-100"
+         ? "bg-gradient-to-r from-brand-500 to-brand-500/70 text-white shadow-[0_4px_16px_-4px_rgba(139,92,246,0.65)]"
+         : "text-gray-400 hover:bg-white/[0.06] hover:text-gray-100"
      }`;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-canvas">
+    // No opaque background here: the aurora painted on <body> shows through the
+    // whole shell, and the chrome floats on it as frosted glass.
+    <div className="flex h-screen overflow-hidden">
       {/* ── Sidebar ── */}
       <nav
         aria-label="Primary navigation"
-        className={`relative flex-shrink-0 bg-ink-950 flex flex-col select-none border-r border-white/[0.06]
-                    transition-[width] duration-200 ${collapsed ? "w-[68px]" : "w-[248px]"}`}
+        className={`relative flex-shrink-0 glass-chrome flex flex-col select-none border-r
+                    transition-[width] duration-300 ${collapsed ? "w-[68px]" : "w-[252px]"}`}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(20,184,166,0.07),transparent_55%)]" />
+        {/* Violet bloom behind the logo, and a coral one at the foot — the rail
+            reads as lit from within rather than as a flat dark column. */}
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(139,92,246,0.18),transparent_55%)]" />
+        <div className="pointer-events-none absolute bottom-0 inset-x-0 h-64 bg-[radial-gradient(circle_at_50%_100%,rgba(249,115,60,0.10),transparent_60%)]" />
 
         {/* Logo */}
-        <div className="relative flex items-center gap-2.5 px-4 h-[62px] flex-shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center flex-shrink-0">
-            <Bot className="w-[18px] h-[18px] text-white" strokeWidth={2} />
+        <div className="relative flex items-center gap-2.5 px-4 h-[64px] flex-shrink-0">
+          <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-cta-400 via-brand-500 to-brand-700
+                          flex items-center justify-center flex-shrink-0
+                          shadow-[0_6px_20px_-6px_rgba(139,92,246,0.8)]">
+            <Bot className="w-[19px] h-[19px] text-white" strokeWidth={2} />
           </div>
           {!collapsed && (
-            <span className="font-bold text-[15px] tracking-tight text-white truncate">
-              Kore<span className="text-brand-400">AI</span>
+            <span className="font-display font-bold text-[16px] tracking-tight text-white truncate">
+              Evara<span className="text-aurora">AI</span>
             </span>
           )}
         </div>
@@ -249,7 +260,7 @@ export default function Layout() {
                             <>
                               <Icon
                                 className={`w-[18px] h-[18px] flex-shrink-0 transition-colors ${
-                                  isActive ? "text-brand-400" : "text-gray-500 group-hover:text-gray-300"
+                                  isActive ? "text-white" : "text-gray-500 group-hover:text-gray-300"
                                 }`}
                                 strokeWidth={1.75}
                               />
@@ -257,8 +268,12 @@ export default function Layout() {
                                 <>
                                   <span className="truncate">{item.label}</span>
                                   {item.badge && (
-                                    <span className="ml-auto rounded px-1.5 py-0.5 text-[9.5px] font-semibold
-                                                     uppercase tracking-wide bg-brand-500/15 text-brand-400">
+                                    <span className={`ml-auto rounded-full px-1.5 py-0.5 text-[9.5px] font-bold
+                                                     uppercase tracking-wide ${
+                                                       isActive
+                                                         ? "bg-white/20 text-white"
+                                                         : "bg-cta-500/20 text-cta-400"
+                                                     }`}>
                                       {item.badge}
                                     </span>
                                   )}
@@ -277,12 +292,12 @@ export default function Layout() {
         </div>
 
         {/* Footer */}
-        <div className="relative px-3 py-3 space-y-0.5 border-t border-white/[0.06]">
+        <div className="relative px-3 py-3 space-y-0.5 border-t border-white/[0.07]">
           <button
             onClick={() => setCollapsed((c) => !c)}
             aria-expanded={!collapsed}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium
-                       text-gray-400 transition-colors hover:bg-white/[0.05] hover:text-gray-100"
+            className="flex w-full items-center gap-3 rounded-full px-3 py-2 text-[13px] font-semibold
+                       text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-gray-100"
           >
             <ChevronLeft
               className={`w-[18px] h-[18px] flex-shrink-0 transition-transform ${collapsed ? "rotate-180" : ""}`}
@@ -296,7 +311,7 @@ export default function Layout() {
               {({ isActive }) => (
                 <>
                   <Settings
-                    className={`w-[18px] h-[18px] flex-shrink-0 ${isActive ? "text-brand-400" : "text-gray-500"}`}
+                    className={`w-[18px] h-[18px] flex-shrink-0 ${isActive ? "text-white" : "text-gray-500"}`}
                     strokeWidth={1.75}
                   />
                   {!collapsed && "Settings"}
@@ -308,8 +323,8 @@ export default function Layout() {
           <button
             onClick={handleLogout}
             title={collapsed ? "Logout" : undefined}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium
-                       text-gray-400 transition-colors hover:bg-white/[0.05] hover:text-gray-100"
+            className="flex w-full items-center gap-3 rounded-full px-3 py-2 text-[13px] font-semibold
+                       text-gray-400 transition-colors hover:bg-red-500/10 hover:text-red-400"
           >
             <LogOut className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={1.75} />
             {!collapsed && "Logout"}
@@ -320,7 +335,7 @@ export default function Layout() {
       {/* ── Main column ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <header className="flex-shrink-0 h-[62px] bg-ink-950 border-b border-white/[0.06]
+        <header className="relative flex-shrink-0 h-[64px] glass-chrome border-b
                            flex items-center gap-4 px-6">
           <div className="flex-1 flex justify-center">
             <CommandSearch />
@@ -329,16 +344,17 @@ export default function Layout() {
           <div className="flex items-center gap-2.5 flex-shrink-0">
             <button
               aria-label="Notifications"
-              className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-gray-400
-                         transition-colors hover:bg-white/[0.06] hover:text-gray-100"
+              className="relative inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-400
+                         transition-colors hover:bg-white/[0.08] hover:text-gray-100"
             >
               <Bell className="w-[18px] h-[18px]" strokeWidth={1.75} />
             </button>
             <div
               title={email || undefined}
               className="inline-flex items-center justify-center w-9 h-9 rounded-full
-                         bg-gradient-to-br from-brand-400 to-brand-600 text-white text-[11px]
-                         font-semibold uppercase tracking-tight"
+                         bg-gradient-to-br from-cta-400 via-brand-500 to-brand-700 text-white text-[11px]
+                         font-bold uppercase tracking-tight
+                         shadow-[0_4px_14px_-4px_rgba(139,92,246,0.7)]"
             >
               {initials}
             </div>
@@ -346,7 +362,8 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto min-h-0 bg-canvas">
+        {/* Transparent so the body aurora reads through the content column. */}
+        <main className="flex-1 overflow-y-auto min-h-0">
           <Outlet />
         </main>
       </div>

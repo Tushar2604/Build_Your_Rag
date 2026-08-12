@@ -298,14 +298,14 @@ function DeploymentsTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot
 ></script>`;
 
   const inlineSnippet = `<!-- Container — adjust height to fit your layout -->
-<div id="kore-chat" style="height:600px;border-radius:12px;overflow:hidden;"></div>
+<div id="evara-chat" style="height:600px;border-radius:12px;overflow:hidden;"></div>
 
 <!-- Widget script — place after the container -->
 <script
   src="${origin}/widget.js"
   data-chatbot-key="${pk}"
   data-mode="inline"
-  data-container="#kore-chat"
+  data-container="#evara-chat"
   async
 ></script>`;
 
@@ -326,7 +326,7 @@ function DeploymentsTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot
     '',
     'interface Msg { role: "user" | "bot"; text: string }',
     '',
-    'export function KoreChat() {',
+    'export function EvaraChat() {',
     '  const [msgs, setMsgs]     = useState<Msg[]>([{ role: "bot", text: "Hi! How can I help?" }]);',
     '  const [input, setInput]   = useState("");',
     '  const [busy, setBusy]     = useState(false);',

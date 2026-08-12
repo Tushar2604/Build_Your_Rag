@@ -419,7 +419,7 @@ function TextEmbedChat({ publicKey, config }: { publicKey: string; config: Publi
         </form>
 
         <div style={{ textAlign: "center", fontSize: 10, color: "#d1d5db", padding: "4px 0 8px" }}>
-          Powered by Kore AI
+          Powered by Evara AI
         </div>
       </div>
     </>

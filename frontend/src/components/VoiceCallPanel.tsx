@@ -63,7 +63,7 @@ const SILENCE_BEFORE_CHECK_IN_MS = 45000;
 export default function VoiceCallPanel({
   adapter,
   botName,
-  theme = "#0d9488",
+  theme = "#7c3aed",
 }: {
   adapter: VoiceCallAdapter;
   botName: string;
