@@ -9,6 +9,7 @@ import express from "express";
 import pg from "pg";
 import pino from "pino";
 
+import { normalizeDbUrl, wantsTls } from "./dbUrl.js";
 import { SessionManager } from "./sessions.js";
 
 const log = pino({ level: process.env.BRIDGE_LOG_LEVEL || "info" });
@@ -24,10 +25,6 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-/** Convert a Postgres URL that may carry SQLAlchemy's driver suffix. */
-function normalizeDbUrl(url) {
-  return (url || "").replace("postgresql+asyncpg://", "postgresql://");
-}
 
 const pool = new pg.Pool({
   connectionString: normalizeDbUrl(process.env.DATABASE_URL),
@@ -47,9 +44,12 @@ const pool = new pg.Pool({
   // that looks like a dead database but is really an impatient client.
   connectionTimeoutMillis: Number(process.env.BRIDGE_DB_CONNECT_TIMEOUT_MS || 30_000),
   keepAlive: true,
-  ssl: /sslmode=require/.test(process.env.DATABASE_URL || "")
-    ? { rejectUnauthorized: false }
-    : undefined,
+  // Encrypted, but without chain verification. Managed providers front their
+  // databases with certificates Node's default trust store rejects (Supabase's
+  // pooler is self-signed); the alternative would be shipping each provider's
+  // CA bundle. The connection is still TLS — this only skips verifying who is
+  // on the other end, which is the same posture the API side takes.
+  ssl: wantsTls(process.env.DATABASE_URL) ? { rejectUnauthorized: false } : undefined,
 });
 
 // An idle client that dies emits 'error' on the pool. With no listener that is

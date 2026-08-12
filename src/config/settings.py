@@ -7,6 +7,7 @@ single source of truth for runtime config — nothing else in the codebase reads
 
 from __future__ import annotations
 
+import ssl
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -53,6 +54,11 @@ class Settings(BaseSettings):
 
     # --- Database ---
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
+    # Verify the database server's TLS certificate chain. Off by default because
+    # managed providers disagree: Supabase's pooler is self-signed and refusing
+    # it stops the app booting, while Neon's chain is publicly trusted. Turn on
+    # where the provider supports it.
+    database_ssl_verify: bool = False
 
     # --- LLM providers ---
     openai_api_key: str = ""
@@ -332,7 +338,26 @@ class Settings(BaseSettings):
             or params.get("ssl") in {"true", "require"}
             or ("sslmode" not in params and host not in _HOSTS_WITHOUT_TLS)
         )
-        return {"ssl": True} if wants_ssl else {}
+        if not wants_ssl:
+            return {}
+        if self.database_ssl_verify:
+            # asyncpg's `ssl=True` builds a verifying default context.
+            return {"ssl": True}
+        # Encrypted, but without verifying the chain. Managed providers differ in
+        # what they present: Neon serves a publicly trusted certificate, while
+        # Supabase's connection pooler is self-signed. Verifying by default makes
+        # the app fail to boot at all on the latter — `certificate verify failed:
+        # self-signed certificate in certificate chain`, during migrations, so
+        # the container exits before serving anything.
+        #
+        # The traffic is still encrypted; this only skips authenticating the
+        # server's identity, matching the sidecar's posture so one DSN works for
+        # both. Set DATABASE_SSL_VERIFY=true where the provider's chain is
+        # trusted and you want the stronger guarantee.
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return {"ssl": context}
 
     # Validate the DSN parses (kept separate so the async prefix is allowed).
     def validate_database_url(self) -> None:
