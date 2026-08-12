@@ -34,9 +34,25 @@ const pool = new pg.Pool({
   // The bridge is bursty and mostly idle; a big pool would just hold Neon
   // connections open next to the API's own pool.
   max: Number(process.env.BRIDGE_DB_POOL || 4),
+  // Managed Postgres closes idle connections server-side — Neon's free tier
+  // suspends the whole compute after a few minutes. The pool cannot tell a
+  // dropped socket from a live one until it runs a query, which is where
+  // "Connection terminated unexpectedly" comes from. Expiring our own idle
+  // connections first means we reconnect on demand instead of handing out a
+  // socket the server has already closed.
+  idleTimeoutMillis: 10_000,
+  connectionTimeoutMillis: 10_000,
+  keepAlive: true,
   ssl: /sslmode=require/.test(process.env.DATABASE_URL || "")
     ? { rejectUnauthorized: false }
     : undefined,
+});
+
+// An idle client that dies emits 'error' on the pool. With no listener that is
+// an uncaught exception, which used to take the whole bridge down every time
+// the database went away for a moment.
+pool.on("error", (err) => {
+  log.warn({ err: err.message }, "idle database client error");
 });
 
 /** Report an event to the API. Never throws — a momentarily unreachable API

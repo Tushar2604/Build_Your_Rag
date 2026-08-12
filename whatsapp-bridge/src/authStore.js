@@ -17,9 +17,27 @@ const deserialize = (text) => JSON.parse(text, BufferJSON.reviver);
 
 const CREDS_KEY = "creds";
 
+// A connection the server closed while it sat idle in the pool fails on first
+// use, not on checkout. Retrying once turns that into a hiccup rather than a
+// failed pairing: the pool discards the dead socket and dials a fresh one.
+// Restricted to connection-level failures — a genuine SQL error must still
+// surface rather than being run twice.
+const TRANSIENT_DB_ERROR =
+  /Connection terminated|ECONNRESET|socket hang up|server closed the connection|Client has encountered a connection error/i;
+
+async function query(pool, text, params) {
+  try {
+    return await pool.query(text, params);
+  } catch (err) {
+    if (!TRANSIENT_DB_ERROR.test(err?.message || "")) throw err;
+    return await pool.query(text, params);
+  }
+}
+
 export async function useDbAuthState(pool, sessionId) {
   async function readKey(key) {
-    const { rows } = await pool.query(
+    const { rows } = await query(
+      pool,
       "SELECT value FROM whatsapp_web_auth WHERE session_id = $1 AND key = $2",
       [sessionId, key],
     );
@@ -27,7 +45,8 @@ export async function useDbAuthState(pool, sessionId) {
   }
 
   async function writeKey(key, value) {
-    await pool.query(
+    await query(
+      pool,
       `INSERT INTO whatsapp_web_auth (session_id, key, value, updated_at)
        VALUES ($1, $2, $3, now())
        ON CONFLICT (session_id, key) DO UPDATE
@@ -37,7 +56,8 @@ export async function useDbAuthState(pool, sessionId) {
   }
 
   async function removeKey(key) {
-    await pool.query(
+    await query(
+      pool,
       "DELETE FROM whatsapp_web_auth WHERE session_id = $1 AND key = $2",
       [sessionId, key],
     );
@@ -54,6 +74,16 @@ export async function useDbAuthState(pool, sessionId) {
           await Promise.all(
             ids.map(async (id) => {
               let value = await readKey(`${type}-${id}`);
+              // libsignal probes these records with the `in` operator, so a row
+              // that deserialises to anything but an object crashes it with
+              // "Cannot use 'in' operator to search for 'key' in <value>" —
+              // and, because the read happens on every reconnect, a single bad
+              // row would brick the session permanently. Treating it as absent
+              // lets Baileys regenerate the key instead.
+              if (value !== null && typeof value !== "object") {
+                await removeKey(`${type}-${id}`);
+                return;
+              }
               // app-state-sync-keys come back out as protobufs, not plain JSON.
               if (type === "app-state-sync-key" && value) {
                 value = proto.Message.AppStateSyncKeyData.fromObject(value);
@@ -81,7 +111,7 @@ export async function useDbAuthState(pool, sessionId) {
     /** Called on logout — the keys are dead, and leaving them would make the
      * bridge retry a link WhatsApp has already revoked. */
     clear: async () => {
-      await pool.query("DELETE FROM whatsapp_web_auth WHERE session_id = $1", [sessionId]);
+      await query(pool, "DELETE FROM whatsapp_web_auth WHERE session_id = $1", [sessionId]);
     },
   };
 }
