@@ -156,5 +156,18 @@ async function shutdown(signal) {
   process.exit(0);
 }
 
+// Node's default for an unhandled rejection is to kill the process. That is the
+// wrong trade here: nearly every async path in this service touches Postgres or
+// a WhatsApp socket, and a managed database that briefly refuses a connection
+// (Neon suspends when idle) would otherwise take the bridge down for good. The
+// API keeps serving either way, so the failure is invisible — it shows up only
+// as "the bridge isn't responding" the next time someone tries to pair.
+process.on("unhandledRejection", (reason) => {
+  log.error({ err: reason instanceof Error ? reason.message : String(reason) }, "unhandled rejection");
+});
+process.on("uncaughtException", (err) => {
+  log.error({ err: err.message }, "uncaught exception");
+});
+
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));

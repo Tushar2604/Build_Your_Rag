@@ -83,7 +83,15 @@ export class SessionManager {
 
     this.sockets.set(sessionId, { sock, auth });
 
-    sock.ev.on("creds.update", auth.saveCreds);
+    // Baileys ignores the promise this returns, so a failed write would surface
+    // as an unhandled rejection rather than anything actionable. Losing one
+    // creds flush is survivable — Baileys emits another on the next key change —
+    // so log it and keep the socket alive.
+    sock.ev.on("creds.update", () => {
+      auth.saveCreds().catch((err) =>
+        logger.error({ sessionId, err: err.message }, "could not persist creds"),
+      );
+    });
 
     sock.ev.on("connection.update", async (update) => {
       // Ignore events from a socket we have already replaced or deliberately
