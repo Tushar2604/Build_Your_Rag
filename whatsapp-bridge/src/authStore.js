@@ -63,7 +63,17 @@ export async function useDbAuthState(pool, sessionId) {
     );
   }
 
-  const creds = (await readKey(CREDS_KEY)) || initAuthCreds();
+  // A corrupt creds row is the one failure this store cannot shrug off: a
+  // damaged value deserialises to a *string*, which is truthy, so it would slip
+  // past a plain `|| initAuthCreds()` and reach Baileys as the credentials
+  // object — crashing every reconnect forever with "Cannot use 'in' operator".
+  // Falling back to fresh creds costs a re-scan; leaving it costs the session.
+  let creds = await readKey(CREDS_KEY);
+  if (creds !== null && (typeof creds !== "object" || Array.isArray(creds))) {
+    await removeKey(CREDS_KEY);
+    creds = null;
+  }
+  if (creds === null) creds = initAuthCreds();
 
   return {
     state: {
