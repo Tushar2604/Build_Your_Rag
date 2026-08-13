@@ -80,8 +80,8 @@ function ThemeToggle() {
       onClick={toggle}
       aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
       title={dark ? "Light theme" : "Dark theme"}
-      className="inline-flex items-center justify-center w-9 h-9 rounded-full border border-white/10
-                 text-gray-400 transition-colors hover:bg-white/[0.08] hover:text-gray-100"
+      className="chrome-control inline-flex items-center justify-center w-9 h-9 rounded-full
+                 border chrome-rule"
     >
       {dark ? <Moon className="w-[18px] h-[18px]" strokeWidth={1.75} />
             : <Sun className="w-[18px] h-[18px]" strokeWidth={1.75} />}
@@ -137,12 +137,9 @@ function CommandSearch() {
         onKeyDown={(e) => { if (e.key === "Enter" && hits[0]) go(hits[0].to); }}
         placeholder="Search or jump to..."
         aria-label="Search or jump to a page"
-        className="w-full rounded-full border border-white/10 bg-white/[0.05] pl-9 pr-14 py-2 text-[13px]
-                   text-gray-100 placeholder:text-gray-500 backdrop-blur-md transition-all duration-200
-                   focus:border-brand-400/60 focus:outline-none focus:bg-white/[0.09]
-                   focus:shadow-glow-sm"
+        className="chrome-field w-full rounded-full pl-9 pr-14 py-2 text-[13px]"
       />
-      <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-white/10
+      <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border chrome-rule
                        px-1.5 py-0.5 text-[10px] font-medium text-gray-500 pointer-events-none">
         ⌘K
       </span>
@@ -150,8 +147,8 @@ function CommandSearch() {
       {open && hits.length > 0 && (
         <ul
           role="listbox"
-          className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-white/10
-                     bg-ink-900/90 backdrop-blur-2xl shadow-modal p-1.5 animate-scale-in"
+          className="chrome-popover absolute z-50 mt-2 w-full overflow-hidden rounded-2xl
+                     p-1.5 animate-scale-in"
         >
           {hits.map((hit) => {
             const Icon = hit.icon;
@@ -159,8 +156,8 @@ function CommandSearch() {
               <li key={hit.to}>
                 <button
                   onMouseDown={() => go(hit.to)}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px]
-                             text-gray-300 transition-colors hover:bg-white/[0.08] hover:text-white"
+                  className="chrome-popover-item flex w-full items-center gap-2.5 rounded-xl
+                             px-3 py-2 text-left text-[13px]"
                 >
                   <Icon className="w-4 h-4 text-gray-500" strokeWidth={1.75} />
                   {hit.label}
@@ -200,7 +197,7 @@ export default function Layout() {
      transition-all duration-200 ${
        isActive
          ? "bg-gradient-to-r from-brand-500 to-brand-500/70 text-white shadow-[0_4px_16px_-4px_rgba(139,92,246,0.65)]"
-         : "text-gray-400 hover:bg-white/[0.06] hover:text-gray-100"
+         : "chrome-item"
      }`;
 
   return (
@@ -214,9 +211,11 @@ export default function Layout() {
                     transition-[width] duration-300 ${collapsed ? "w-[68px]" : "w-[252px]"}`}
       >
         {/* Violet bloom behind the logo, and a coral one at the foot — the rail
-            reads as lit from within rather than as a flat dark column. */}
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(139,92,246,0.18),transparent_55%)]" />
-        <div className="pointer-events-none absolute bottom-0 inset-x-0 h-64 bg-[radial-gradient(circle_at_50%_100%,rgba(249,115,60,0.10),transparent_60%)]" />
+            reads as lit from within rather than as a flat column. `chrome-bloom`
+            dims both in the light theme, where the same alphas stain rather
+            than glow. */}
+        <div className="chrome-bloom pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(139,92,246,0.18),transparent_55%)]" />
+        <div className="chrome-bloom pointer-events-none absolute bottom-0 inset-x-0 h-64 bg-[radial-gradient(circle_at_50%_100%,rgba(249,115,60,0.10),transparent_60%)]" />
 
         {/* Logo */}
         <div className="relative flex items-center gap-2.5 px-4 h-[64px] flex-shrink-0">
@@ -226,7 +225,7 @@ export default function Layout() {
             <Bot className="w-[19px] h-[19px] text-white" strokeWidth={2} />
           </div>
           {!collapsed && (
-            <span className="font-display font-bold text-[16px] tracking-tight text-white truncate">
+            <span className="chrome-brand font-display font-bold text-[16px] tracking-tight truncate">
               Evara<span className="text-aurora">AI</span>
             </span>
           )}
@@ -240,11 +239,14 @@ export default function Layout() {
             return (
               <div key={group.title} className="mb-4">
                 {!collapsed && (
-                  <p className="px-3 pb-1.5 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-gray-600">
+                  // gray-500, not gray-600: the grey scale inverts with the
+                  // theme, and gray-600 is a *dark* grey in light — which is
+                  // how these headings ended up invisible.
+                  <p className="px-3 pb-1.5 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-gray-500">
                     {group.title}
                   </p>
                 )}
-                {collapsed && <div className="mx-3 my-3 border-t border-white/[0.06]" />}
+                {collapsed && <div className="mx-3 my-3 border-t chrome-rule" />}
                 <ul className="space-y-0.5" role="list">
                   {items.map((item) => {
                     const Icon = item.icon;
@@ -260,7 +262,7 @@ export default function Layout() {
                             <>
                               <Icon
                                 className={`w-[18px] h-[18px] flex-shrink-0 transition-colors ${
-                                  isActive ? "text-white" : "text-gray-500 group-hover:text-gray-300"
+                                  isActive ? "text-white" : "text-gray-500 group-hover:text-gray-800"
                                 }`}
                                 strokeWidth={1.75}
                               />
@@ -292,12 +294,12 @@ export default function Layout() {
         </div>
 
         {/* Footer */}
-        <div className="relative px-3 py-3 space-y-0.5 border-t border-white/[0.07]">
+        <div className="relative px-3 py-3 space-y-0.5 border-t chrome-rule">
           <button
             onClick={() => setCollapsed((c) => !c)}
             aria-expanded={!collapsed}
-            className="flex w-full items-center gap-3 rounded-full px-3 py-2 text-[13px] font-semibold
-                       text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-gray-100"
+            className="chrome-item flex w-full items-center gap-3 rounded-full px-3 py-2
+                       text-[13px] font-semibold"
           >
             <ChevronLeft
               className={`w-[18px] h-[18px] flex-shrink-0 transition-transform ${collapsed ? "rotate-180" : ""}`}
@@ -344,8 +346,8 @@ export default function Layout() {
           <div className="flex items-center gap-2.5 flex-shrink-0">
             <button
               aria-label="Notifications"
-              className="relative inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-400
-                         transition-colors hover:bg-white/[0.08] hover:text-gray-100"
+              className="chrome-control relative inline-flex items-center justify-center
+                         w-9 h-9 rounded-full"
             >
               <Bell className="w-[18px] h-[18px]" strokeWidth={1.75} />
             </button>

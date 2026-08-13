@@ -65,7 +65,10 @@ class Message:
 @dataclass
 class ChatSession:
     tenant_id: TenantId
-    chatbot_id: ChatbotId
+    # None = the session exists but nobody has been chosen to answer it yet.
+    # Only reachable through WhatsApp, where a thread starts at the first
+    # inbound message — possibly before an assistant is attached to the number.
+    chatbot_id: ChatbotId | None
     id: SessionId = field(default_factory=lambda: SessionId(new_id()))
     title: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

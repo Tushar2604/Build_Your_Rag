@@ -86,6 +86,25 @@ class Settings(BaseSettings):
     # Local Ollama (https://ollama.com). Run `ollama pull qwen2.5` first.
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5"
+    # Sampling temperature for every generation backend. Low on purpose: these
+    # are grounded, retrieval-backed answers, and the providers' own default of
+    # 1.0 is tuned for creative writing — it is what makes a bot paraphrase its
+    # sources into details they never contained. Raise it only if replies start
+    # reading as stilted.
+    llm_temperature: float = 0.2
+    # Platform-wide relevance floor for retrieval, as cosine similarity.
+    # `top_k` alone always returns its k best chunks however bad they are, so an
+    # off-topic question still arrives at the model dressed as reference
+    # material — a large part of why answers come back confidently wrong. An
+    # assistant that sets its own higher `min_score` keeps it; this is the floor
+    # under the ones that never did.
+    #
+    # Kept low on purpose. `gemini-embedding-001` cosine scores rarely clear
+    # 0.65, and a floor near that empties the context for almost every query
+    # (which a previous change learned the hard way — see the note in
+    # `RagGraph._assemble`). The heavier lifting is done by the relative floor
+    # in `domain.chat.relevance`, which is scale-free; this only cuts noise.
+    retrieval_min_score_floor: float = 0.15
 
     # --- Object storage ---
     r2_endpoint_url: str = ""

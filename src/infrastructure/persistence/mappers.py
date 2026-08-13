@@ -204,7 +204,7 @@ def session_to_domain(row: m.ChatSessionModel) -> ChatSession:
     return ChatSession(
         id=SessionId(row.id),
         tenant_id=TenantId(row.tenant_id),
-        chatbot_id=ChatbotId(row.chatbot_id),
+        chatbot_id=ChatbotId(row.chatbot_id) if row.chatbot_id else None,
         title=row.title,
         created_at=row.created_at,
     )

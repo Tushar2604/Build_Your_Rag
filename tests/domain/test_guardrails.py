@@ -7,6 +7,7 @@ import pytest
 from src.domain.chatbot.entities import DEFAULT_SYSTEM_PROMPT
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
+    NO_CONTEXT_MARKER,
     build_grounded_prompt,
     scan_input,
     scan_output,
@@ -99,3 +100,52 @@ def test_build_grounded_prompt_neutralises_delimiter_breakout() -> None:
 def test_default_system_prompt_has_injection_resistance() -> None:
     assert "reference material" in DEFAULT_SYSTEM_PROMPT  # grounding kept
     assert "untrusted" in DEFAULT_SYSTEM_PROMPT.lower()  # injection clause added
+
+
+# --- grounding strictness ----------------------------------------------------
+# The prompt has to say something *different* when retrieval came back empty.
+# One hedged wording for both cases ("never invent these; if a detail is
+# missing, say you'll check") reads, to a model holding an empty context block,
+# as permission to decide nothing is missing and answer from training data —
+# which is what "it ignores my knowledge base" looks like in practice.
+
+def test_a_grounded_prompt_names_the_context_block_as_the_only_source() -> None:
+    prompt = build_grounded_prompt("Salary band is 12-18 LPA.", "what's the pay?")
+    assert "only source of truth" in prompt
+    assert "general knowledge" in prompt
+
+
+def test_an_empty_context_switches_to_the_no_sources_wording() -> None:
+    prompt = build_grounded_prompt(NO_CONTEXT_MARKER, "what's the pay?")
+    assert "NO reference material was found" in prompt
+    assert "only source of truth" not in prompt
+
+
+def test_a_blank_context_is_treated_as_no_sources_too() -> None:
+    # The streaming path passes "" rather than the marker when input screening
+    # skipped retrieval entirely.
+    assert "NO reference material was found" in build_grounded_prompt("", "hello")
+
+
+def test_both_wordings_forbid_mentioning_the_reference_material() -> None:
+    # Naming its own sources is the tell that breaks the "real recruiter" voice.
+    for context in ("some real context", NO_CONTEXT_MARKER):
+        prompt = build_grounded_prompt(context, "hi")
+        assert "Never mention" in prompt
+
+
+def test_the_no_sources_wording_still_allows_the_conversation_to_continue() -> None:
+    # Refusing to speak at all is its own failure: the assistant must still be
+    # able to greet, acknowledge and ask its next question.
+    prompt = build_grounded_prompt(NO_CONTEXT_MARKER, "hi")
+    assert "ask the next question in your flow" in prompt
+
+
+def test_the_marker_is_the_one_the_context_builders_emit() -> None:
+    # A paraphrase in either builder silently reverts every path to the hedged
+    # instructions, with no test failing anywhere else.
+    from src.application.use_cases.ask_chatbot import _build_context
+    from src.infrastructure.rag.graph import build_context
+
+    assert _build_context([]) == NO_CONTEXT_MARKER
+    assert build_context([]) == NO_CONTEXT_MARKER

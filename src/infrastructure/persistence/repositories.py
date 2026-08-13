@@ -522,6 +522,35 @@ class ChatRepositoryImpl:
         ).scalar_one_or_none()
         return map_.session_to_domain(row) if row else None
 
+    async def assign_chatbot(
+        self,
+        tenant_id: TenantId,
+        session_ids: list[SessionId],
+        chatbot_id: ChatbotId | None,
+    ) -> int:
+        """Point existing sessions at a (possibly different) assistant.
+
+        WhatsApp threads are created at the first inbound message, which is
+        routinely before the user has picked who answers the number — and the
+        answer path reads the *session's* chatbot, not the number's. Without
+        this, choosing an assistant only affected threads that started
+        afterwards, so every conversation already in the inbox stayed silent.
+        Returns the number of rows changed.
+        """
+        if not session_ids:
+            return 0
+        result = await self._s.execute(
+            update(m.ChatSessionModel)
+            .where(
+                m.ChatSessionModel.tenant_id == tenant_id,
+                m.ChatSessionModel.id.in_(session_ids),
+                # Skip rows already correct so the count means "actually moved".
+                m.ChatSessionModel.chatbot_id.is_distinct_from(chatbot_id),
+            )
+            .values(chatbot_id=chatbot_id)
+        )
+        return int(result.rowcount or 0)
+
     async def add_message(self, message: Message) -> None:
         self._s.add(
             m.ChatMessageModel(

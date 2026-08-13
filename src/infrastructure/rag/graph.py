@@ -18,9 +18,11 @@ from langgraph.graph import END, StateGraph
 
 from src.application.ports.repositories import ChunkRepository
 from src.application.ports.services import Embedder, LLMProvider
+from src.config.settings import get_settings
 from src.domain.chat.entities import Citation
+from src.domain.chat.relevance import prune_citations
 from src.domain.chatbot.entities import Chatbot
-from src.domain.safety.guardrails import build_grounded_prompt
+from src.domain.safety.guardrails import NO_CONTEXT_MARKER, build_grounded_prompt
 
 
 class RAGState(TypedDict, total=False):
@@ -33,9 +35,19 @@ class RAGState(TypedDict, total=False):
     provider: str
 
 
+def _effective_min_score(bot: Chatbot) -> float:
+    """The assistant's own floor, or the platform's, whichever is stricter.
+    Matches `AskChatbot._retrieve`, so the streaming and non-streaming paths
+    cannot answer the same question from different evidence."""
+    return max(bot.retrieval.min_score, get_settings().retrieval_min_score_floor)
+
+
 def build_context(citations: list[Citation]) -> str:
+    # The exact marker matters: `build_grounded_prompt` keys its strict
+    # "you have no sources" wording off it, so a paraphrase here silently puts
+    # the widget and streaming paths back on the hedged instructions.
     if not citations:
-        return "(no relevant context found)"
+        return NO_CONTEXT_MARKER
     return "\n\n".join(
         f"[Source {c.ordinal} | doc={c.document_id} | score={c.score:.3f}]\n{c.snippet}"
         for c in citations
@@ -59,7 +71,7 @@ class RagGraph:
             query_embedding=vec,
             top_k=bot.retrieval.top_k,
             document_ids=bot.document_filter(),
-            min_score=bot.retrieval.min_score,
+            min_score=_effective_min_score(bot),
         )
         state["citations"] = [
             Citation(
@@ -75,13 +87,14 @@ class RagGraph:
 
     async def _assemble(self, state: RAGState) -> RAGState:
         bot = state["chatbot"]
-        # Respect the chatbot's configured floor only. The previous hard-coded
-        # max(..., 0.65) silently overrode lower configs and emptied the context
-        # for most queries (gemini-embedding-001 cosine scores rarely clear
-        # 0.65), which made the model fall back to general knowledge. It also
-        # diverged from the streaming path, which filters solely in `search`.
-        floor = bot.retrieval.min_score
-        relevant = [c for c in state.get("citations", []) if c.score >= floor]
+        # A hard-coded max(..., 0.65) once lived here. It silently overrode
+        # lower configs and emptied the context for most queries
+        # (gemini-embedding-001 cosine scores rarely clear 0.65), which made the
+        # model fall back to general knowledge — so the floor is now low and
+        # tunable, and the scale-free relative cut does the real filtering.
+        relevant = prune_citations(
+            state.get("citations", []), min_score=_effective_min_score(bot)
+        )
         state["citations"] = relevant
         state["context"] = build_context(relevant)
         return state

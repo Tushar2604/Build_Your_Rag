@@ -84,7 +84,7 @@ export default function InterviewDetailPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Link to="/interviews" className="text-xs text-gray-400 hover:text-gray-600">Interviews</Link>
-            <span className="text-xs text-gray-300">/</span>
+            <span className="text-xs text-gray-400">/</span>
             <span className="text-xs text-gray-600 font-medium">{interview.candidate_name || interview.candidate_email}</span>
           </div>
           <h1 className="page-title">{interview.candidate_name || interview.candidate_email}</h1>

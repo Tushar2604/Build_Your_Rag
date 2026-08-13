@@ -204,7 +204,10 @@ export default function ChatbotSettingsPage() {
             Paste this snippet before <code>&lt;/body&gt;</code> on any page.
           </p>
           <div className="flex items-start gap-2">
-            <pre className="flex-1 overflow-x-auto rounded-lg bg-gray-900 text-gray-100 text-xs p-3 whitespace-pre-wrap break-all">
+            {/* `ink`, not `gray-900`: the grey scale inverts, so gray-900 is a
+                near-white block in the dark theme — a light code panel in a
+                dark console. Code stays dark in both, like `.code-block`. */}
+            <pre className="flex-1 overflow-x-auto rounded-lg bg-ink-900 text-[#ddd8f0] text-xs p-3 whitespace-pre-wrap break-all">
               {bot.embed_snippet}
             </pre>
             <CopyButton value={bot.embed_snippet} label="Copy snippet" />

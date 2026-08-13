@@ -18,18 +18,21 @@ import structlog
 from src.application.dtos import AnswerOutput, AskInput, CitationOut
 from src.application.ports.repositories import RequestLog, UnitOfWork
 from src.application.ports.services import Embedder, LLMProvider, LLMResult
+from src.config.settings import get_settings
 from src.domain.chat.entities import Citation, Message, MessageRole
+from src.domain.chat.relevance import prune_citations
 from src.domain.chat.events import MessageAnswered
 from src.domain.chatbot.entities import Chatbot
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
+    NO_CONTEXT_MARKER,
     build_grounded_prompt,
     format_message_history,
     scan_input,
     scan_output,
 )
 from src.domain.shared.errors import NotFoundError, QuotaExceededError
-from src.domain.shared.identifiers import SessionId, TenantId
+from src.domain.shared.identifiers import ChatbotId, SessionId, TenantId
 
 log = structlog.get_logger(__name__)
 
@@ -43,7 +46,7 @@ def _build_context(citations: list[Citation]) -> str:
         f"[Source {c.ordinal} | doc={c.document_id} | score={c.score:.3f}]\n{c.snippet}"
         for c in citations
     ]
-    return "\n\n".join(blocks) if blocks else "(no relevant context found)"
+    return "\n\n".join(blocks) if blocks else NO_CONTEXT_MARKER
 
 
 def _retrieved_payload(citations: list[Citation]) -> list[dict]:
@@ -88,7 +91,12 @@ class AskChatbot:
             session = await uow.chats.get_session(tenant_id, session_id)
             if session is None:
                 raise NotFoundError("Chat session not found.")
-            chatbot = await uow.chatbots.get(tenant_id, session.chatbot_id)
+            # The caller's choice wins over the session's own, and a session
+            # with no assistant at all is only answerable when one is supplied.
+            answering_as = ChatbotId(data.chatbot_id) if data.chatbot_id else session.chatbot_id
+            if answering_as is None:
+                raise NotFoundError("No assistant is attached to this conversation.")
+            chatbot = await uow.chatbots.get(tenant_id, answering_as)
             if chatbot is None:
                 raise NotFoundError("Chatbot not found.")
 
@@ -269,6 +277,12 @@ class AskChatbot:
         # Embed first (network call, no DB connection held), then open a short
         # read transaction only for the vector search.
         query_vec = await self._embedder.embed_query(query)
+        # An assistant's own floor wins when it set one; otherwise the platform
+        # floor applies. Without it `min_score=0.0` hands the model the k
+        # least-irrelevant chunks in the knowledge base for *any* question, and
+        # the prompt then presents them as the source of truth — which is how a
+        # bot ends up answering from the wrong document with total confidence.
+        min_score = max(chatbot.retrieval.min_score, get_settings().retrieval_min_score_floor)
         async with self._uow as uow:
             uow.set_tenant_scope(tenant_id)
             hits = await uow.chunks.search(
@@ -276,15 +290,33 @@ class AskChatbot:
                 query_embedding=query_vec,
                 top_k=chatbot.retrieval.top_k,
                 document_ids=chatbot.document_filter(),
-                min_score=chatbot.retrieval.min_score,
+                min_score=min_score,
             )
-        return [
-            Citation(
-                document_id=chunk.document_id,
-                chunk_id=chunk.id,
-                ordinal=chunk.ordinal,
-                score=score,
-                snippet=chunk.text[:500],
-            )
-            for chunk, score in hits
-        ]
+        citations = prune_citations(
+            [
+                Citation(
+                    document_id=chunk.document_id,
+                    chunk_id=chunk.id,
+                    ordinal=chunk.ordinal,
+                    score=score,
+                    snippet=chunk.text[:500],
+                )
+                for chunk, score in hits
+            ],
+            min_score=min_score,
+        )
+        # The one line that answers "why did it say that?" — how many documents
+        # the assistant may read from, how much came back, and how well it
+        # matched. A `kb_documents=0` here is the whole explanation for an
+        # assistant that ignores a knowledge base someone believes they attached.
+        log.info(
+            "rag.retrieved",
+            tenant_id=str(tenant_id),
+            chatbot_id=str(chatbot.id),
+            kb_documents=len(chatbot.document_filter()),
+            hits=len(hits),
+            kept=len(citations),
+            min_score=min_score,
+            top_score=round(max((s for _, s in hits), default=0.0), 3),
+        )
+        return citations

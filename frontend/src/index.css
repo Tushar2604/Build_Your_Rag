@@ -24,6 +24,30 @@
     --c-solid: 124 58 237;
     --c-solid-hover: 109 40 217;
     --c-canvas: 6 4 13;
+    /* Chrome — the sidebar and top bar. Themed rather than fixed dark: the
+       grey scale below inverts with the theme, so a rail that stayed black in
+       the light theme drew its own labels in dark grey on dark and they
+       disappeared. See the `.chrome-*` classes. */
+    --c-chrome: 6 4 13;
+    --c-chrome-alpha: 0.7;
+    /* Ink used for the perforated dot texture and for hairline rules laid over
+       chrome — white on a dark page, near-black on a light one. */
+    --c-overlay: 255 255 255;
+
+    /* Elevation. A drop shadow on a near-black canvas is invisible, so the dark
+       set leans on an inset top highlight to read as a lit bevel; on white that
+       highlight does nothing and the heavy black would look like soot. Both
+       sets live here so `shadow-card` means "the right shadow for this theme"
+       at every call site. */
+    --sh-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+    --sh-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 8px -2px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+    --sh-pop: 0 8px 24px -6px rgba(0, 0, 0, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+    --sh-modal: 0 24px 64px -12px rgba(0, 0, 0, 0.75), 0 8px 24px -8px rgba(124, 58, 237, 0.22),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
+    --sh-lift: 0 16px 36px -12px rgba(139, 92, 246, 0.42), 0 4px 12px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+
     --c-gray-50: 18 15 32;
     --c-gray-100: 25 21 43;
     --c-gray-200: 36 30 60;
@@ -166,11 +190,29 @@
     /* Faintly lavender rather than pure white, so the light theme reads as the
        same product with the lights on rather than a different app. */
     --c-canvas: 250 249 254;
+    /* Chrome follows the theme. Very slightly cooler than `surface` so the rail
+       still separates from the content column without needing a hard border. */
+    --c-chrome: 252 251 255;
+    --c-chrome-alpha: 0.88;
+    --c-overlay: 24 20 45;
+
+    --sh-xs: 0 1px 2px 0 rgba(24, 20, 45, 0.07);
+    --sh-card: 0 1px 2px rgba(24, 20, 45, 0.04), 0 4px 14px -6px rgba(24, 20, 45, 0.1);
+    --sh-pop: 0 10px 28px -8px rgba(24, 20, 45, 0.16), 0 2px 6px -2px rgba(24, 20, 45, 0.06);
+    --sh-modal: 0 28px 64px -16px rgba(24, 20, 45, 0.24),
+      0 8px 24px -10px rgba(124, 58, 237, 0.16);
+    --sh-lift: 0 18px 38px -14px rgba(139, 92, 246, 0.34), 0 4px 12px -4px rgba(24, 20, 45, 0.1);
+
     --c-gray-50: 250 249 253;
     --c-gray-100: 244 243 249;
-    --c-gray-200: 229 227 238;
-    --c-gray-300: 212 209 226;
-    --c-gray-400: 160 156 180;
+    --c-gray-200: 226 224 236;
+    /* Darkened from 212/209/226. This is the border colour on every outlined
+       button and input, and against a white surface the old value was faint
+       enough that the controls read as missing rather than quiet. */
+    --c-gray-300: 199 195 216;
+    /* Darkened from 160/156/180 (≈3.1:1 on white — below the 4.5:1 needed for
+       body text). Carries hints, eyebrows, metric labels and placeholders. */
+    --c-gray-400: 130 126 152;
     --c-gray-500: 113 109 134;
     --c-gray-600: 83 79 102;
     --c-gray-700: 63 60 80;
@@ -299,6 +341,58 @@
     --c-brand-900: 76 29 149;
 }
 
+/* ── Always-dark islands ───────────────────────────────────────────────────
+   Some surfaces stay dark whichever theme is on: the whole auth experience
+   (`.aurora-shell`), the invite panel, the marketing empty state. Text on them
+   is written with the ordinary grey scale — and that scale *inverts* with the
+   theme, so in the light theme `text-gray-900` on one of these was near-black
+   on near-black. The sign-in heading, the nav group labels and half the
+   secondary buttons were not "low contrast"; they were the same colour as what
+   was behind them. That was most of "there are buttons I can't see".
+
+   Rather than rewriting each call site to a literal colour, this pins the
+   scale back to its dark values for the whole subtree. Everything inside then
+   behaves exactly as it does in the dark theme, and a future edit to one of
+   these panels cannot reintroduce the bug. `.aurora-shell` carries it
+   implicitly, since a saturated aurora over near-black is a dark surface by
+   definition; `.on-dark` is the same pin for panels that opt in on their own.
+
+   The trade is deliberate: the auth pages now look identical in both themes.
+   A dark sign-in screen is a choice; an invisible one is not. */
+.on-dark,
+.aurora-shell {
+    color-scheme: dark;
+    --c-surface: 14 11 26;
+    --c-surface-2: 21 17 38;
+    --c-canvas: 6 4 13;
+    --c-overlay: 255 255 255;
+    --c-gray-50: 18 15 32;
+    --c-gray-100: 25 21 43;
+    --c-gray-200: 36 30 60;
+    --c-gray-300: 52 44 82;
+    --c-gray-400: 122 113 150;
+    --c-gray-500: 150 142 178;
+    --c-gray-600: 178 171 202;
+    --c-gray-700: 206 201 226;
+    --c-gray-800: 229 225 242;
+    --c-gray-900: 243 241 251;
+    --c-gray-950: 253 252 255;
+    --c-brand-50: 30 20 56;
+    --c-brand-100: 40 26 76;
+    --c-brand-200: 56 36 104;
+    --c-brand-300: 78 50 142;
+    --c-brand-600: 167 139 250;
+    --c-brand-700: 196 181 253;
+    --sh-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+    --sh-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 8px -2px rgba(0, 0, 0, 0.45),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+    --sh-pop: 0 8px 24px -6px rgba(0, 0, 0, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+    --sh-modal: 0 24px 64px -12px rgba(0, 0, 0, 0.75), 0 8px 24px -8px rgba(124, 58, 237, 0.22),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
+    --sh-lift: 0 16px 36px -12px rgba(139, 92, 246, 0.42), 0 4px 12px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+}
+
 
 @layer base {
   html {
@@ -410,13 +504,17 @@
   .btn-cta:hover:not(:disabled) {
     background-image: linear-gradient(140deg, rgb(253 160 90), rgb(249 104 47));
   }
-  /* Secondary is glass, not a filled chip — it has to sit on the aurora. */
+  /* Secondary is glass, not a filled chip — it has to sit on the aurora.
+     In light it becomes a properly outlined button instead: a translucent white
+     fill with a hairline border is invisible on a white card, which is most of
+     why the light theme looked like it was missing its buttons. */
   .btn-secondary {
     @apply btn border border-white/10 bg-white/[0.04] text-gray-700 backdrop-blur-md
            hover:bg-white/[0.09] hover:border-white/20 hover:text-gray-900;
   }
   [data-theme="light"] .btn-secondary {
-    @apply border-gray-200 bg-surface text-gray-700 shadow-xs hover:bg-gray-50 hover:border-gray-300;
+    @apply border-gray-300 bg-surface text-gray-800 shadow-xs
+           hover:bg-gray-100 hover:border-gray-400 hover:text-gray-900;
   }
   .btn-danger    { @apply btn bg-red-600 text-white shadow-xs hover:bg-red-700 active:bg-red-800; }
   .btn-ghost     { @apply btn text-gray-600 hover:bg-white/[0.07] hover:text-gray-900 hover:translate-y-0; }
@@ -454,7 +552,8 @@
            disabled:opacity-50;
   }
   [data-theme="light"] .input {
-    @apply border-gray-200 bg-surface shadow-xs focus:bg-surface disabled:bg-gray-50 disabled:text-gray-500;
+    @apply border-gray-300 bg-surface shadow-xs focus:bg-surface
+           disabled:bg-gray-100 disabled:text-gray-500;
   }
   textarea.input { @apply leading-relaxed; }
   .label      { @apply block text-[13px] font-semibold text-gray-700 mb-1.5; }
@@ -488,12 +587,89 @@
   .divider    { @apply border-t border-white/[0.07]; }
   [data-theme="light"] .divider { @apply border-gray-100; }
 
-  /* Frosted chrome — sidebar, top bar, popovers. Heavier blur than a card and
-     a touch more opaque, because navigation must stay legible over anything
-     that scrolls beneath it. */
+  /* ── Frosted chrome — sidebar, top bar, popovers ────────────────────────
+     Heavier blur than a card and a touch more opaque, because navigation must
+     stay legible over anything that scrolls beneath it.
+
+     The chrome used to be fixed dark in both themes. That looked deliberate
+     and was not survivable: the grey scale inverts with the theme, so on a
+     black rail in the light theme `text-gray-600` (a *dark* grey there) drew
+     the nav group headings in near-black on near-black, and they vanished.
+     Chrome now follows the theme, and everything drawn on it uses the classes
+     below rather than a literal colour — which is what stops the two variants
+     drifting apart again the next time someone adds a button to the rail. */
   .glass-chrome {
-    @apply border-white/[0.07] bg-ink-950/70 backdrop-blur-2xl;
+    background-color: rgb(var(--c-chrome) / var(--c-chrome-alpha));
+    @apply border-white/[0.07] backdrop-blur-2xl;
   }
+  [data-theme="light"] .glass-chrome { @apply border-gray-200; }
+
+  /* The wordmark and any other "loudest thing in the rail" text. */
+  .chrome-brand { @apply text-white; }
+  [data-theme="light"] .chrome-brand { @apply text-gray-900; }
+
+  /* A row in the rail: nav link, collapse toggle, logout. Idle is quiet, hover
+     lifts it one step. The active state is a solid capsule and is applied
+     separately, so it needs nothing here. */
+  .chrome-item {
+    @apply text-gray-400 transition-colors hover:bg-white/[0.06] hover:text-gray-100;
+  }
+  [data-theme="light"] .chrome-item { @apply hover:bg-gray-100 hover:text-gray-900; }
+
+  /* Icon-only control on chrome — notifications, theme toggle. */
+  .chrome-control {
+    @apply text-gray-400 transition-colors hover:bg-white/[0.08] hover:text-gray-100;
+  }
+  [data-theme="light"] .chrome-control { @apply hover:bg-gray-100 hover:text-gray-900; }
+
+  /* Hairline rules and group separators drawn over chrome. */
+  .chrome-rule { @apply border-overlay/[0.07]; }
+
+  /* The search field in the top bar. */
+  .chrome-field {
+    @apply border border-white/10 bg-white/[0.05] text-gray-100 placeholder:text-gray-500
+           backdrop-blur-md transition-all duration-200
+           focus:border-brand-400/60 focus:bg-white/[0.09] focus:outline-none focus:shadow-glow-sm;
+  }
+  [data-theme="light"] .chrome-field {
+    @apply border-gray-300 bg-surface text-gray-900 placeholder:text-gray-400 focus:bg-surface;
+  }
+
+  /* Popover anchored to chrome — the ⌘K results list. */
+  .chrome-popover {
+    @apply border border-white/10 bg-ink-900/90 backdrop-blur-2xl shadow-modal;
+  }
+  [data-theme="light"] .chrome-popover { @apply border-gray-200 bg-surface; }
+  .chrome-popover-item {
+    @apply text-gray-300 transition-colors hover:bg-white/[0.08] hover:text-white;
+  }
+  [data-theme="light"] .chrome-popover-item {
+    @apply text-gray-700 hover:bg-gray-100 hover:text-gray-900;
+  }
+
+  /* Outlined control sitting on chrome — the assistant toolbar's buttons and
+     its inline name field. `text-gray-200` is near-white, which is correct on
+     a dark bar and invisible on a light one; this picks the right end of the
+     scale per theme. */
+  .chrome-btn {
+    @apply border border-white/10 bg-white/[0.04] text-gray-200
+           transition-colors hover:bg-white/[0.08] disabled:opacity-50;
+  }
+  [data-theme="light"] .chrome-btn {
+    @apply border-gray-300 bg-surface text-gray-800 hover:bg-gray-100;
+  }
+
+  /* Tab in a chrome toolbar. Idle is quiet; active is a filled chip. */
+  .chrome-tab { @apply text-gray-400 transition-colors hover:bg-white/[0.04] hover:text-gray-200; }
+  [data-theme="light"] .chrome-tab { @apply hover:bg-gray-100 hover:text-gray-900; }
+  .chrome-tab-active { @apply bg-white/[0.08] text-white; }
+  [data-theme="light"] .chrome-tab-active { @apply bg-brand-600 text-white; }
+
+  /* The violet/coral blooms behind the rail. Full strength they read as light
+     sources on black; on a white rail the same alphas are a coloured stain, so
+     the light theme dims them to a tint. */
+  .chrome-bloom { @apply opacity-100; }
+  [data-theme="light"] .chrome-bloom { @apply opacity-40; }
 
   /* Full-strength aurora frame — the reference's saturated border around a
      dark panel. Opt-in, for marketing moments only (auth, empty states). */

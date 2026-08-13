@@ -208,7 +208,7 @@ export default function DocumentsPage() {
         className="mb-6 rounded-xl border-2 border-dashed border-gray-200 bg-surface px-6 py-10 text-center hover:border-brand-400 hover:bg-brand-50/30 transition-colors"
         aria-label="Drop files here to upload"
       >
-        <svg className="mx-auto w-10 h-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+        <svg className="mx-auto w-10 h-10 text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
         </svg>
         <p className="text-sm text-gray-500">

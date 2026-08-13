@@ -1028,6 +1028,12 @@ class InboxMessageResponse(BaseModel):
     id: uuid.UUID
     # "in" from the contact, "out" from the assistant or a human operator.
     direction: Literal["in", "out"]
+    # Who wrote an outgoing message. "contact" for inbound. Derived from the
+    # message's `provider`, which already distinguished these three but was
+    # never exposed — so the inbox could not show whether the assistant had
+    # actually answered anything, which is the one thing you want to see after
+    # attaching an agent to a number.
+    author: Literal["contact", "assistant", "operator", "device"] = "contact"
     content: str
     created_at: datetime
     media_kind: str = ""

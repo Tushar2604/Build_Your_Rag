@@ -166,3 +166,67 @@ def test_heartbeat_records_activity() -> None:
     ws.heartbeat()
     assert ws.last_seen_at is not None
     assert before is not None and ws.last_seen_at >= before
+
+
+# --- Traffic as evidence of a live link ---
+#
+# Status is reported to us; traffic is observed. When the two disagree, traffic
+# wins — a message can only arrive over a socket that is actually up. The
+# failure this guards against is a row stuck at "disconnected" because a drop
+# was recorded and the matching reconnect never reached the API: `is_live()`
+# then refuses to answer anything, so the number keeps receiving forever and
+# never replies, with nothing in the UI to suggest why.
+
+
+def test_traffic_on_a_stale_disconnected_session_restores_it() -> None:
+    ws = _linked()
+    ws.attach_chatbot(ChatbotId(new_id()))
+    ws.mark_disconnected("connection closed")
+    assert not ws.is_live()
+
+    ws.observe_traffic()
+
+    assert ws.status == "linked"
+    assert ws.is_live()
+    assert ws.last_error == ""
+
+
+def test_traffic_updates_last_seen_like_a_heartbeat() -> None:
+    ws = _linked()
+    ws.last_seen_at = None
+    ws.observe_traffic()
+    assert ws.last_seen_at is not None
+
+
+def test_traffic_does_not_resurrect_a_logged_out_session() -> None:
+    # WhatsApp revoked the link. A late event from a socket that has not
+    # noticed yet must not put the row back into a state that claims it can
+    # answer — recovering needs a new QR, and nothing else.
+    ws = _linked()
+    ws.mark_logged_out("device removed")
+    ws.observe_traffic()
+    assert ws.status == "logged_out"
+
+
+def test_traffic_does_not_resurrect_a_failed_session() -> None:
+    ws = _session()
+    ws.mark_failed("bridge unreachable")
+    ws.observe_traffic()
+    assert ws.status == "failed"
+
+
+def test_traffic_on_a_never_linked_session_changes_nothing() -> None:
+    # `mark_disconnected` maps a never-linked drop to "failed", so this is
+    # belt-and-braces: no path may promote a session that was never paired.
+    ws = _session()
+    ws.status = "disconnected"
+    ws.observe_traffic()
+    assert ws.status == "disconnected"
+
+
+def test_a_live_session_stays_live_after_traffic() -> None:
+    ws = _linked()
+    ws.attach_chatbot(ChatbotId(new_id()))
+    ws.observe_traffic()
+    assert ws.status == "linked"
+    assert ws.is_live()

@@ -200,7 +200,7 @@ export default function KnowledgePage() {
           className="inline-flex"
         >
           <UploadCloud
-            className={`mx-auto w-10 h-10 mb-3 transition-colors ${dragActive ? "text-brand-500" : "text-gray-300"}`}
+            className={`mx-auto w-10 h-10 mb-3 transition-colors ${dragActive ? "text-brand-500" : "text-gray-400"}`}
             strokeWidth={1.25}
           />
         </motion.div>

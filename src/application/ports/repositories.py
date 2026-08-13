@@ -168,6 +168,12 @@ class ChatRepository(Protocol):
     async def message_exists(
         self, tenant_id: TenantId, session_id: SessionId, provider_message_id: str
     ) -> bool: ...
+    async def assign_chatbot(
+        self,
+        tenant_id: TenantId,
+        session_ids: list[SessionId],
+        chatbot_id: ChatbotId | None,
+    ) -> int: ...
 
 
 @runtime_checkable

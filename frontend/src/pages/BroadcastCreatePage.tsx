@@ -147,7 +147,7 @@ export default function BroadcastCreatePage() {
       <header>
         <Link
           to="/broadcasts"
-          className="inline-flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-300 mb-3"
+          className="inline-flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-800 mb-3"
         >
           <ArrowLeft className="w-4 h-4" strokeWidth={2} />
           Campaigns

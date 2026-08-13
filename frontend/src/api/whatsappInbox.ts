@@ -7,6 +7,16 @@ import { api } from "./client";
 /** "in" from the contact, "out" from the assistant or a human operator. */
 export type MessageDirection = "in" | "out";
 
+/**
+ * Who wrote a message.
+ *
+ * `assistant` is a generated answer, `operator` a reply typed in this inbox,
+ * and `device` one typed on the linked phone itself. Worth distinguishing: the
+ * point of attaching an agent to a number is being able to see that it is in
+ * fact answering, and all three otherwise look identical in the thread.
+ */
+export type MessageAuthor = "contact" | "assistant" | "operator" | "device";
+
 /** Empty for a plain text message. */
 export type MediaKind = "" | "image" | "video" | "audio" | "document" | "sticker";
 
@@ -32,6 +42,7 @@ export interface InboxConversationPage {
 export interface InboxMessage {
   id: string;
   direction: MessageDirection;
+  author: MessageAuthor;
   content: string;
   created_at: string;
   media_kind: MediaKind;

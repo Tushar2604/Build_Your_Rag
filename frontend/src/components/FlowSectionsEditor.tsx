@@ -201,7 +201,7 @@ export default function FlowSectionsEditor({
                 </button>
 
                 <span
-                  className="cursor-grab select-none text-gray-500 hover:text-gray-300"
+                  className="cursor-grab select-none text-gray-500 hover:text-gray-800"
                   aria-hidden="true"
                   title="Drag to reorder"
                 >
@@ -282,7 +282,7 @@ export default function FlowSectionsEditor({
         type="button"
         onClick={onUseSections}
         disabled={busy}
-        className="mt-4 text-xs text-gray-500 hover:text-gray-300 underline"
+        className="mt-4 text-xs text-gray-500 hover:text-gray-800 underline"
       >
         Reset to the stock flow
       </button>

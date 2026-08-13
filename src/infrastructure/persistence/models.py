@@ -177,8 +177,10 @@ class ChatSessionModel(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
     )
-    chatbot_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="CASCADE")
+    # Nullable since 0023: a WhatsApp thread exists from the first inbound
+    # message, which can arrive before anyone has chosen who answers it.
+    chatbot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="CASCADE"), nullable=True
     )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

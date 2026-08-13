@@ -41,6 +41,7 @@ class OpenAIProvider:
 
     def __init__(self, settings: Settings) -> None:
         self._model = settings.openai_model
+        self._temperature = settings.llm_temperature
         self._api_key = settings.openai_api_key
         self._base_url = settings.openai_base_url or None
         self._client = None
@@ -61,6 +62,7 @@ class OpenAIProvider:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            temperature=self._temperature,
         )
         text = resp.choices[0].message.content or ""
         usage = getattr(resp, "usage", None)
@@ -79,6 +81,7 @@ class OpenAIProvider:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            temperature=self._temperature,
             stream=True,
         )
         async for chunk in stream:
@@ -112,6 +115,7 @@ class GroqProvider:
 
     def __init__(self, settings: Settings) -> None:
         self._model = settings.groq_model
+        self._temperature = settings.llm_temperature
         self._api_key = settings.groq_api_key
         self._client = None
 
@@ -131,6 +135,7 @@ class GroqProvider:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            temperature=self._temperature,
         )
         text = resp.choices[0].message.content or ""
         usage = getattr(resp, "usage", None)
@@ -149,6 +154,7 @@ class GroqProvider:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            temperature=self._temperature,
             stream=True,
         )
         async for chunk in stream:
@@ -165,6 +171,7 @@ class GeminiProvider:
 
     def __init__(self, settings: Settings) -> None:
         self._model = settings.gemini_model
+        self._temperature = settings.llm_temperature
         self._api_key = settings.gemini_api_key
         self._configured = False
 
@@ -186,7 +193,9 @@ class GeminiProvider:
             response = client.models.generate_content(
                 model=self._model,
                 contents=user,
-                config=types.GenerateContentConfig(system_instruction=system),
+                config=types.GenerateContentConfig(
+                    system_instruction=system, temperature=self._temperature
+                ),
             )
             return response.text
 
@@ -207,7 +216,9 @@ class GeminiProvider:
             return client.models.generate_content_stream(
                 model=self._model,
                 contents=user,
-                config=types.GenerateContentConfig(system_instruction=system),
+                config=types.GenerateContentConfig(
+                    system_instruction=system, temperature=self._temperature
+                ),
             )
 
         stream = await asyncio.to_thread(_start)
@@ -246,6 +257,7 @@ class OllamaProvider:
 
     def __init__(self, settings: Settings) -> None:
         self._model = settings.ollama_model
+        self._temperature = settings.llm_temperature
         self._base_url = settings.ollama_base_url.rstrip("/")
         self._client = None
 
@@ -271,6 +283,7 @@ class OllamaProvider:
                     {"role": "user", "content": user},
                 ],
                 "stream": False,
+                "temperature": self._temperature,
             },
         )
         resp.raise_for_status()
@@ -298,6 +311,7 @@ class OllamaProvider:
                     {"role": "user", "content": user},
                 ],
                 "stream": True,
+                "temperature": self._temperature,
             },
         ) as resp:
             resp.raise_for_status()

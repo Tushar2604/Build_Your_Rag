@@ -68,7 +68,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           <CitationsPanel citations={msg.citations} />
         )}
         {!isUser && msg.tokensUsed !== undefined && !msg.streaming && (
-          <p className="text-[10px] text-gray-300 mt-1 tabular-nums">
+          <p className="text-[10px] text-gray-400 mt-1 tabular-nums">
             {msg.tokensUsed.toLocaleString()} tokens
           </p>
         )}
@@ -390,7 +390,7 @@ export default function ChatPage() {
             </button>
           )}
         </form>
-        <p className="text-[11px] text-gray-300 mt-1.5 text-right tabular-nums">
+        <p className="text-[11px] text-gray-400 mt-1.5 text-right tabular-nums">
           {input.length.toLocaleString()}/8,000
         </p>
       </div>

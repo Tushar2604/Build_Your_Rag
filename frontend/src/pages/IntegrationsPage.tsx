@@ -204,7 +204,7 @@ export default function IntegrationsPage() {
             className={`rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors ${
               category === c.value
                 ? "bg-brand-500/15 text-brand-400 ring-1 ring-inset ring-brand-500/40"
-                : "bg-surface-2 text-gray-500 hover:text-gray-200"
+                : "bg-surface-2 text-gray-500 hover:text-gray-900"
             }`}
           >
             {c.label}

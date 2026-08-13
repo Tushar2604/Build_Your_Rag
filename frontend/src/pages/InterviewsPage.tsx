@@ -25,7 +25,7 @@ function StatusBadge({ status }: { status: Interview["status"] }) {
 }
 
 function VerdictBadge({ verdict }: { verdict: Interview["overall_verdict"] }) {
-  if (!verdict) return <span className="text-gray-300 text-xs">—</span>;
+  if (!verdict) return <span className="text-gray-400 text-xs">—</span>;
   const styles: Record<string, string> = {
     strong_hire: "text-emerald-700 bg-emerald-50",
     hire: "text-emerald-700 bg-emerald-50",

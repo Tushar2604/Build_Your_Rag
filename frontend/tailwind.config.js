@@ -11,6 +11,11 @@ export default {
         // stay white in both themes. Panels use `surface`.
         canvas:  "rgb(var(--c-canvas) / <alpha-value>)",
         surface: "rgb(var(--c-surface) / <alpha-value>)",
+        // The sidebar / top-bar ground. Themed, unlike `ink` below.
+        chrome:  "rgb(var(--c-chrome) / <alpha-value>)",
+        // Overlay ink for hairlines and washes drawn *on* chrome — white in
+        // dark, near-black in light, so one utility works in both.
+        overlay: "rgb(var(--c-overlay) / <alpha-value>)",
         // One step above `surface` — nested panels, table headers, inputs
         // sitting on a card.
         "surface-2": "rgb(var(--c-surface-2) / <alpha-value>)",
@@ -210,16 +215,19 @@ export default {
         "3xl": "1.75rem",
       },
       boxShadow: {
-        // Elevation on a near-black canvas cannot rely on drop shadow alone —
-        // a dark shadow on a dark ground is invisible. Each level therefore
-        // pairs a shadow with a 1px inset top highlight, which is what actually
-        // separates a glass panel from the page behind it.
-        xs:    "0 1px 2px 0 rgba(0,0,0,0.4)",
-        card:  "0 1px 2px rgba(0,0,0,0.35), 0 2px 8px -2px rgba(0,0,0,0.45), inset 0 1px 0 0 rgba(255,255,255,0.05)",
-        pop:   "0 8px 24px -6px rgba(0,0,0,0.55), inset 0 1px 0 0 rgba(255,255,255,0.06)",
-        modal: "0 24px 64px -12px rgba(0,0,0,0.75), 0 8px 24px -8px rgba(124,58,237,0.22), inset 0 1px 0 0 rgba(255,255,255,0.07)",
+        // Variable-driven, like the palette: elevation on a near-black canvas
+        // cannot rely on drop shadow alone (a dark shadow on a dark ground is
+        // invisible), so the dark set pairs each level with a 1px inset top
+        // highlight that reads as a lit bevel. On white that highlight does
+        // nothing and the same heavy black reads as soot — which is why the
+        // light theme looked grubby while every `shadow-card` in the app was
+        // hard-coded for dark. Both sets are defined in src/index.css.
+        xs:    "var(--sh-xs)",
+        card:  "var(--sh-card)",
+        pop:   "var(--sh-pop)",
+        modal: "var(--sh-modal)",
         // Colored ambient lift — violet bloom on card/row hover.
-        lift:  "0 16px 36px -12px rgba(139,92,246,0.42), 0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 0 rgba(255,255,255,0.08)",
+        lift:  "var(--sh-lift)",
         // Halo rings — the glowing outline around the hero CTA in the design.
         "glow-cta":   "0 0 0 1px rgba(249,104,47,0.35), 0 8px 28px -6px rgba(249,104,47,0.5)",
         "glow-brand": "0 0 0 1px rgba(139,92,246,0.35), 0 8px 28px -6px rgba(139,92,246,0.5)",
@@ -245,8 +253,10 @@ export default {
         // keep working, now rendering the new aurora instead of the old teal.
         "mesh-light": "radial-gradient(at 12% 16%, rgba(249,115,60,0.20) 0, transparent 52%), radial-gradient(at 88% 12%, rgba(167,80,235,0.24) 0, transparent 52%), radial-gradient(at 50% 92%, rgba(214,64,152,0.18) 0, transparent 56%)",
         "mesh-navy":  "radial-gradient(at 16% 12%, rgba(249,115,60,0.28) 0, transparent 50%), radial-gradient(at 86% 84%, rgba(167,80,235,0.34) 0, transparent 54%)",
-        // Dot-matrix texture — the perforated corners in the reference.
-        "dot-grid":   "radial-gradient(rgba(255,255,255,0.16) 1px, transparent 1px)",
+        // Dot-matrix texture — the perforated corners in the reference. The ink
+        // is a token: white dots are invisible on a white page, so the light
+        // theme was paying for a texture layer that rendered nothing.
+        "dot-grid":   "radial-gradient(rgb(var(--c-overlay) / 0.16) 1px, transparent 1px)",
         // Hairline top edge that fakes a lit bevel on glass.
         "glass-edge": "linear-gradient(180deg, rgba(255,255,255,0.09) 0, rgba(255,255,255,0) 45%)",
       },

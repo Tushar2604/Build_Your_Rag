@@ -14,6 +14,7 @@ Twilio webhooks already use.
 
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -64,6 +65,13 @@ log = structlog.get_logger(__name__)
 # message it. Bulk outbound belongs on the official Twilio path, where the
 # recipient consented — and it is what gets personal numbers banned.
 _MAX_SESSIONS_PER_TENANT = 5
+
+# Ceiling on the back-fill when an assistant is attached. A full history import
+# can leave thousands of threads, and re-pointing them is a single UPDATE ...
+# IN (...) — bounded so the request cannot degrade into an unbounded statement.
+# Threads past the cap are the coldest ones, and they self-heal: the answer path
+# re-points a thread the first time a message arrives on it.
+_MAX_THREADS_TO_REPOINT = 500
 
 
 def _to_response(ws: WhatsAppWebSession, chatbot_name: str = "") -> WhatsAppWebSessionResponse:
@@ -206,19 +214,40 @@ async def attach_assistant(
     container: ContainerDep,
 ) -> WhatsAppWebSessionResponse:
     """Choose which assistant answers this number. Null detaches it — messages
-    still arrive and are stored, but nothing replies."""
+    still arrive and are stored, but nothing replies.
+
+    Threads that already exist are re-pointed at the new assistant. They were
+    stamped with whatever was attached when their first message landed — usually
+    nothing, because linking comes before choosing — and the answer path reads
+    the thread, so without the back-fill picking an assistant would only ever
+    affect conversations that started later.
+    """
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         ws = await uow.whatsapp_web_sessions.get(principal.tenant_id, session_id)
         if ws is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        if body.chatbot_id is not None:
-            bot = await uow.chatbots.get(principal.tenant_id, ChatbotId(body.chatbot_id))
+        chatbot_id = ChatbotId(body.chatbot_id) if body.chatbot_id else None
+        if chatbot_id is not None:
+            bot = await uow.chatbots.get(principal.tenant_id, chatbot_id)
             if bot is None:
                 raise HTTPException(status_code=404, detail="Chatbot not found")
-        ws.attach_chatbot(ChatbotId(body.chatbot_id) if body.chatbot_id else None)
+        ws.attach_chatbot(chatbot_id)
         await uow.whatsapp_web_sessions.update(ws)
+
+        threads = await uow.whatsapp_conversations.list_for_owner(
+            principal.tenant_id, session_id, limit=_MAX_THREADS_TO_REPOINT
+        )
+        moved = await uow.chats.assign_chatbot(
+            principal.tenant_id, [t.session_id for t in threads], chatbot_id
+        )
         await uow.commit()
+        log.info(
+            "whatsapp.assistant_attached",
+            session_id=str(session_id),
+            chatbot_id=str(chatbot_id) if chatbot_id else None,
+            threads_repointed=moved,
+        )
         return await _named(uow, principal.tenant_id, ws)
 
 
@@ -258,6 +287,24 @@ def _conversation_response(c: WhatsAppConversation) -> InboxConversationResponse
         has_attachment=c.has_attachment,
         auto_reply=c.auto_reply,
     )
+
+
+def _author_of(msg: Message) -> str:
+    """Who wrote this message, from the provider tag already on the row.
+
+    "whatsapp:operator" is a reply typed in the inbox, "whatsapp:device" one
+    typed on the phone itself, and anything else on an outgoing message is a
+    generated answer — those are tagged with the LLM provider that produced
+    them ("groq", "gemini", …), which is exactly the set we want to call
+    "assistant".
+    """
+    if msg.role == MessageRole.USER:
+        return "contact"
+    if msg.provider == "whatsapp:operator":
+        return "operator"
+    if msg.provider == "whatsapp:device":
+        return "device"
+    return "assistant"
 
 
 async def _owned_conversation(
@@ -333,6 +380,7 @@ async def list_conversation_messages(
         InboxMessageResponse(
             id=msg.id,
             direction="in" if msg.role == MessageRole.USER else "out",
+            author=_author_of(msg),
             content=msg.content,
             created_at=msg.created_at,
             media_kind=msg.media_kind or "",
@@ -400,6 +448,7 @@ async def send_conversation_message(
     return InboxMessageResponse(
         id=message.id,
         direction="out",
+        author="operator",
         content=message.content,
         created_at=message.created_at,
     )
@@ -555,6 +604,7 @@ async def _reply_to_message(
     tenant_id: TenantId,
     chat_session_id: SessionId,
     session_id: uuid.UUID,
+    chatbot_id: ChatbotId,
     jid: str,
     phone: str,
     text: str,
@@ -566,27 +616,72 @@ async def _reply_to_message(
     isn't blocked behind the RAG pipeline. The inbound message is already
     stored by the caller — hence `persist_user_message=False`, which stops it
     being written a second time.
+
+    `chatbot_id` is the assistant currently attached to the *number*, passed
+    explicitly rather than left to the chat session's own column: the session
+    was stamped when the thread began and does not follow later changes.
+
+    Every outcome is logged. This runs after the response has gone back to the
+    bridge, so a silent failure here is invisible from both ends — which is
+    exactly how "I attached an agent and nothing ever replies" stays a mystery.
     """
     container = get_container()
     use_case = AskChatbot(container.unit_of_work(), container.embedder, container.llm)
+    started = time.perf_counter()
+    # AskChatbot persists a successful answer itself; a fallback bypasses it and
+    # has to be written here, or the inbox shows the contact's message with no
+    # sign of what they were actually sent back.
+    persist_answer = False
     try:
         result = await use_case.execute(
-            tenant_id, chat_session_id, AskInput(message=text, persist_user_message=False)
+            tenant_id,
+            chat_session_id,
+            AskInput(message=text, persist_user_message=False, chatbot_id=chatbot_id),
         )
         answer = result.answer
-    except Exception:  # noqa: BLE001 — always answer, even on a pipeline failure
+        log.info(
+            "whatsapp.reply.generated",
+            session_id=str(session_id),
+            chatbot_id=str(chatbot_id),
+            citations=len(result.citations),
+            provider=result.provider,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+    except Exception as exc:  # noqa: BLE001 — always answer, even on a pipeline failure
+        log.exception(
+            "whatsapp.reply.failed",
+            session_id=str(session_id),
+            chatbot_id=str(chatbot_id),
+            error=f"{type(exc).__name__}: {exc}",
+        )
         answer = "Sorry, something went wrong on our end. Please try again shortly."
+        persist_answer = True
 
-    await container.whatsapp_bridge.send_text(str(session_id), jid, answer)
+    sent, error = await container.whatsapp_bridge.send_text(str(session_id), jid, answer)
+    if not sent:
+        # The answer exists but never reached the contact. Advancing the thread
+        # anyway would show the operator a message that was never delivered, so
+        # the thread is left alone and the failure is logged loudly.
+        log.error("whatsapp.reply.send_failed", session_id=str(session_id), error=error)
+        return
 
     # Keep the thread list in step with what the contact actually sees.
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(tenant_id)
+        if persist_answer:
+            await uow.chats.add_message(
+                Message(
+                    session_id=chat_session_id,
+                    tenant_id=tenant_id,
+                    role=MessageRole.ASSISTANT,
+                    content=answer,
+                    provider="whatsapp:assistant",
+                )
+            )
         conversation = await uow.whatsapp_conversations.get(session_id, phone)
-        if conversation is None:
-            return
-        conversation.note_message(preview=answer, has_media=False, inbound=False)
-        await uow.whatsapp_conversations.update(conversation)
+        if conversation is not None:
+            conversation.note_message(preview=answer, has_media=False, inbound=False)
+            await uow.whatsapp_conversations.update(conversation)
         await uow.commit()
 
 
@@ -767,7 +862,14 @@ async def bridge_events(
 
     if body.event == "message":
         phone = body.from_ or body.phone_number
-        ws.heartbeat()
+        # A message just arrived over the socket, which is proof the link is
+        # alive. Statuses drift out of step with reality — a transient drop
+        # writes "disconnected", and if the reconnect's "linked" event misses
+        # the API (a sleeping free-tier instance answers nothing) the row stays
+        # that way forever. `is_live()` then refuses to answer anything, which
+        # is how a working number quietly stops replying while its inbox keeps
+        # filling up.
+        ws.observe_traffic()
 
         # Store first, decide second. Every early return below used to happen
         # BEFORE anything was written, so a number with no assistant attached —
@@ -780,6 +882,14 @@ async def bridge_events(
                 uow, ws.tenant_id, ws.chatbot_id, ws.id, phone, body.pushname
             )
             stored = await _store_message(uow, ws.tenant_id, conversation, body)
+            # Threads outlive the assistant they were opened under, so a thread
+            # created before (or under a different) assistant is corrected here
+            # as well as on attach. Keeps history and analytics attributing the
+            # conversation to whoever is actually answering it.
+            if ws.chatbot_id is not None:
+                await uow.chats.assign_chatbot(
+                    ws.tenant_id, [conversation.session_id], ws.chatbot_id
+                )
             await uow.commit()
             chat_session_id = conversation.session_id
             auto_reply = conversation.auto_reply
@@ -798,12 +908,14 @@ async def bridge_events(
         # personal-sender campaigns reported zero replies.
         await mark_replied(container, chat_session_id)
 
-        if not ws.is_live():
+        if ws.chatbot_id is None:
             # Linked but no assistant attached — receiving is fine, replying
             # would be answering on the user's behalf without them asking.
+            log.info("whatsapp.reply.skipped", session_id=str(ws.id), reason="no_assistant")
             return {"status": "no_assistant"}
         if not auto_reply:
             # A human has taken this conversation over.
+            log.info("whatsapp.reply.skipped", session_id=str(ws.id), reason="paused")
             return {"status": "paused"}
 
         background.add_task(
@@ -811,6 +923,7 @@ async def bridge_events(
             ws.tenant_id,
             chat_session_id,
             ws.id,
+            ws.chatbot_id,
             body.jid,
             phone,
             body.text,

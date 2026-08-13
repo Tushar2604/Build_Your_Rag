@@ -235,10 +235,10 @@ function ConfigTab({ bot, onUpdate }: { bot: Chatbot; onUpdate: (b: Chatbot) => 
 
       {/* Save bar */}
       {dirty && (
-        <div className="sticky bottom-4 flex items-center justify-between rounded-xl bg-gray-900 text-white px-5 py-3 shadow-lg">
-          <span className="text-sm text-gray-300">You have unsaved changes.</span>
+        <div className="sticky bottom-4 flex items-center justify-between rounded-xl bg-ink-900 text-white px-5 py-3 shadow-pop">
+          <span className="text-sm text-white/70">You have unsaved changes.</span>
           <div className="flex items-center gap-3">
-            <button type="button" onClick={() => { setDirty(false); /* TODO: reset */ }} className="text-sm text-gray-400 hover:text-white">Discard</button>
+            <button type="button" onClick={() => { setDirty(false); /* TODO: reset */ }} className="text-sm text-white/70 hover:text-white">Discard</button>
             <button type="button" onClick={save} disabled={saving} className="btn-primary py-1.5 text-xs">
               {saving ? "Saving…" : "Save changes"}
             </button>
@@ -1116,13 +1116,13 @@ export default function AssistantDetailPage() {
       )}
 
       {/* ── Header ── */}
-      <header className="sticky top-0 z-30 bg-ink-950 border-b border-white/[0.06]">
+      <header className="sticky top-0 z-30 glass-chrome border-b">
         <div className="flex items-center gap-3 px-5 h-[58px] flex-wrap">
           <Link
             to="/assistants"
             aria-label="Back to assistants"
-            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-gray-400
-                       transition-colors hover:bg-white/[0.06] hover:text-gray-100 flex-shrink-0"
+            className="chrome-control inline-flex items-center justify-center w-8 h-8 rounded-lg
+                       flex-shrink-0"
           >
             <ArrowLeft className="w-[18px] h-[18px]" strokeWidth={2} />
           </Link>
@@ -1133,10 +1133,8 @@ export default function AssistantDetailPage() {
             maxLength={120}
             disabled={testing}
             aria-label="Assistant name"
-            className="w-[260px] rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5
-                       text-[14px] font-semibold text-gray-100 transition-colors
-                       focus:border-brand-500/60 focus:outline-none focus:bg-white/[0.07]
-                       disabled:opacity-50"
+            className="chrome-btn w-[260px] rounded-lg px-3 py-1.5 text-[14px] font-semibold
+                       focus:border-brand-500/60 focus:outline-none"
           />
 
           {/* Direction */}
@@ -1156,9 +1154,8 @@ export default function AssistantDetailPage() {
                 : "Incoming — a contact dials in. Click to switch to outgoing."
             }
             disabled={testing}
-            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04]
-                       px-3 py-1.5 text-[13px] font-medium text-gray-200 transition-colors
-                       hover:bg-white/[0.08] flex-shrink-0 disabled:opacity-50"
+            className="chrome-btn inline-flex items-center gap-2 rounded-lg px-3 py-1.5
+                       text-[13px] font-medium flex-shrink-0"
           >
             {outgoing ? "Outgoing" : "Incoming"}
             <span className="w-5 h-5 rounded-full bg-brand-500/20 flex items-center justify-center">
@@ -1177,8 +1174,8 @@ export default function AssistantDetailPage() {
               onClick={() => setShowVariables((v) => !v)}
               aria-expanded={showVariables}
               title="Variables you can use in the welcome message"
-              className="inline-flex items-center justify-center w-9 h-8 rounded-lg border border-white/10
-                         bg-white/[0.04] text-[13px] font-mono text-gray-300 transition-colors hover:bg-white/[0.08]"
+              className="chrome-btn inline-flex items-center justify-center w-9 h-8 rounded-lg
+                         text-[13px] font-mono"
             >
               {"{ }"}
             </button>
@@ -1246,8 +1243,8 @@ export default function AssistantDetailPage() {
 
               {/* Test with — saves the draft first; see startTest(). */}
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-[13px] font-semibold text-gray-200">Test with</span>
-                <div className="flex items-center rounded-lg overflow-hidden border border-white/10">
+                <span className="text-[13px] font-semibold text-gray-700">Test with</span>
+                <div className="flex items-center rounded-lg overflow-hidden border chrome-rule">
                   <button
                     onClick={() => startTest("chat")}
                     disabled={startingTest}
@@ -1267,7 +1264,7 @@ export default function AssistantDetailPage() {
                     disabled={startingTest}
                     className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
                                font-medium text-brand-300 transition-colors hover:bg-brand-600/30
-                               border-l border-white/10 disabled:opacity-50"
+                               border-l chrome-rule disabled:opacity-50"
                   >
                     <Headphones className="w-4 h-4" strokeWidth={1.75} />
                     Web Call
@@ -1277,7 +1274,7 @@ export default function AssistantDetailPage() {
                     title="Phone calls run through a connected number — set one up under Phone Numbers."
                     className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
                                font-medium text-brand-300 transition-colors hover:bg-brand-600/30
-                               border-l border-white/10"
+                               border-l chrome-rule"
                   >
                     <Phone className="w-4 h-4" strokeWidth={1.75} />
                     Phone Call
@@ -1287,9 +1284,8 @@ export default function AssistantDetailPage() {
 
               <button
                 onClick={() => setShowDeploy(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04]
-                           px-3.5 py-2 text-[13px] font-medium text-gray-200 transition-colors
-                           hover:bg-white/[0.08] flex-shrink-0"
+                className="chrome-btn inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2
+                           text-[13px] font-medium flex-shrink-0"
               >
                 <Rocket className="w-4 h-4" strokeWidth={1.75} />
                 Deploy
@@ -1313,9 +1309,7 @@ export default function AssistantDetailPage() {
                   aria-current={active ? "page" : undefined}
                   className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[13.5px]
                               font-medium transition-colors ${
-                                active
-                                  ? "bg-white/[0.08] text-white"
-                                  : "text-gray-400 hover:bg-white/[0.04] hover:text-gray-200"
+                                active ? "chrome-tab-active" : "chrome-tab"
                               }`}
                 >
                   <Icon className="w-4 h-4" strokeWidth={1.75} />
@@ -1328,7 +1322,7 @@ export default function AssistantDetailPage() {
           <div className="flex-1" />
 
           {/* UI ⇄ Code */}
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5">
+          <div className="chrome-btn flex items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-transparent">
             <span className={`text-[13px] font-semibold ${codeView ? "text-gray-500" : "text-brand-400"}`}>UI</span>
             <button
               type="button"

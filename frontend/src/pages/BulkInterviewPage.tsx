@@ -216,7 +216,7 @@ export default function BulkInterviewPage() {
     <div className="page max-w-3xl">
       <div className="flex items-center gap-2 mb-1">
         <Link to="/interviews" className="text-xs text-gray-400 hover:text-gray-600">Interviews</Link>
-        <span className="text-xs text-gray-300">/</span>
+        <span className="text-xs text-gray-400">/</span>
         <span className="text-xs text-gray-600 font-medium">Bulk invite</span>
       </div>
       <h1 className="page-title mb-6">Bulk interview invites</h1>
@@ -225,7 +225,7 @@ export default function BulkInterviewPage() {
       <div className="flex items-center gap-2 mb-6 text-xs text-gray-400">
         {(["setup", "upload", "review", "send"] as Step[]).map((s, i) => (
           <span key={s} className={`flex items-center gap-2 ${step === s ? "text-brand-700 font-semibold" : ""}`}>
-            {i > 0 && <span className="text-gray-300">→</span>}
+            {i > 0 && <span className="text-gray-400">→</span>}
             {i + 1}. {s === "setup" ? "Setup" : s === "upload" ? "Upload resumes" : s === "review" ? "Review" : "Send"}
           </span>
         ))}

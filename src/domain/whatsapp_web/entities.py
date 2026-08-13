@@ -118,6 +118,21 @@ class WhatsAppWebSession:
         self.last_seen_at = datetime.now(UTC)
         self._touch()
 
+    def observe_traffic(self) -> None:
+        """Record that a real message just came over the socket.
+
+        Traffic is stronger evidence than any status we were told about: it can
+        only happen on a live link. A row left at "disconnected" — because the
+        drop was reported and the matching reconnect was not — otherwise never
+        answers again, since `is_live()` insists on "linked". Only that one
+        recoverable state is promoted; "logged_out" and "failed" are decisions
+        WhatsApp or the bridge made, and a stray event must not undo them.
+        """
+        if self.status == "disconnected" and self.linked_at is not None:
+            self.status = "linked"
+            self.last_error = ""
+        self.heartbeat()
+
     def attach_chatbot(self, chatbot_id: ChatbotId | None) -> None:
         self.chatbot_id = chatbot_id
         self._touch()
@@ -136,7 +151,14 @@ class WhatsAppWebSession:
         return max(0, int(delta))
 
     def is_live(self) -> bool:
-        """Can this session answer a message right now?"""
+        """Is this number set up to answer — linked, with an assistant chosen?
+
+        A readiness question, for status copy and for tests. Deliberately *not*
+        what the inbound path gates on: an arriving message is itself proof the
+        socket is up, and gating the reply on this instead meant one missed
+        reconnect event left a working number permanently mute. That path
+        checks only whether an assistant is attached.
+        """
         return self.status == "linked" and self.chatbot_id is not None
 
     def can_reconnect(self) -> bool:

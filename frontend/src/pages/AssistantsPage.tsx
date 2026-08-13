@@ -153,7 +153,7 @@ function CreateAssistantCard({ onCreated }: { onCreated: (bot: Chatbot) => void 
                     className={`rounded-lg px-4 py-2 text-[13px] font-medium transition-colors ${
                       active
                         ? "bg-brand-500/15 text-brand-400 ring-1 ring-inset ring-brand-500/40"
-                        : "bg-surface-2 text-gray-400 hover:text-gray-200 hover:bg-gray-100"
+                        : "bg-surface-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100"
                     }`}
                   >
                     {uc.label}

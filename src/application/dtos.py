@@ -46,6 +46,11 @@ class AskInput(BaseModel):
     # use case knows nothing about. Letting it be re-added here would show every
     # such message twice in the inbox.
     persist_user_message: bool = True
+    # Answer as this assistant rather than the one the session was opened with.
+    # WhatsApp needs it: a thread is created at the first inbound message and
+    # then outlives every later change to which assistant answers the number,
+    # so the session's own chatbot is stale the moment the user picks another.
+    chatbot_id: uuid.UUID | None = None
 
 
 class CitationOut(BaseModel):
