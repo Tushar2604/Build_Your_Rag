@@ -80,11 +80,25 @@ async function warmDatabase() {
   }
 }
 
+// This container starts the bridge before Uvicorn is accepting connections
+// (see scripts/start.sh) — migrations plus Python/DB startup routinely take
+// longer than Baileys takes to resume a session and fire its first
+// connection event. Without a retry, that first notify() (often a "linked"
+// status, sometimes a customer's actual first message) hit a closed port,
+// failed, and was gone for good. `event` matters here — a "message" dropped
+// this way is one the assistant was never even asked to answer, silently.
+const NOTIFY_RETRIES = 5;
+const NOTIFY_BACKOFF_MS = 1000; // 1s, 2s, 4s, 8s, 16s — ~31s worst case
+
 /** Report an event to the API. Never throws — a momentarily unreachable API
- * must not kill the WhatsApp socket that produced the event. */
-async function notify(sessionId, event, payload) {
+ * must not kill the WhatsApp socket that produced the event. Retries only a
+ * network-level failure (connection refused/reset — the API process isn't
+ * there yet, or isn't there anymore); an HTTP error response is a real
+ * answer from a live server and is not retried. */
+async function notify(sessionId, event, payload, attempt = 0) {
+  let res;
   try {
-    const res = await fetch(`${API_BASE}${EVENT_PATH}`, {
+    res = await fetch(`${API_BASE}${EVENT_PATH}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -92,24 +106,33 @@ async function notify(sessionId, event, payload) {
       },
       body: JSON.stringify({ session_id: sessionId, event, ...payload }),
     });
-    if (!res.ok) {
-      log.warn({ sessionId, event, status: res.status }, "api rejected bridge event");
-      return null;
-    }
-    const body = await res.json().catch(() => null);
-    // The API already tells us when a session row is gone; until now nothing
-    // acted on it, so an unlinked session kept its socket and its reconnect
-    // timer forever — retrying a link that can never be restored, and filling
-    // the logs with failures for a session the user deleted minutes ago.
-    if (body?.status === "unknown_session") {
-      log.info({ sessionId }, "session no longer exists — stopping socket");
-      manager.stop(sessionId, { keepAuth: false }).catch(() => {});
-    }
-    return body;
   } catch (err) {
-    log.warn({ sessionId, event, err: err.message }, "could not reach api");
+    if (attempt < NOTIFY_RETRIES) {
+      const delay = NOTIFY_BACKOFF_MS * 2 ** attempt;
+      log.warn(
+        { sessionId, event, err: err.message, attempt: attempt + 1, delay },
+        "could not reach api, retrying",
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return notify(sessionId, event, payload, attempt + 1);
+    }
+    log.warn({ sessionId, event, err: err.message }, "could not reach api, giving up");
     return null;
   }
+  if (!res.ok) {
+    log.warn({ sessionId, event, status: res.status }, "api rejected bridge event");
+    return null;
+  }
+  const body = await res.json().catch(() => null);
+  // The API already tells us when a session row is gone; until now nothing
+  // acted on it, so an unlinked session kept its socket and its reconnect
+  // timer forever — retrying a link that can never be restored, and filling
+  // the logs with failures for a session the user deleted minutes ago.
+  if (body?.status === "unknown_session") {
+    log.info({ sessionId }, "session no longer exists — stopping socket");
+    manager.stop(sessionId, { keepAuth: false }).catch(() => {});
+  }
+  return body;
 }
 
 /**
