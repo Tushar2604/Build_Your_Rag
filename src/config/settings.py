@@ -179,6 +179,16 @@ class Settings(BaseSettings):
     bridge_token: str = ""
     bridge_base_url: str = "http://127.0.0.1:8081"
 
+    # --- Conversation follow-ups ---
+    # How long a contact may stay silent before the assistant nudges them, how
+    # many nudges they get before the sign-off, and how often the sweep looks.
+    # The sweep interval only bounds how *late* a nudge can be — the schedule
+    # itself lives on the conversation row, so it survives a restart.
+    follow_ups_enabled: bool = True
+    follow_up_after_minutes: int = 5
+    max_follow_ups: int = 2
+    follow_up_sweep_seconds: int = 60
+
     # --- Issue reports ---
     # Where "Report Issue" submissions are emailed. Blank = reports are still
     # persisted and visible in the admin list, they just aren't emailed out.

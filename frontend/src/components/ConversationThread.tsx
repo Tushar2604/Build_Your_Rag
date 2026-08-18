@@ -88,24 +88,51 @@ function initialsFor(name: string, phone: string): string {
   return source.slice(0, 2).toUpperCase();
 }
 
+/** Faces for the contacts who have no saved name — a number alone is
+ * impossible to tell apart at a glance, and two initials pulled from a phone
+ * number ("91", "91", "91") are worse than useless in a list of Indian
+ * numbers. Kept deliberately neutral: no flags, no gestures, nothing that
+ * reads as a judgement about the person. */
+const AVATAR_EMOJI = [
+  "🙂", "😀", "😎", "🤓", "🧑", "👩", "👨", "🧔",
+  "👩‍💻", "🧑‍💻", "👨‍💼", "👩‍💼", "🧑‍🎓", "👩‍🎓", "👨‍🎓", "🦊",
+  "🐨", "🐼", "🦉", "🐧", "🦁", "🐯", "🐸", "🐳",
+];
+
+/** The emoji this contact always gets. Keyed off the number, not the name, so
+ * it survives them being renamed. */
+export function emojiFor(phone: string): string {
+  let hash = 0;
+  for (let i = 0; i < phone.length; i += 1) hash = (hash * 33 + phone.charCodeAt(i)) | 0;
+  return AVATAR_EMOJI[Math.abs(hash) % AVATAR_EMOJI.length];
+}
+
 export function Avatar({
   name,
   phone,
   size = 44,
+  emoji = false,
 }: {
   name: string;
   phone: string;
   size?: number;
+  /** Show the contact's emoji rather than their initials. Used where the list
+   * is mostly unsaved numbers (Candidates) — initials off a phone number tell
+   * you nothing, a distinct face is at least memorable. */
+  emoji?: boolean;
 }) {
+  // A saved name still wins: real initials identify someone better than any
+  // generated icon, so the emoji is the fallback rather than the default.
+  const showEmoji = emoji && !name.trim();
   return (
     <span
       aria-hidden="true"
-      style={{ width: size, height: size, fontSize: size * 0.34 }}
+      style={{ width: size, height: size, fontSize: size * (showEmoji ? 0.5 : 0.34) }}
       className={`flex-shrink-0 inline-flex items-center justify-center rounded-full
                   bg-gradient-to-br ${tintFor(phone)} font-semibold text-white
-                  tracking-tight select-none`}
+                  tracking-tight select-none leading-none`}
     >
-      {initialsFor(name, phone)}
+      {showEmoji ? emojiFor(phone) : initialsFor(name, phone)}
     </span>
   );
 }

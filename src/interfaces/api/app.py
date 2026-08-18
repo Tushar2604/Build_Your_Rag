@@ -7,7 +7,9 @@ process is picked back up.
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
+from datetime import timedelta
 from pathlib import Path
 
 import structlog
@@ -16,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.application.use_cases.follow_up import SendFollowUps
 from src.application.use_cases.ingest_document import IngestDocument, ResumePendingIngestions
 from src.config.container import get_container
 from src.config.settings import get_settings
@@ -122,8 +125,25 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     except Exception:  # noqa: BLE001 - never block startup on the resume sweep
         log.exception("startup.resume_failed")
 
+    # Nudges contacts who have gone quiet. A task rather than a cron job or an
+    # external worker: this deployment is a single process, and the schedule
+    # itself lives in Postgres, so the loop is only a clock — losing it to a
+    # restart delays follow-ups until the next boot rather than dropping them.
+    follow_ups = None
+    if settings.follow_ups_enabled:
+        follow_ups = asyncio.create_task(_follow_up_loop(settings))
+
     log.info("app.started", env=settings.app_env)
     yield
+
+    if follow_ups is not None:
+        follow_ups.cancel()
+        # Awaited so the task is actually finished before the engine is
+        # disposed underneath it, rather than logging a connection error on
+        # the way out.
+        with suppress(asyncio.CancelledError):
+            await follow_ups
+
     # Flush buffered telemetry before the engine/process goes away.
     try:
         await container.tracer.flush()
@@ -131,6 +151,32 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         log.exception("shutdown.tracer_flush_failed")
     await dispose_engine()
     log.info("app.stopped")
+
+
+async def _follow_up_loop(settings) -> None:
+    """Run the follow-up sweep forever, on a fixed interval.
+
+    Every failure is swallowed and retried on the next tick: a sweep that
+    raises (a database blip, a bridge restart) must not kill the loop and
+    silently end follow-ups for the life of the process.
+    """
+    container = get_container()
+    while True:
+        await asyncio.sleep(settings.follow_up_sweep_seconds)
+        try:
+            sent = await SendFollowUps(
+                container.unit_of_work(),
+                bridge=container.whatsapp_bridge,
+                whatsapp_sender=container.whatsapp_sender,
+                after=timedelta(minutes=settings.follow_up_after_minutes),
+                max_follow_ups=settings.max_follow_ups,
+            ).execute()
+            if sent:
+                log.info("followup.sweep", sent=sent)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - one bad sweep must not end the loop
+            log.exception("followup.sweep_failed")
 
 
 def create_app() -> FastAPI:

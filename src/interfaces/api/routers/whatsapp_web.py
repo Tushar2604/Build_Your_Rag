@@ -1024,8 +1024,18 @@ async def bridge_events(
 
         # A reply on a campaign thread advances that recipient's funnel. The
         # Twilio path has always done this; the personal path never did, so
-        # personal-sender campaigns reported zero replies.
+        # personal-sender campaigns reported zero replies. Runs for synced
+        # messages too: a reply that reached us late is still a reply, and the
+        # funnel should say so.
         await mark_replied(container, chat_session_id)
+
+        if body.synced:
+            # WhatsApp catching this device up, not a live message. It belongs
+            # in the thread and in the funnel, but answering it would mean
+            # replying to whatever the backfill happened to contain — possibly
+            # days after the fact.
+            log.info("whatsapp.reply.skipped", session_id=str(ws.id), reason="synced")
+            return {"status": "synced"}
 
         if effective_chatbot_id is None:
             # Linked but no assistant attached anywhere — receiving is fine,

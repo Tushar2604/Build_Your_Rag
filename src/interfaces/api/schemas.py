@@ -944,6 +944,11 @@ class BridgeEventRequest(BaseModel):
     direction: Literal["in", "out"] = "in"
     # What the thread list shows: the caption, or a label like "Photo".
     preview: str = ""
+    # True when WhatsApp was catching the linked device up rather than
+    # delivering something live (messages typed on the phone, a reconnect
+    # backfill). Stored so the inbox matches WhatsApp, never answered — a sync
+    # batch must not make the assistant reply to a days-old conversation.
+    synced: bool = False
     # Attachment metadata. `media_storage_key` is set once the bridge has
     # uploaded the bytes; `media_error` explains an attachment we know arrived
     # but could not store (too large, download failed).

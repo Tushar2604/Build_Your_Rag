@@ -196,6 +196,12 @@ class FakeConversations:
     async def add(self, conversation) -> None:
         self.added.append(conversation)
 
+    async def update(self, conversation) -> None:
+        # Already the same object the fake handed out, so there is nothing to
+        # write back — but the real repository is called on the returning-
+        # contact path (to start their follow-up clock) and must exist here.
+        assert conversation in self.added
+
 
 class FakeUow:
     def __init__(self) -> None:

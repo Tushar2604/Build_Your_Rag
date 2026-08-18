@@ -256,3 +256,90 @@ test("sending on a session with no socket fails loudly", async () => {
     /isn't connected/,
   );
 });
+
+// --- Recipient verification ---
+//
+// WhatsApp accepts a send to any well-formed JID, registered or not, and
+// answers success either way. Without a check, a number mistyped into a
+// campaign (a local number pasted with no country code is the usual one) is
+// reported as delivered and simply never arrives.
+
+/** Attach a fake socket so the send paths can run without a real connection. */
+function withSocket(manager, { onWhatsApp, sent } = {}) {
+  manager.sockets.set(SESSION, {
+    sock: {
+      onWhatsApp: onWhatsApp || (async (jid) => [{ jid, exists: true }]),
+      sendMessage: async (jid, content) => sent?.push({ jid, content }),
+    },
+  });
+}
+
+test("a number that isn't on WhatsApp fails with an actionable message", async () => {
+  const { manager } = harness();
+  const sent = [];
+  withSocket(manager, { onWhatsApp: async () => [], sent });
+
+  await assert.rejects(
+    () => manager.sendText(SESSION, "+9122091018@s.whatsapp.net", "hi"),
+    /isn't a WhatsApp account.*country code/s,
+  );
+  assert.equal(sent.length, 0, "nothing may be sent to an unregistered number");
+});
+
+test("a registered number is sent to the canonical jid the lookup returns", async () => {
+  const { manager } = harness();
+  const sent = [];
+  withSocket(manager, {
+    onWhatsApp: async () => [{ jid: LID, exists: true }],
+    sent,
+  });
+
+  await manager.sendText(SESSION, DIRECT, "hi");
+  assert.deepEqual(sent, [{ jid: LID, content: { text: "hi" } }]);
+});
+
+test("a failed lookup still sends — an outage must not block real messages", async () => {
+  const { manager } = harness();
+  const sent = [];
+  withSocket(manager, {
+    onWhatsApp: async () => {
+      throw new Error("usync timed out");
+    },
+    sent,
+  });
+
+  await manager.sendText(SESSION, DIRECT, "hi");
+  assert.equal(sent.length, 1, "fails open: inconclusive is not a rejection");
+});
+
+test("a @lid address is sent to directly, with no lookup", async () => {
+  const { manager } = harness();
+  const sent = [];
+  let looked = false;
+  withSocket(manager, {
+    onWhatsApp: async () => {
+      looked = true;
+      return [];
+    },
+    sent,
+  });
+
+  await manager.sendText(SESSION, LID, "hi");
+  assert.equal(looked, false, "a live @lid chat needs no verification");
+  assert.deepEqual(sent, [{ jid: LID, content: { text: "hi" } }]);
+});
+
+// --- Synced (catch-up) messages ---
+
+test("messages synced from the phone are stored but flagged not to answer", async () => {
+  const { manager, events } = harness();
+  await manager.handleInbound(SESSION, inbound(), { synced: true });
+  assert.equal(events.length, 1, "it belongs in the thread");
+  assert.equal(events[0].payload.synced, true);
+});
+
+test("a live message is not flagged as synced", async () => {
+  const { manager, events } = harness();
+  await manager.handleInbound(SESSION, inbound());
+  assert.equal(events[0].payload.synced, false);
+});

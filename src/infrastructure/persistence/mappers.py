@@ -388,6 +388,8 @@ def whatsapp_conversation_to_domain(row: m.WhatsAppConversationModel) -> WhatsAp
         last_message_preview=row.last_message_preview,
         unread_count=row.unread_count,
         has_attachment=row.has_attachment,
+        awaiting_reply_since=row.awaiting_reply_since,
+        followups_sent=row.followups_sent,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

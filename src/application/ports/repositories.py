@@ -11,7 +11,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
 from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
@@ -411,6 +411,13 @@ class WhatsAppConversation:
     last_message_preview: str = ""
     unread_count: int = 0
     has_attachment: bool = False
+    # --- Follow-up ladder (see migration 0024) ---
+    # When we last spoke and started waiting for an answer. None means we are
+    # not waiting on anyone: they replied, or the ladder has been signed off.
+    awaiting_reply_since: datetime | None = None
+    # Nudges sent since they last said anything. `MAX_FOLLOW_UPS + 1` counts the
+    # sign-off, which is what stops the ladder for good.
+    followups_sent: int = 0
     id: uuid.UUID = field(default_factory=new_id)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -420,6 +427,10 @@ class WhatsAppConversation:
 
         Unread counts only inbound messages — an assistant answer or an operator
         reply is not something the operator needs to be told about.
+
+        This is also where the follow-up clock starts and stops, because every
+        message in either direction passes through here: anything we send means
+        we are waiting again, and anything they send means we are not.
         """
         self.last_message_at = datetime.now(UTC)
         self.last_message_preview = (preview or "").strip()[:300]
@@ -427,6 +438,50 @@ class WhatsAppConversation:
             self.has_attachment = True
         if inbound:
             self.unread_count += 1
+            # They are back. Stop waiting, and clear the ladder so a future
+            # silence is nudged from the top rather than resuming mid-way.
+            self.awaiting_reply_since = None
+            self.followups_sent = 0
+        else:
+            self.start_waiting()
+        self.updated_at = datetime.now(UTC)
+
+    def start_waiting(self, *, now: datetime | None = None) -> None:
+        """Begin (or restart) the countdown to the next follow-up.
+
+        A thread that has already been signed off stays signed off: the
+        counter is left alone, so `follow_up_due` keeps refusing it until the
+        contact actually replies. Otherwise a manual message months later
+        would restart a ladder nobody asked for.
+        """
+        self.awaiting_reply_since = now or datetime.now(UTC)
+        self.updated_at = datetime.now(UTC)
+
+    def follow_up_due(
+        self, *, after: timedelta, max_follow_ups: int, now: datetime | None = None
+    ) -> bool:
+        """Whether this thread has gone quiet long enough to deserve a nudge."""
+        if self.awaiting_reply_since is None or not self.auto_reply:
+            return False
+        # `> max` rather than `>=`: the sign-off is the (max + 1)th message and
+        # is still owed to a thread that has had both nudges.
+        if self.followups_sent > max_follow_ups:
+            return False
+        return (now or datetime.now(UTC)) - self.awaiting_reply_since >= after
+
+    def is_final_follow_up(self, *, max_follow_ups: int) -> bool:
+        """True when the next thing we send should be the sign-off, not a nudge."""
+        return self.followups_sent >= max_follow_ups
+
+    def record_follow_up(self, *, final: bool, now: datetime | None = None) -> None:
+        """Book a nudge that has just gone out.
+
+        The sign-off clears `awaiting_reply_since` as well as bumping the
+        count: nothing is being waited for any more, which also drops the row
+        straight out of the sweep's partial index.
+        """
+        self.followups_sent += 1
+        self.awaiting_reply_since = None if final else (now or datetime.now(UTC))
         self.updated_at = datetime.now(UTC)
 
     def mark_read(self) -> None:
@@ -490,6 +545,9 @@ class WhatsAppConversationRepository(Protocol):
         unread_only: bool = False,
         auto_reply: bool | None = None,
     ) -> int: ...
+    async def list_due_follow_ups(
+        self, *, cutoff: datetime, max_follow_ups: int, limit: int = 50
+    ) -> list[WhatsAppConversation]: ...
 
 
 @runtime_checkable

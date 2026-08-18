@@ -10,7 +10,7 @@
 // than re-implementing send here.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download, MessageCircle, Search, Users } from "lucide-react";
+import { Download, MessageCircle, Paperclip, Search, Users } from "lucide-react";
 
 import { Candidate, listCandidates } from "../api/candidates";
 import { ApiError } from "../api/client";
@@ -209,7 +209,7 @@ export default function CandidatesPage() {
                     active ? "border-brand-500 bg-brand-500/10" : "border-transparent hover:bg-gray-100"
                   }`}
                 >
-                  <Avatar name={c.display_name} phone={c.phone_number} />
+                  <Avatar name={c.display_name} phone={c.phone_number} emoji />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline justify-between gap-2">
                       <span className="truncate text-[14px] font-semibold text-gray-900">
@@ -224,6 +224,13 @@ export default function CandidatesPage() {
                       </span>
                     </span>
                     <span className="mt-0.5 flex items-center gap-1.5">
+                      {c.has_attachment && (
+                        <Paperclip
+                          className="w-3 h-3 flex-shrink-0 text-gray-400"
+                          strokeWidth={2}
+                          aria-label="Sent documents"
+                        />
+                      )}
                       <span className="min-w-0 flex-1 truncate text-[12.5px] text-gray-500">
                         {c.last_message_preview || "—"}
                       </span>
@@ -233,7 +240,13 @@ export default function CandidatesPage() {
                         </span>
                       )}
                     </span>
-                    <span className="mt-1 block truncate text-[10.5px] text-gray-400">{c.channel_label}</span>
+                    {/* The number is the identity here, so it stays visible
+                        even once a name is known — an HR user searching their
+                        own phone needs it, and half these contacts never get
+                        saved a name at all. */}
+                    <span className="mt-1 block truncate text-[10.5px] text-gray-400">
+                      {c.display_name ? `${c.phone_number} · ${c.channel_label}` : c.channel_label}
+                    </span>
                   </span>
                 </button>
               </li>
@@ -262,15 +275,36 @@ export default function CandidatesPage() {
           </div>
         ) : (
           <>
-            <header className="flex flex-shrink-0 items-center gap-3 border-b border-gray-200 bg-surface px-5 py-2.5">
-              <Avatar name={selected.display_name} phone={selected.phone_number} size={38} />
+            <header className="flex flex-shrink-0 items-center gap-3.5 border-b border-gray-200 bg-surface px-5 py-3">
+              <Avatar name={selected.display_name} phone={selected.phone_number} size={46} emoji />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[14px] font-semibold text-gray-900">
+                <p className="truncate text-[15px] font-semibold text-gray-900">
                   {selected.display_name || selected.phone_number}
                 </p>
                 <p className="truncate text-[11.5px] text-gray-500">
                   {selected.phone_number} · {selected.channel_label}
                 </p>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10.5px] font-medium text-gray-600">
+                    {messages.length} message{messages.length === 1 ? "" : "s"}
+                  </span>
+                  {documents.length > 0 && (
+                    <span className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[10.5px] font-medium text-brand-600">
+                      {documents.length} document{documents.length === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  {/* Says who is answering this thread, which is the first
+                      thing you want to know before replying by hand. */}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10.5px] font-medium ${
+                      selected.auto_reply
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    {selected.auto_reply ? "Assistant replying" : "Handled by a human"}
+                  </span>
+                </div>
               </div>
               {selected.channel_kind === "personal" && selected.session_id && (
                 <Link

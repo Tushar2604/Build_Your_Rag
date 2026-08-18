@@ -1292,6 +1292,8 @@ class WhatsAppConversationRepositoryImpl:
                 last_message_preview=conversation.last_message_preview,
                 unread_count=conversation.unread_count,
                 has_attachment=conversation.has_attachment,
+                awaiting_reply_since=conversation.awaiting_reply_since,
+                followups_sent=conversation.followups_sent,
                 created_at=conversation.created_at,
                 updated_at=conversation.updated_at,
             )
@@ -1308,6 +1310,8 @@ class WhatsAppConversationRepositoryImpl:
                 last_message_preview=conversation.last_message_preview,
                 unread_count=conversation.unread_count,
                 has_attachment=conversation.has_attachment,
+                awaiting_reply_since=conversation.awaiting_reply_since,
+                followups_sent=conversation.followups_sent,
                 updated_at=conversation.updated_at,
             )
         )
@@ -1475,6 +1479,40 @@ class WhatsAppConversationRepositoryImpl:
                 )
             ).scalar_one()
         )
+
+    async def list_due_follow_ups(
+        self, *, cutoff: datetime, max_follow_ups: int, limit: int = 50
+    ) -> list[WhatsAppConversation]:
+        """Conversations that have gone quiet long enough to deserve a nudge.
+
+        Deliberately not tenant-scoped: this backs a system sweep that runs on
+        a timer with no request and no principal behind it, the same shape as
+        the bridge's `get_unscoped` lookups. Every row it returns still carries
+        its own `tenant_id`, and the caller scopes each send to that tenant.
+
+        Ordered oldest-first so the contact who has been waiting longest is
+        served first when a backlog builds up after the host has been asleep.
+        """
+        rows = (
+            (
+                await self._s.execute(
+                    select(m.WhatsAppConversationModel)
+                    .where(
+                        m.WhatsAppConversationModel.awaiting_reply_since.is_not(None),
+                        m.WhatsAppConversationModel.awaiting_reply_since <= cutoff,
+                        m.WhatsAppConversationModel.auto_reply.is_(True),
+                        # The sign-off is the (max + 1)th message, so a thread
+                        # is still owed one when it is exactly at the limit.
+                        m.WhatsAppConversationModel.followups_sent <= max_follow_ups,
+                    )
+                    .order_by(m.WhatsAppConversationModel.awaiting_reply_since.asc())
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [map_.whatsapp_conversation_to_domain(r) for r in rows]
 
 
 class PostCallConfigRepositoryImpl:

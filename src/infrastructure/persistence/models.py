@@ -420,6 +420,12 @@ class WhatsAppConversationModel(Base):
     last_message_preview: Mapped[str] = mapped_column(String(300), server_default="")
     unread_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     has_attachment: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # Added in 0024. NULL means nobody is being waited on, which is the state
+    # the follow-up sweep's partial index is built to skip.
+    awaiting_reply_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    followups_sent: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

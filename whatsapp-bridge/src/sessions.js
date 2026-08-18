@@ -161,16 +161,22 @@ export class SessionManager {
     });
 
     sock.ev.on("messages.upsert", async (event) => {
-      if (event.type !== "notify") return;
+      // "notify" is a live message. "append" is WhatsApp catching this device
+      // up — most importantly the messages the operator typed on the phone
+      // itself, which is why the inbox used to disagree with what WhatsApp
+      // showed. Both are stored; only "notify" may be answered, so a sync
+      // batch can never make the assistant reply to a conversation days late.
+      if (event.type !== "notify" && event.type !== "append") return;
+      const synced = event.type === "append";
       for (const message of event.messages) {
-        await this.handleInbound(sessionId, message);
+        await this.handleInbound(sessionId, message, { synced });
       }
     });
 
     return sock;
   }
 
-  async handleInbound(sessionId, message) {
+  async handleInbound(sessionId, message, { synced = false } = {}) {
     const jid = message.key?.remoteJid || "";
     const isLidChat = jid.endsWith(LID_CHAT_SUFFIX);
     if (!jid.endsWith(DIRECT_CHAT_SUFFIX) && !isLidChat) return; // groups, status, broadcasts
@@ -206,6 +212,9 @@ export class SessionManager {
       message_id: message.key?.id || "",
       pushname: message.pushName || "",
       preview: previewFor(text, media),
+      // Recorded so the thread matches WhatsApp, but never answered — see the
+      // messages.upsert handler.
+      synced,
     };
 
     if (media) {
@@ -304,16 +313,70 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Resolve the address to actually send to, and confirm someone is there.
+   *
+   * WhatsApp accepts a send to any well-formed JID without complaint — a
+   * number that was never registered, or one mistyped into a campaign's
+   * contact list, returns exactly the same success as a real delivery. That
+   * silence is the worst possible failure mode for a broadcast tool: the
+   * campaign reports "sent", the operator waits for a reply, and the message
+   * never existed. `onWhatsApp` is a USync lookup that answers whether the
+   * number is registered, and hands back the canonical JID (including the
+   * @lid form) to address it by.
+   *
+   * Fails open on a lookup *error* — a USync timeout must not block a real
+   * send — but closed on a definitive "not registered", which is the case
+   * worth catching.
+   */
+  async resolveJid(sessionId, toJid) {
+    const entry = this.sockets.get(sessionId);
+    if (!entry) throw new Error("This WhatsApp session isn't connected.");
+    // A @lid address is already canonical and came from a live conversation,
+    // so there is nothing to look up and nobody to doubt.
+    if (!String(toJid).endsWith("@s.whatsapp.net")) return { jid: toJid };
+
+    let results;
+    try {
+      results = await entry.sock.onWhatsApp(toJid);
+    } catch (err) {
+      logger.warn({ sessionId, err: err.message }, "number check failed, sending anyway");
+      return { jid: toJid };
+    }
+    // `undefined` means the query itself produced nothing usable (offline,
+    // rate limited) — treated as inconclusive rather than as a rejection.
+    if (!results) return { jid: toJid };
+
+    const match = results.find((r) => r.exists);
+    if (!match) return { jid: toJid, registered: false };
+    return { jid: match.jid || toJid, registered: true };
+  }
+
+  /** Throws a message an operator can act on when the number isn't reachable. */
+  async #addressFor(sessionId, toJid) {
+    const resolved = await this.resolveJid(sessionId, toJid);
+    if (resolved.registered === false) {
+      throw new Error(
+        `${jidToPhone(toJid)} isn't a WhatsApp account. Check the country code — ` +
+          `a local number pasted without one is the usual cause.`,
+      );
+    }
+    return resolved.jid;
+  }
+
   async sendText(sessionId, toJid, text) {
     const entry = this.sockets.get(sessionId);
     if (!entry) throw new Error("This WhatsApp session isn't connected.");
-    await entry.sock.sendMessage(toJid, { text });
+    await entry.sock.sendMessage(await this.#addressFor(sessionId, toJid), { text });
   }
 
   async sendMedia(sessionId, toJid, kind, buffer, { mimeType, fileName, caption } = {}) {
     const entry = this.sockets.get(sessionId);
     if (!entry) throw new Error("This WhatsApp session isn't connected.");
-    await entry.sock.sendMessage(toJid, buildMediaContent(kind, buffer, { mimeType, fileName, caption }));
+    await entry.sock.sendMessage(
+      await this.#addressFor(sessionId, toJid),
+      buildMediaContent(kind, buffer, { mimeType, fileName, caption }),
+    );
   }
 
   /** Stop the socket. `keepAuth` distinguishes a restart from an unlink. */

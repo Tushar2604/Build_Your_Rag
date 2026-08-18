@@ -299,6 +299,12 @@ class SendBroadcast:
         owner_id = broadcast.sender_id
         existing = await uow.whatsapp_conversations.get(owner_id, recipient.phone_number)
         if existing is not None:
+            # The opening message has just gone out on an existing thread, so
+            # the follow-up clock starts here too — a returning contact who
+            # ignores this campaign is exactly as worth nudging as a new one.
+            if broadcast.replies_are_answered():
+                existing.start_waiting()
+                await uow.whatsapp_conversations.update(existing)
             return existing.session_id
 
         session = ChatSession(
@@ -307,14 +313,18 @@ class SendBroadcast:
             title=recipient.display_name or recipient.phone_number,
         )
         await uow.chats.add_session(session)
-        await uow.whatsapp_conversations.add(
-            WhatsAppConversation(
-                whatsapp_channel_id=owner_id,
-                phone_number=recipient.phone_number,
-                session_id=session.id,
-                tenant_id=broadcast.tenant_id,
-                auto_reply=broadcast.replies_are_answered(),
-            )
+        conversation = WhatsAppConversation(
+            whatsapp_channel_id=owner_id,
+            phone_number=recipient.phone_number,
+            session_id=session.id,
+            tenant_id=broadcast.tenant_id,
+            auto_reply=broadcast.replies_are_answered(),
         )
+        # Only a campaign whose replies are answered follows up. An
+        # announce-only broadcast is a notice, not a conversation, and nudging
+        # someone about one would be the assistant speaking out of turn.
+        if broadcast.replies_are_answered():
+            conversation.start_waiting()
+        await uow.whatsapp_conversations.add(conversation)
         await uow.flush()
         return session.id
