@@ -35,6 +35,13 @@ const RECONNECT_MAX_MS = 60_000;
 // A group JID ends in @g.us. Auto-replying into group chats is a fast way to
 // get a number reported, so the bridge drops them before the API ever sees them.
 const DIRECT_CHAT_SUFFIX = "@s.whatsapp.net";
+// WhatsApp's phone-number-privacy rollout addresses some direct chats by an
+// opaque "linked ID" instead of the phone number — Baileys treats @lid as a
+// fully valid 1:1 chat address (see isLidUser / decodeMessageNode in
+// @whiskeysockets/baileys), not a group/broadcast type. A contact whose chat
+// happens to be LID-routed was previously indistinguishable from a group here
+// and silently dropped: no log, no error, the message just never arrived.
+const LID_CHAT_SUFFIX = "@lid";
 
 /** Strip the WhatsApp JID down to an E.164 number. */
 export function jidToPhone(jid) {
@@ -165,7 +172,18 @@ export class SessionManager {
 
   async handleInbound(sessionId, message) {
     const jid = message.key?.remoteJid || "";
-    if (!jid.endsWith(DIRECT_CHAT_SUFFIX)) return; // groups, status, broadcasts
+    const isLidChat = jid.endsWith(LID_CHAT_SUFFIX);
+    if (!jid.endsWith(DIRECT_CHAT_SUFFIX) && !isLidChat) return; // groups, status, broadcasts
+
+    // A LID is an opaque per-contact identifier, not a phone number — parsing
+    // it the way a normal @s.whatsapp.net JID is parsed would produce a
+    // number that means nothing (and can never match a campaign recipient,
+    // since everything else in this app keys a contact by E.164 phone).
+    // Baileys carries the real number alongside as `key.senderPn` for exactly
+    // this case. If it isn't present yet, there is no correct number to file
+    // this under, so the message is dropped rather than filed under a fake one.
+    const phoneJid = isLidChat ? message.key?.senderPn || "" : jid;
+    if (!phoneJid) return;
 
     // Messages the operator sent from the phone itself echo back here. They are
     // reported (so the inbox agrees with what WhatsApp shows) but marked
@@ -178,7 +196,10 @@ export class SessionManager {
     if (!text && !media) return;
 
     const payload = {
-      from: jidToPhone(jid),
+      from: jidToPhone(phoneJid),
+      // The original jid, not phoneJid: replies must address the same chat
+      // WhatsApp is actually routing this contact through (their LID, if
+      // that's what arrived), not a phone-number address that may not work.
       jid,
       text,
       direction: outbound ? "out" : "in",

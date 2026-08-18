@@ -13,6 +13,7 @@ import { SessionManager, extractText, jidToPhone } from "../src/sessions.js";
 const SESSION = "11111111-1111-1111-1111-111111111111";
 const DIRECT = "917502163963@s.whatsapp.net";
 const GROUP = "120363000000000000@g.us";
+const LID = "138078937182420@lid";
 
 /** A manager that records notifications instead of making network calls. */
 function harness({ uploadMedia, fetchMedia } = {}) {
@@ -112,6 +113,28 @@ test("group messages are dropped", async () => {
   // Auto-replying into a group is how a number gets reported.
   const { manager, events } = harness();
   await manager.handleInbound(SESSION, inbound({ key: { remoteJid: GROUP } }));
+  assert.equal(events.length, 0);
+});
+
+test("a @lid-addressed contact is forwarded, keyed by their real phone number", async () => {
+  // WhatsApp's phone-number-privacy rollout routes some direct chats through
+  // an opaque @lid address instead of the number. It's still a real 1:1 chat
+  // — previously indistinguishable here from a group and silently dropped —
+  // and Baileys carries the actual number separately as `key.senderPn`.
+  const { manager, events } = harness();
+  await manager.handleInbound(
+    SESSION,
+    inbound({ key: { remoteJid: LID, senderPn: DIRECT } }),
+  );
+  assert.equal(events.length, 1);
+  const { payload } = events[0];
+  assert.equal(payload.from, "+917502163963", "filed under the real number, not the LID");
+  assert.equal(payload.jid, LID, "still addressed to the LID for the reply to reach the same chat");
+});
+
+test("a @lid message with no resolved phone number is dropped, not filed under a fake one", async () => {
+  const { manager, events } = harness();
+  await manager.handleInbound(SESSION, inbound({ key: { remoteJid: LID } }));
   assert.equal(events.length, 0);
 });
 

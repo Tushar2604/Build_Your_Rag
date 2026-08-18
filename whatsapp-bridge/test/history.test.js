@@ -20,10 +20,35 @@ test("directPhone accepts direct chats and rejects everything else", () => {
   assert.equal(directPhone(undefined), "");
 });
 
+test("directPhone resolves a @lid chat from its phone-number alt", () => {
+  assert.equal(
+    directPhone("138078937182420@lid", "917502163963@s.whatsapp.net"),
+    "+917502163963",
+    "a LID chat with a known phone alt resolves to that number",
+  );
+  assert.equal(
+    directPhone("138078937182420@lid"),
+    "",
+    "a LID chat with no phone alt yet is skipped, not parsed as a fake number",
+  );
+  assert.equal(
+    directPhone("138078937182420@lid", ""),
+    "",
+    "an empty phone alt is treated the same as a missing one",
+  );
+});
+
 test("contacts keep the saved name in preference to a pushname", () => {
   const rows = toContactRows([
     { id: "917502163963@s.whatsapp.net", notify: "self-chosen" },
     { id: "917502163963@s.whatsapp.net", name: "Speedy Printers" },
+  ]);
+  assert.deepEqual(rows, [{ phone: "+917502163963", name: "Speedy Printers" }]);
+});
+
+test("a LID-addressed contact resolves via its jid alt", () => {
+  const rows = toContactRows([
+    { id: "138078937182420@lid", jid: "917502163963@s.whatsapp.net", name: "Speedy Printers" },
   ]);
   assert.deepEqual(rows, [{ phone: "+917502163963", name: "Speedy Printers" }]);
 });
@@ -69,6 +94,28 @@ test("outbound history keeps its direction", () => {
     extractText,
   );
   assert.equal(rows[0].direction, "out");
+});
+
+test("a LID-addressed message resolves via its senderPn alt", () => {
+  const rows = toMessageRows(
+    [
+      {
+        key: {
+          remoteJid: "138078937182420@lid",
+          senderPn: "917502163963@s.whatsapp.net",
+          fromMe: false,
+          id: "H4",
+        },
+        message: { conversation: "Still interested, thanks!" },
+        messageTimestamp: 1700000300,
+      },
+    ],
+    describeMedia,
+    extractText,
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].phone, "+917502163963");
+  assert.equal(rows[0].preview, "Still interested, thanks!");
 });
 
 test("group and empty messages are excluded from history", () => {

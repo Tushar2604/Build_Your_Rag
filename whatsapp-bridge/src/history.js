@@ -13,11 +13,28 @@ const CONTACT_CHUNK = 400;
 const MESSAGE_CHUNK = 200;
 
 const DIRECT_CHAT_SUFFIX = "@s.whatsapp.net";
+// WhatsApp's phone-number-privacy rollout addresses some direct chats by an
+// opaque "linked ID" instead of the phone number. A LID is not a number and
+// must never be parsed as one — see the matching note in sessions.js.
+const LID_CHAT_SUFFIX = "@lid";
 
-/** Strip a JID to its E.164 number, or "" when it is not a direct chat. */
-export function directPhone(jid) {
-  if (!jid || !String(jid).endsWith(DIRECT_CHAT_SUFFIX)) return "";
-  const bare = String(jid).split(":")[0].split("@")[0];
+/**
+ * Strip a JID to its E.164 number, or "" when it is not (or can't yet be
+ * resolved to) a direct chat.
+ *
+ * `phoneJid` is the real number Baileys carries alongside a @lid address —
+ * `Contact.jid` for a synced contact, `WAMessageKey.senderPn` for a message.
+ * Without one, a LID-addressed row is skipped rather than filed under a
+ * meaningless number that can never match anything else in the app (every
+ * contact elsewhere is keyed by phone number).
+ */
+export function directPhone(jid, phoneJid) {
+  const j = String(jid || "");
+  if (j.endsWith(LID_CHAT_SUFFIX)) {
+    return phoneJid ? directPhone(phoneJid) : "";
+  }
+  if (!j.endsWith(DIRECT_CHAT_SUFFIX)) return "";
+  const bare = j.split(":")[0].split("@")[0];
   if (!/^\d{6,16}$/.test(bare)) return "";
   return `+${bare}`;
 }
@@ -31,7 +48,7 @@ export function directPhone(jid) {
 export function toContactRows(contacts = []) {
   const seen = new Map();
   for (const contact of contacts) {
-    const phone = directPhone(contact?.id);
+    const phone = directPhone(contact?.id, contact?.jid);
     if (!phone) continue;
     const name = (contact.name || contact.notify || contact.verifiedName || "").trim();
     if (!name) continue;
@@ -53,7 +70,7 @@ export function toContactRows(contacts = []) {
 export function toMessageRows(messages = [], describe, extract) {
   const rows = [];
   for (const message of messages) {
-    const phone = directPhone(message?.key?.remoteJid);
+    const phone = directPhone(message?.key?.remoteJid, message?.key?.senderPn);
     if (!phone) continue; // groups, status, broadcasts
 
     const media = describe(message);
