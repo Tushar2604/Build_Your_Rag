@@ -312,6 +312,7 @@ class SendBroadcast:
                 whatsapp_channel_id=owner_id,
                 phone_number=recipient.phone_number,
                 session_id=session.id,
+                tenant_id=broadcast.tenant_id,
                 auto_reply=broadcast.replies_are_answered(),
             )
         )

@@ -149,6 +149,7 @@ async def whatsapp_webhook(request: Request, container: ContainerDep) -> Respons
                 whatsapp_channel_id=channel.id,
                 phone_number=from_number,
                 session_id=session.id,
+                tenant_id=channel.tenant_id,
             )
             await uow.whatsapp_conversations.add(conversation)
             await uow.commit()
