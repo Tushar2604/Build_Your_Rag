@@ -10,7 +10,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Bot, BookOpen, LineChart, Settings, LogOut, Users2, PhoneCall, Radio,
   Megaphone, Plug, Mic, LifeBuoy, Search, Bell, Moon, Sun, ChevronLeft,
-  ListChecks, LayoutDashboard, PhoneOutgoing, MessageCircle,
+  ListChecks, LayoutDashboard, PhoneOutgoing, MessageCircle, UserSearch,
 } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { useTheme } from "../store/theme";
@@ -45,6 +45,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/channels", label: "Phone Numbers", icon: PhoneCall, adminOnly: true },
       { to: "/channels?tab=whatsapp", label: "WhatsApp Numbers", icon: MessageCircle, adminOnly: true },
+      { to: "/candidates", label: "Candidates", icon: UserSearch, adminOnly: true },
       { to: "/interviews", label: "Call Logs", icon: PhoneOutgoing, adminOnly: true },
       { to: "/analytics", label: "Analytics", icon: LineChart },
     ],

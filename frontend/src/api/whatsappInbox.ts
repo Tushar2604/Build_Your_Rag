@@ -96,6 +96,22 @@ export function sendMessage(conversationId: string, message: string): Promise<In
   });
 }
 
+/** Send a file as the operator, with an optional caption. Personal/QR-linked
+ * numbers only — see the backend endpoint for why Twilio numbers can't yet. */
+export function sendAttachment(
+  conversationId: string,
+  file: File,
+  caption: string,
+): Promise<InboxMessage> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("caption", caption);
+  return api.postForm<InboxMessage>(
+    `/whatsapp-web/conversations/${conversationId}/attachments`,
+    form,
+  );
+}
+
 /** Hand the conversation to a human (false) or back to the assistant (true). */
 export function setAutoReply(
   conversationId: string,

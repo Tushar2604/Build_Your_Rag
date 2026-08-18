@@ -470,6 +470,26 @@ class WhatsAppConversationRepository(Protocol):
         unread_only: bool = False,
         auto_reply: bool | None = None,
     ) -> int: ...
+    async def list_for_tenant(
+        self,
+        tenant_id: TenantId,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        auto_reply: bool | None = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[WhatsAppConversation]: ...
+    async def count_for_tenant(
+        self,
+        tenant_id: TenantId,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        auto_reply: bool | None = None,
+    ) -> int: ...
 
 
 @runtime_checkable

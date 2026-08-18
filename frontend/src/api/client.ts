@@ -68,6 +68,29 @@ export const api = {
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  /** POST a `FormData` body (file uploads). No `Content-Type` header is set
+   * here — the browser fills it in with the multipart boundary itself, which
+   * only happens if we leave it out. */
+  postForm: <T>(path: string, form: FormData) => {
+    const token = getToken();
+    return fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    }).then(async (res) => {
+      if (!res.ok) {
+        if (res.status === 401 && token) handleExpiredSession();
+        let detail = res.statusText;
+        try {
+          detail = (await res.json()).detail ?? detail;
+        } catch {
+          // ignore parse failure
+        }
+        throw new ApiError(res.status, detail);
+      }
+      return res.json() as Promise<T>;
+    });
+  },
 };
 
 /**

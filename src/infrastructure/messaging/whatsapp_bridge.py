@@ -71,6 +71,50 @@ class WhatsAppBridgeClient:
     async def send_text(self, session_id: str, jid: str, text: str) -> tuple[bool, str]:
         return await self._post(f"/sessions/{session_id}/send", {"jid": jid, "text": text})
 
+    async def send_media(
+        self,
+        session_id: str,
+        jid: str,
+        data: bytes,
+        *,
+        media_kind: str,
+        mime_type: str,
+        filename: str,
+        caption: str = "",
+    ) -> tuple[bool, str]:
+        """Send an attachment. The bytes go over the wire raw (not multipart or
+        base64-in-JSON) with the metadata in the query string, so the bridge can
+        stream the body straight into Baileys without buffering it twice."""
+        if not self.enabled:
+            return False, _DISABLED
+        params = {
+            "jid": jid,
+            "kind": media_kind,
+            "mimeType": mime_type,
+            "fileName": filename,
+            "caption": caption,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    f"{self._base}/sessions/{session_id}/send-media",
+                    params=params,
+                    content=data,
+                    headers={
+                        "X-Bridge-Token": self._token,
+                        "Content-Type": mime_type or "application/octet-stream",
+                    },
+                )
+        except httpx.HTTPError as exc:
+            log.warning("bridge.unreachable", path="send-media", error=str(exc))
+            return False, (
+                "The WhatsApp bridge isn't responding. It may still be starting up — "
+                "try again in a few seconds."
+            )
+        if resp.status_code >= 400:
+            return False, _detail(resp)
+        return True, ""
+
     async def health(self) -> tuple[bool, str]:
         if not self.enabled:
             return False, _DISABLED

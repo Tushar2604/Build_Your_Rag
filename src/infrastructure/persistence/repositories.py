@@ -1328,7 +1328,7 @@ class WhatsAppConversationRepositoryImpl:
     def _owner_filters(
         self,
         tenant_id: TenantId,
-        owner_id: uuid.UUID,
+        owner_id: uuid.UUID | None,
         search: str,
         has_attachment: bool | None,
         unread_only: bool,
@@ -1336,11 +1336,13 @@ class WhatsAppConversationRepositoryImpl:
     ) -> list:
         """Shared WHERE clauses so the page query and its count can never drift
         apart — a mismatch there shows the wrong page total, which reads as data
-        loss to whoever is looking at the inbox."""
-        conditions = [
-            m.WhatsAppConversationModel.tenant_id == tenant_id,
-            m.WhatsAppConversationModel.whatsapp_channel_id == owner_id,
-        ]
+        loss to whoever is looking at the inbox.
+
+        `owner_id=None` drops the per-number filter entirely — the tenant-wide
+        Candidates view over every number, rather than the one-number inbox."""
+        conditions = [m.WhatsAppConversationModel.tenant_id == tenant_id]
+        if owner_id is not None:
+            conditions.append(m.WhatsAppConversationModel.whatsapp_channel_id == owner_id)
         if search:
             like = f"%{search.strip()}%"
             conditions.append(
@@ -1412,6 +1414,62 @@ class WhatsAppConversationRepositoryImpl:
                     .where(
                         *self._owner_filters(
                             tenant_id, owner_id, search, has_attachment, unread_only, auto_reply
+                        )
+                    )
+                )
+            ).scalar_one()
+        )
+
+    async def list_for_tenant(
+        self,
+        tenant_id: TenantId,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        auto_reply: bool | None = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[WhatsAppConversation]:
+        rows = (
+            (
+                await self._s.execute(
+                    select(m.WhatsAppConversationModel)
+                    .where(
+                        *self._owner_filters(
+                            tenant_id, None, search, has_attachment, unread_only, auto_reply
+                        )
+                    )
+                    .order_by(
+                        m.WhatsAppConversationModel.last_message_at.desc().nullslast(),
+                        m.WhatsAppConversationModel.created_at.desc(),
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [map_.whatsapp_conversation_to_domain(r) for r in rows]
+
+    async def count_for_tenant(
+        self,
+        tenant_id: TenantId,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        auto_reply: bool | None = None,
+    ) -> int:
+        return int(
+            (
+                await self._s.execute(
+                    select(func.count())
+                    .select_from(m.WhatsAppConversationModel)
+                    .where(
+                        *self._owner_filters(
+                            tenant_id, None, search, has_attachment, unread_only, auto_reply
                         )
                     )
                 )

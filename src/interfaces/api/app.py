@@ -29,6 +29,7 @@ from src.interfaces.api.routers import (
     auth,
     auth_google,
     broadcasts,
+    candidates,
     chat,
     chatbots,
     documents,
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     # generic /{chatbot_id} route can't shadow /{chatbot_id}/post-call.
     app.include_router(post_call.router, prefix=api_prefix)
     app.include_router(broadcasts.router, prefix=api_prefix)
+    app.include_router(candidates.router, prefix=api_prefix)
     app.include_router(integrations_catalogue.router, prefix=api_prefix)
     app.include_router(oauth.router, prefix=api_prefix)
     app.include_router(support.router, prefix=api_prefix)

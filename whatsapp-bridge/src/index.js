@@ -215,6 +215,36 @@ app.post("/sessions/:id/send", async (req, res) => {
   }
 });
 
+/**
+ * Send an attachment. The body is the file's raw bytes — not multipart, not
+ * base64 — with everything else (jid, kind, filename, caption) in the query
+ * string, so this can sit next to the JSON-only routes above without a
+ * multipart parser. `express.raw` here is scoped to this one route; the
+ * `express.json` limit above only ever matches JSON requests and leaves this
+ * one alone.
+ */
+app.post(
+  "/sessions/:id/send-media",
+  express.raw({ type: () => true, limit: `${Number(process.env.BRIDGE_MAX_MEDIA_MB || 16)}mb` }),
+  async (req, res) => {
+    const { jid, kind, mimeType, fileName, caption } = req.query;
+    const buffer = req.body;
+    if (!jid || !Buffer.isBuffer(buffer) || !buffer.length) {
+      return res.status(400).json({ detail: "jid and file bytes are required" });
+    }
+    try {
+      await manager.sendMedia(req.params.id, jid, kind || "document", buffer, {
+        mimeType,
+        fileName,
+        caption,
+      });
+      res.json({ status: "sent" });
+    } catch (err) {
+      res.status(502).json({ detail: err.message });
+    }
+  },
+);
+
 app.get("/sessions", (_req, res) => {
   res.json({ sessions: [...manager.sockets.keys()] });
 });

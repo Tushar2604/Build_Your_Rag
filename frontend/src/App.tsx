@@ -20,6 +20,7 @@ import ChannelsPage       from "./pages/ChannelsPage";
 import BroadcastsPage     from "./pages/BroadcastsPage";
 import BroadcastCreatePage from "./pages/BroadcastCreatePage";
 import WhatsAppInboxPage from "./pages/WhatsAppInboxPage";
+import CandidatesPage     from "./pages/CandidatesPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import BroadcastDetailPage from "./pages/BroadcastDetailPage";
@@ -77,6 +78,8 @@ export default function App() {
                 <Route path="/channels"  element={<ChannelsPage />}      />
                 {/* The chat window for one QR-linked number. */}
                 <Route path="/channels/whatsapp/:sessionId/inbox" element={<WhatsAppInboxPage />} />
+                {/* Every WhatsApp contact across every number, read-oriented. */}
+                <Route path="/candidates" element={<CandidatesPage />} />
                 <Route path="/integrations"   element={<IntegrationsPage />}    />
                 <Route path="/broadcasts"     element={<BroadcastsPage />}      />
                 {/* Registered before /:id so "new" is a page, not an id. */}

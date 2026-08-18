@@ -115,3 +115,26 @@ export async function fetchMedia(message, media, { logger, maxBytes } = {}) {
 
 export const MAX_MEDIA_BYTES = () =>
   Number(process.env.BRIDGE_MAX_MEDIA_MB || DEFAULT_MAX_MEDIA_MB) * 1024 * 1024;
+
+/**
+ * Build the Baileys `sendMessage` content for an outbound attachment.
+ *
+ * Baileys discriminates the message type by which key is present (`image`,
+ * `video`, `document`, ...), not by a separate type field, so this is just
+ * picking the right shape for the kind the API already classified the file
+ * as. Anything not recognised as image/video/audio falls back to `document`
+ * — WhatsApp renders that as a generic downloadable file, which is always a
+ * safe default.
+ */
+export function buildMediaContent(kind, buffer, { mimeType, fileName, caption } = {}) {
+  const base = caption ? { caption } : {};
+  if (kind === "image") return { image: buffer, mimetype: mimeType, ...base };
+  if (kind === "video") return { video: buffer, mimetype: mimeType, ...base };
+  if (kind === "audio") return { audio: buffer, mimetype: mimeType, ptt: false };
+  return {
+    document: buffer,
+    mimetype: mimeType || "application/octet-stream",
+    fileName: fileName || "file",
+    ...base,
+  };
+}

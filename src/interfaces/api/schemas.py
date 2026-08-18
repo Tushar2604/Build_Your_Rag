@@ -1056,3 +1056,34 @@ class InboxConversationUpdate(BaseModel):
 
     auto_reply: bool | None = None
     mark_read: bool | None = None
+
+
+# --- Candidates (tenant-wide, read-oriented view over every WhatsApp number) ---
+
+
+class CandidateResponse(BaseModel):
+    """One WhatsApp contact, labelled with whichever number the conversation
+    landed on. Same underlying row as `InboxConversationResponse` — this is
+    the tenant-wide version, not scoped to one number."""
+
+    id: uuid.UUID
+    phone_number: str
+    display_name: str
+    last_message_at: datetime | None
+    last_message_preview: str
+    unread_count: int
+    has_attachment: bool
+    auto_reply: bool
+    channel_kind: SenderKindLiteral
+    channel_label: str
+    # Only set for a "personal" (QR-linked) number — the only kind with a live
+    # reply inbox today — so the frontend knows when it can offer a deep link
+    # to keep replying rather than pretending every candidate has one.
+    session_id: uuid.UUID | None = None
+
+
+class CandidatePageResponse(BaseModel):
+    candidates: list[CandidateResponse]
+    total: int
+    page: int
+    page_size: int

@@ -73,6 +73,23 @@ _MAX_SESSIONS_PER_TENANT = 5
 # re-points a thread the first time a message arrives on it.
 _MAX_THREADS_TO_REPOINT = 500
 
+# Matches the bridge's own inbound cap (BRIDGE_MAX_MEDIA_MB, default 16) so an
+# operator never uploads a file the outbound send is going to reject anyway.
+_MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+
+
+def _media_kind_for(mime_type: str) -> str:
+    """Classify an outbound attachment the same way inbound media already is
+    (see whatsapp-bridge/src/media.js MEDIA_KINDS) — the inbox filters and
+    renders on this value regardless of which direction it came from."""
+    if mime_type.startswith("image/"):
+        return "image"
+    if mime_type.startswith("video/"):
+        return "video"
+    if mime_type.startswith("audio/"):
+        return "audio"
+    return "document"
+
 
 def _to_response(ws: WhatsAppWebSession, chatbot_name: str = "") -> WhatsAppWebSessionResponse:
     fresh = ws.qr_is_fresh()
@@ -451,6 +468,99 @@ async def send_conversation_message(
         author="operator",
         content=message.content,
         created_at=message.created_at,
+    )
+
+
+@router.post(
+    "/conversations/{conversation_id}/attachments",
+    response_model=InboxMessageResponse,
+    status_code=201,
+)
+async def send_conversation_attachment(
+    conversation_id: uuid.UUID,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+    file: UploadFile = File(...),
+    caption: str = Form(""),
+) -> InboxMessageResponse:
+    """Send a file as the operator, with an optional caption.
+
+    A separate endpoint from `send_conversation_message` rather than an
+    optional field there: that one is plain JSON, and a file needs multipart.
+    Personal/QR-linked numbers only — Twilio's WhatsApp API needs a publicly
+    fetchable URL for media, which this deployment's storage doesn't issue.
+    """
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Empty upload")
+    if len(payload) > _MAX_ATTACHMENT_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Attachments are limited to {_MAX_ATTACHMENT_BYTES // (1024 * 1024)}MB.",
+        )
+
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        conversation = await _owned_conversation(uow, principal.tenant_id, conversation_id)
+        ws = await uow.whatsapp_web_sessions.get(
+            principal.tenant_id, conversation.whatsapp_channel_id
+        )
+        if ws is None or ws.status != "linked":
+            raise HTTPException(
+                status_code=400, detail="This WhatsApp number is not currently linked."
+            )
+
+    mime_type = file.content_type or "application/octet-stream"
+    media_kind = _media_kind_for(mime_type)
+    filename = file.filename or media_kind
+    # Same storage backend and proxied-download convention as inbound media
+    # (see conversation_media below) — never a public URL.
+    storage_key = f"whatsapp/out/{conversation.whatsapp_channel_id}/{uuid.uuid4().hex}"
+    await container.storage.put_bytes(storage_key, payload, mime_type)
+
+    jid = f"{conversation.phone_number.lstrip('+')}@s.whatsapp.net"
+    ok, error = await container.whatsapp_bridge.send_media(
+        str(conversation.whatsapp_channel_id),
+        jid,
+        payload,
+        media_kind=media_kind,
+        mime_type=mime_type,
+        filename=filename,
+        caption=caption,
+    )
+    if not ok:
+        raise HTTPException(status_code=502, detail=error)
+
+    message = Message(
+        session_id=conversation.session_id,
+        tenant_id=principal.tenant_id,
+        role=MessageRole.ASSISTANT,
+        content=caption,
+        provider="whatsapp:operator",
+        media_kind=media_kind,
+        media_mime_type=mime_type,
+        media_filename=filename,
+        media_storage_key=storage_key,
+        media_size_bytes=len(payload),
+    )
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        await uow.chats.add_message(message)
+        conversation.note_message(preview=caption or media_kind, has_media=True, inbound=False)
+        await uow.whatsapp_conversations.update(conversation)
+        await uow.commit()
+
+    return InboxMessageResponse(
+        id=message.id,
+        direction="out",
+        author="operator",
+        content=message.content,
+        created_at=message.created_at,
+        media_kind=media_kind,
+        media_mime_type=mime_type,
+        media_filename=filename,
+        media_size_bytes=len(payload),
+        media_available=True,
     )
 
 
@@ -890,9 +1000,18 @@ async def bridge_events(
                 await uow.chats.assign_chatbot(
                     ws.tenant_id, [conversation.session_id], ws.chatbot_id
                 )
-            await uow.commit()
+            # The number itself may have nothing attached (personal accounts
+            # attach an assistant separately from picking one for a campaign),
+            # while the thread's own session already carries the assistant the
+            # campaign was sent with (see SendBroadcast._ensure_conversation).
+            # Falling back to that is what makes a campaign's replies actually
+            # get answered without also requiring the operator to attach the
+            # same assistant to the number a second time.
             chat_session_id = conversation.session_id
+            session = await uow.chats.get_session(ws.tenant_id, chat_session_id)
+            await uow.commit()
             auto_reply = conversation.auto_reply
+            effective_chatbot_id = ws.chatbot_id or (session.chatbot_id if session else None)
 
         if not stored:
             # A redelivery after a socket reconnect; already in the thread.
@@ -908,9 +1027,10 @@ async def bridge_events(
         # personal-sender campaigns reported zero replies.
         await mark_replied(container, chat_session_id)
 
-        if ws.chatbot_id is None:
-            # Linked but no assistant attached — receiving is fine, replying
-            # would be answering on the user's behalf without them asking.
+        if effective_chatbot_id is None:
+            # Linked but no assistant attached anywhere — receiving is fine,
+            # replying would be answering on the user's behalf without them
+            # asking.
             log.info("whatsapp.reply.skipped", session_id=str(ws.id), reason="no_assistant")
             return {"status": "no_assistant"}
         if not auto_reply:
@@ -923,7 +1043,7 @@ async def bridge_events(
             ws.tenant_id,
             chat_session_id,
             ws.id,
-            ws.chatbot_id,
+            effective_chatbot_id,
             body.jid,
             phone,
             body.text,

@@ -15,7 +15,14 @@ import QRCode from "qrcode";
 import pino from "pino";
 
 import { useDbAuthState } from "./authStore.js";
-import { describeMedia, extractText, fetchMedia, MAX_MEDIA_BYTES, previewFor } from "./media.js";
+import {
+  buildMediaContent,
+  describeMedia,
+  extractText,
+  fetchMedia,
+  MAX_MEDIA_BYTES,
+  previewFor,
+} from "./media.js";
 import { CHUNK_SIZES, chunk, toContactRows, toMessageRows } from "./history.js";
 
 export { extractText };
@@ -280,6 +287,12 @@ export class SessionManager {
     const entry = this.sockets.get(sessionId);
     if (!entry) throw new Error("This WhatsApp session isn't connected.");
     await entry.sock.sendMessage(toJid, { text });
+  }
+
+  async sendMedia(sessionId, toJid, kind, buffer, { mimeType, fileName, caption } = {}) {
+    const entry = this.sockets.get(sessionId);
+    if (!entry) throw new Error("This WhatsApp session isn't connected.");
+    await entry.sock.sendMessage(toJid, buildMediaContent(kind, buffer, { mimeType, fileName, caption }));
   }
 
   /** Stop the socket. `keepAuth` distinguishes a restart from an unlink. */
