@@ -32,9 +32,6 @@ from src.domain.shared.identifiers import TenantId
 
 log = structlog.get_logger(__name__)
 
-# Sent per claim-batch. Small enough that a killed process loses little work,
-# large enough that the per-batch transaction overhead stays amortised.
-BATCH_SIZE = 20
 # Twilio throttles WhatsApp sends; a short gap between messages keeps a large
 # campaign from tripping rate limits and failing recipients for no good reason.
 INTER_SEND_DELAY_SECONDS = 0.35
@@ -170,7 +167,22 @@ class SendBroadcast:
         self._bridge = bridge
 
     async def execute(self, tenant_id: TenantId, broadcast_id: uuid.UUID) -> int:
-        """Returns how many messages were sent in this run."""
+        """Returns how many messages were sent in this run.
+
+        One recipient per transaction, committed immediately after that
+        recipient's send — not a whole claimed batch committed at the end.
+        The WhatsApp send itself is irreversible (the bridge/Twilio has
+        already handed it to the phone) but the bookkeeping that records it
+        (`mark_sent`, the conversation, the outbound message row) used to be
+        deferred, uncommitted, until an entire batch of up to 20 recipients
+        finished. Anything that killed the process in between — an
+        exception two recipients later, a redeploy landing mid-sweep on a
+        host that restarts often — rolled the whole batch back on
+        `SqlAlchemyUnitOfWork.__aexit__`, leaving already-delivered
+        recipients stuck at "pending" with no record they were ever
+        messaged, and a resume would message them again. Committing per
+        recipient shrinks that window to one recipient instead of a batch.
+        """
         sent_total = 0
         while True:
             async with self._uow as uow:
@@ -197,8 +209,9 @@ class SendBroadcast:
                     await uow.broadcasts.update(broadcast)
                     await uow.commit()
                     return sent_total
-                batch = await uow.broadcast_recipients.claim_pending(broadcast_id, BATCH_SIZE)
-                if not batch:
+
+                claimed = await uow.broadcast_recipients.claim_pending(broadcast_id, 1)
+                if not claimed:
                     # Nothing left to send — close the campaign out.
                     all_recipients = await uow.broadcast_recipients.list_for_broadcast(
                         broadcast_id
@@ -210,15 +223,14 @@ class SendBroadcast:
                     await uow.commit()
                     return sent_total
 
-                for recipient in batch:
-                    await self._send_one(uow, broadcast, channel, recipient)
-                    sent_total += 1
-                    await asyncio.sleep(INTER_SEND_DELAY_SECONDS)
-
-                all_recipients = await uow.broadcast_recipients.list_for_broadcast(broadcast_id)
-                broadcast.recompute_counts(all_recipients)
+                recipient = claimed[0]
+                await self._send_one(uow, broadcast, channel, recipient)
+                broadcast.record_send_outcome(recipient.status != "failed")
                 await uow.broadcasts.update(broadcast)
                 await uow.commit()
+
+            sent_total += 1
+            await asyncio.sleep(INTER_SEND_DELAY_SECONDS)
 
     async def _deliver(self, broadcast: Broadcast, channel, recipient, body: str):
         """Hand one message to whichever transport this campaign sends through.

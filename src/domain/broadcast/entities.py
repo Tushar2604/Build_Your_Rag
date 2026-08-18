@@ -252,3 +252,17 @@ class Broadcast:
     def is_finished(self, recipients: list[BroadcastRecipient]) -> bool:
         """True when no recipient is still awaiting a send attempt."""
         return not any(r.status == "pending" for r in recipients)
+
+    def record_send_outcome(self, ok: bool) -> None:
+        """Cheap +1 to the funnel counters for one just-sent recipient.
+
+        Used by the sweep instead of `recompute_counts`, which rescans every
+        recipient — fine once per campaign, but O(n) per recipient would make
+        an n-recipient sweep O(n^2). The sweep still runs one full
+        `recompute_counts` when it finishes, to true up anything this drifted
+        on (a concurrent Twilio callback, a retry)."""
+        if ok:
+            self.sent_count += 1
+        else:
+            self.failed_count += 1
+        self._touch()

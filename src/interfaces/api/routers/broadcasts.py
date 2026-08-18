@@ -415,8 +415,10 @@ async def start_broadcast(
 async def pause_broadcast(
     broadcast_id: uuid.UUID, principal: AdminPrincipalDep, container: ContainerDep
 ) -> BroadcastResponse:
-    """Halt the sweep. The in-flight batch finishes (at most BATCH_SIZE more
-    messages) because a send already handed to Twilio can't be recalled."""
+    """Halt the sweep. At most one more message can still land — the sweep
+    commits one recipient at a time and checks this status before claiming
+    the next — because a send already handed to the provider can't be
+    recalled."""
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         broadcast = await _load(uow, principal.tenant_id, broadcast_id)
@@ -514,7 +516,10 @@ async def send_manual_message(
     """Human takeover: send as the assistant, bypassing the RAG pipeline.
 
     The message is persisted to the same session, so the assistant's later
-    replies see what the human said and don't contradict it.
+    replies see what the human said and don't contradict it. Sends through
+    whichever transport the campaign itself uses — this used to assume Cloud
+    API unconditionally, so a personal/QR-linked campaign's composer failed
+    with a misleading "channel is gone" on every attempt.
     """
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
@@ -522,11 +527,15 @@ async def send_manual_message(
         if recipient is None or recipient.broadcast_id != broadcast_id:
             raise HTTPException(status_code=404, detail="Contact not found")
         broadcast = await _load(uow, principal.tenant_id, broadcast_id)
-        channel = await uow.whatsapp_channels.get(
-            principal.tenant_id, broadcast.whatsapp_channel_id
-        )
-        if channel is None:
-            raise HTTPException(status_code=400, detail="This campaign's WhatsApp channel is gone.")
+        channel = None
+        if broadcast.sender_kind == "cloud_api":
+            channel = await uow.whatsapp_channels.get(
+                principal.tenant_id, broadcast.whatsapp_channel_id
+            )
+            if channel is None:
+                raise HTTPException(
+                    status_code=400, detail="This campaign's WhatsApp channel is gone."
+                )
         session_id = recipient.session_id
 
     if session_id is None:
@@ -535,13 +544,19 @@ async def send_manual_message(
             detail="This contact hasn't been messaged yet — start the campaign first.",
         )
 
-    ok, _sid, error = await container.whatsapp_sender.send(
-        account_sid=channel.twilio_account_sid,
-        auth_token=channel.twilio_auth_token,
-        from_number=channel.phone_number,
-        to_number=recipient.phone_number,
-        body=body.message,
-    )
+    if broadcast.sender_kind == "cloud_api":
+        ok, _sid, error = await container.whatsapp_sender.send(
+            account_sid=channel.twilio_account_sid,
+            auth_token=channel.twilio_auth_token,
+            from_number=channel.phone_number,
+            to_number=recipient.phone_number,
+            body=body.message,
+        )
+    else:
+        jid = f"{recipient.phone_number.lstrip('+')}@s.whatsapp.net"
+        ok, error = await container.whatsapp_bridge.send_text(
+            str(broadcast.whatsapp_session_id), jid, body.message
+        )
     if not ok:
         raise HTTPException(status_code=502, detail=error)
 
