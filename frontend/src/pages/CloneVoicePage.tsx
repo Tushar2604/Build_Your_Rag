@@ -277,14 +277,16 @@ export default function CloneVoicePage() {
   }
 
   return (
-    <div className="max-w-3xl">
-      <div className="mb-6">
-        <h1 className="page-title">Clone Voice</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Create custom AI voices by uploading audio samples. Minimum{" "}
-          {minSeconds} seconds, {minSeconds + 10}–60 seconds of clear speech
-          recommended.
-        </p>
+    <div className="page-sm">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Clone Voice</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Create custom AI voices by uploading audio samples. Minimum{" "}
+            {minSeconds} seconds, {minSeconds + 10}–60 seconds of clear speech
+            recommended.
+          </p>
+        </div>
       </div>
 
       {options && !options.cloning_enabled && (

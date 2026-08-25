@@ -205,8 +205,8 @@ export default function AnalyticsPage() {
       : 0;
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6 animate-fade-in">
-      <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+    <div className="page">
+      <div className="page-header">
         <div>
           <h1 className="page-title">Analytics</h1>
           <p className="page-subtitle">

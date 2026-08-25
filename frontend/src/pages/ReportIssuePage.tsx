@@ -86,7 +86,7 @@ export default function ReportIssuePage() {
 
   if (sent) {
     return (
-      <div className="max-w-2xl">
+      <div className="page-sm">
         <div className="card p-8 text-center">
           <div className="text-3xl mb-3">✅</div>
           <h1 className="page-title">Thanks — we've got it.</h1>
@@ -112,13 +112,15 @@ export default function ReportIssuePage() {
   }
 
   return (
-    <div className="max-w-2xl">
-      <div className="mb-6">
-        <h1 className="page-title">Report Issue</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Help us improve by reporting bugs or requesting new features. Your
-          feedback is valuable to us.
-        </p>
+    <div className="page-sm">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Report Issue</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Help us improve by reporting bugs or requesting new features. Your
+            feedback is valuable to us.
+          </p>
+        </div>
       </div>
 
       {options && !options.support_email_configured && (

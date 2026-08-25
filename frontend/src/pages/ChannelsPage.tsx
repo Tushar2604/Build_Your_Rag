@@ -57,7 +57,7 @@ function ConnectModal({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 backdrop-blur-sm px-4 animate-fade-in"
+      className="modal-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="card shadow-modal w-full max-w-lg max-h-[90vh] overflow-y-auto animate-scale-in">
@@ -412,9 +412,11 @@ export default function ChannelsPage() {
         />
       )}
 
-      <div className="mb-6">
-        <h1 className="page-title">WhatsApp</h1>
-        <p className="text-sm text-gray-500 mt-1">Connect and manage your WhatsApp numbers.</p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">WhatsApp</h1>
+          <p className="text-sm text-gray-500 mt-1">Connect and manage your WhatsApp numbers.</p>
+        </div>
       </div>
 
       {error && (

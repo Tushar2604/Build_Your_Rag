@@ -188,7 +188,7 @@ function ScheduleModal({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 backdrop-blur-sm px-4 animate-fade-in"
+      className="modal-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="card shadow-modal w-full max-w-lg max-h-[90vh] overflow-y-auto animate-scale-in">
@@ -422,7 +422,7 @@ export default function InterviewsPage() {
         <ScheduleModal documents={documents} onCreate={handleCreated} onClose={() => setShowCreate(false)} />
       )}
 
-      <div className="flex items-start justify-between mb-6">
+      <div className="page-header">
         <div>
           <h1 className="page-title">Interviews</h1>
           <p className="text-sm text-gray-500 mt-1">

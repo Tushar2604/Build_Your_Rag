@@ -43,6 +43,20 @@ const DIRECT_CHAT_SUFFIX = "@s.whatsapp.net";
 // and silently dropped: no log, no error, the message just never arrived.
 const LID_CHAT_SUFFIX = "@lid";
 
+/**
+ * Baileys carries `messageTimestamp` as a number on some paths and a protobuf
+ * `Long` on others. Both reduce to unix seconds; anything else becomes 0, which
+ * the API reads as "age unknown".
+ */
+export function messageTimestamp(message) {
+  const raw = message?.messageTimestamp;
+  if (raw == null) return 0;
+  const seconds = typeof raw === "object" && typeof raw.toNumber === "function"
+    ? raw.toNumber()
+    : Number(raw);
+  return Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+}
+
 /** Strip the WhatsApp JID down to an E.164 number. */
 export function jidToPhone(jid) {
   if (!jid) return "";
@@ -161,11 +175,18 @@ export class SessionManager {
     });
 
     sock.ev.on("messages.upsert", async (event) => {
-      // "notify" is a live message. "append" is WhatsApp catching this device
-      // up — most importantly the messages the operator typed on the phone
-      // itself, which is why the inbox used to disagree with what WhatsApp
-      // showed. Both are stored; only "notify" may be answered, so a sync
-      // batch can never make the assistant reply to a conversation days late.
+      // "notify" is a message delivered on a live socket. "append" is anything
+      // WhatsApp had queued and flushed on connect — Baileys picks between the
+      // two purely on `node.attrs.offline` (lib/Socket/messages-recv.js), so
+      // "append" covers the operator's own messages typed on the phone AND a
+      // contact's reply that landed while this socket was down.
+      //
+      // Both are stored, and both may be answered. Treating "append" as
+      // unanswerable is what made a campaign reply vanish whenever the bridge
+      // happened to be reconnecting — on a host that sleeps, most of them. The
+      // API decides from the message's own age instead; genuine history
+      // backfill never reaches here at all (it arrives on
+      // "messaging-history.set" and is posted to /bridge-history).
       if (event.type !== "notify" && event.type !== "append") return;
       const synced = event.type === "append";
       for (const message of event.messages) {
@@ -212,9 +233,17 @@ export class SessionManager {
       message_id: message.key?.id || "",
       pushname: message.pushName || "",
       preview: previewFor(text, media),
-      // Recorded so the thread matches WhatsApp, but never answered — see the
-      // messages.upsert handler.
+      // Baileys stamps a message "append" purely from `node.attrs.offline` —
+      // i.e. WhatsApp queued it while this socket was down and flushed it on
+      // reconnect. That is a live, unanswered message, NOT a history backfill
+      // (real backfill arrives via `messaging-history.set` and never reaches
+      // this handler). So `synced` is reported as a hint only; the API decides
+      // whether to answer from `timestamp`, because treating it as a veto
+      // silently dropped every reply that landed during a reconnect.
       synced,
+      // Unix seconds. Lets the API skip a genuinely stale message without
+      // muting a fresh one that merely arrived late.
+      timestamp: messageTimestamp(message),
     };
 
     if (media) {

@@ -944,11 +944,16 @@ class BridgeEventRequest(BaseModel):
     direction: Literal["in", "out"] = "in"
     # What the thread list shows: the caption, or a label like "Photo".
     preview: str = ""
-    # True when WhatsApp was catching the linked device up rather than
-    # delivering something live (messages typed on the phone, a reconnect
-    # backfill). Stored so the inbox matches WhatsApp, never answered — a sync
-    # batch must not make the assistant reply to a days-old conversation.
+    # True when WhatsApp flushed this message on reconnect rather than
+    # delivering it on a live socket. A *hint*, not a veto: Baileys sets it for
+    # anything queued while the socket was down, which includes a campaign
+    # reply that arrived seconds ago. Answerability is decided from
+    # `timestamp`; genuine history backfill never reaches this endpoint (it
+    # goes to /bridge-history).
     synced: bool = False
+    # Unix seconds when WhatsApp stamped the message. 0 when the bridge did not
+    # report one, which is read as "age unknown" and does not block a reply.
+    timestamp: int = 0
     # Attachment metadata. `media_storage_key` is set once the bridge has
     # uploaded the bytes; `media_error` explains an attachment we know arrived
     # but could not store (too large, download failed).
@@ -1085,6 +1090,15 @@ class CandidateResponse(BaseModel):
     # reply inbox today — so the frontend knows when it can offer a deep link
     # to keep replying rather than pretending every candidate has one.
     session_id: uuid.UUID | None = None
+    # Shown on the card without opening the thread: "have they actually talked
+    # to us, and did they send anything?" is most of what the grid is scanned
+    # for. Counted in one grouped query per page, not per card.
+    message_count: int = 0
+    document_count: int = 0
+    # Where this contact sits in the follow-up ladder, so a card can say
+    # "chased twice, gone quiet" rather than looking identical to a live one.
+    followups_sent: int = 0
+    awaiting_reply: bool = False
 
 
 class CandidatePageResponse(BaseModel):

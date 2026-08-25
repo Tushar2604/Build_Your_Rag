@@ -402,10 +402,12 @@ export default function AssistantsPage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-8 py-8 animate-fade-in">
-      <header className="mb-7">
-        <h1 className="text-[30px] font-bold text-gray-900 tracking-tight">Voice AI Assistants</h1>
-        <p className="text-[15px] text-gray-500 mt-1">Create and manage your voice AI assistants</p>
+    <div className="page">
+      <header className="page-header">
+        <div>
+          <h1 className="page-title">Voice AI Assistants</h1>
+          <p className="page-subtitle">Create and manage your voice AI assistants</p>
+        </div>
       </header>
 
       <CreateAssistantCard onCreated={handleCreated} />

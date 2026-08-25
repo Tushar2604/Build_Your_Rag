@@ -77,6 +77,26 @@ _MAX_THREADS_TO_REPOINT = 500
 # operator never uploads a file the outbound send is going to reject anyway.
 _MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
 
+# How old an inbound message may be and still get an automatic answer.
+# Generous on purpose: the failure being guarded against is replying to a
+# days-old thread, while the failure this replaces — never replying at all —
+# was caused by being far too strict. A reply WhatsApp held for an hour while
+# the bridge slept is still a reply the contact is waiting on.
+_MAX_REPLY_AGE_SECONDS = 12 * 60 * 60
+
+
+def _too_stale_to_answer(body: BridgeEventRequest) -> bool:
+    """Is this message old enough that answering would be talking to the past?
+
+    A missing timestamp (`0`) means the bridge did not report one — an older
+    sidecar, or a message shape Baileys did not stamp. That is treated as
+    answerable rather than stale: staying silent is the failure mode operators
+    actually hit, and a message we just received is almost always current.
+    """
+    if body.timestamp <= 0:
+        return False
+    return (int(time.time()) - body.timestamp) > _MAX_REPLY_AGE_SECONDS
+
 
 def _media_kind_for(mime_type: str) -> str:
     """Classify an outbound attachment the same way inbound media already is
@@ -1029,13 +1049,21 @@ async def bridge_events(
         # funnel should say so.
         await mark_replied(container, chat_session_id)
 
-        if body.synced:
-            # WhatsApp catching this device up, not a live message. It belongs
-            # in the thread and in the funnel, but answering it would mean
-            # replying to whatever the backfill happened to contain — possibly
-            # days after the fact.
-            log.info("whatsapp.reply.skipped", session_id=str(ws.id), reason="synced")
-            return {"status": "synced"}
+        if _too_stale_to_answer(body):
+            # Old enough that answering would mean replying to a conversation
+            # that has long since moved on. Note this checks the message's own
+            # age, NOT `body.synced`: Baileys flags every message WhatsApp
+            # queued during a reconnect as "synced", so vetoing on that flag
+            # silently dropped fresh campaign replies that happened to land
+            # while the bridge was reconnecting — which on a free-tier host
+            # that sleeps is most of them.
+            log.info(
+                "whatsapp.reply.skipped",
+                session_id=str(ws.id),
+                reason="stale",
+                age_seconds=int(time.time()) - body.timestamp,
+            )
+            return {"status": "stale"}
 
         if effective_chatbot_id is None:
             # Linked but no assistant attached anywhere — receiving is fine,

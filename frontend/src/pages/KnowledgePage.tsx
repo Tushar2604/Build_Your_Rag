@@ -39,7 +39,7 @@ function StatusBadge({ status }: { status: string }) {
 function ConfirmModal({ filename, onConfirm, onCancel }: { filename: string; onConfirm: () => void; onCancel: () => void }) {
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="confirm-del"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 backdrop-blur-sm px-4 animate-fade-in">
+      className="modal-overlay">
       <div className="card shadow-modal w-full max-w-sm p-6 animate-scale-in">
         <h2 id="confirm-del" className="text-sm font-semibold text-gray-900">Delete document?</h2>
         <p className="mt-2 text-sm text-gray-600">
@@ -150,7 +150,7 @@ export default function KnowledgePage() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="page-header">
         <div>
           <h1 className="page-title">Knowledge</h1>
           <p className="text-sm text-gray-500 mt-1">

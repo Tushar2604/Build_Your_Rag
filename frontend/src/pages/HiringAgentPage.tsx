@@ -204,7 +204,7 @@ export default function HiringAgentPage() {
   return (
     <div className="page">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="page-header">
         <div>
           <h1 className="page-title">Hiring Agent</h1>
           <p className="page-subtitle">

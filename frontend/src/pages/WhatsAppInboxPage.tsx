@@ -215,7 +215,7 @@ export default function WhatsAppInboxPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 overflow-hidden">
+    <div className="page-flush flex-row">
       {/* ── Thread rail ──────────────────────────────────────────────────── */}
       <aside className="flex w-[360px] flex-shrink-0 flex-col border-r border-gray-200 bg-surface">
         <header className="flex-shrink-0 px-4 pt-4 pb-3">

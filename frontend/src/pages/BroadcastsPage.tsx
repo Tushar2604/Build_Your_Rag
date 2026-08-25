@@ -58,8 +58,8 @@ export default function BroadcastsPage() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="page">
+      <div className="page-header">
         <div>
           <h1 className="page-title">Broadcast</h1>
           <p className="text-sm text-gray-500 mt-1">

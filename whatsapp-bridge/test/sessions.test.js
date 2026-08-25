@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { SessionManager, extractText, jidToPhone } from "../src/sessions.js";
+import { SessionManager, extractText, jidToPhone, messageTimestamp } from "../src/sessions.js";
 
 const SESSION = "11111111-1111-1111-1111-111111111111";
 const DIRECT = "917502163963@s.whatsapp.net";
@@ -42,6 +42,9 @@ function inbound(overrides = {}) {
     key: { remoteJid: DIRECT, fromMe: false, id: "MSG1", ...(overrides.key || {}) },
     message: overrides.message ?? { conversation: "Hello there" },
     pushName: overrides.pushName ?? "Yacoob",
+    ...(overrides.messageTimestamp !== undefined
+      ? { messageTimestamp: overrides.messageTimestamp }
+      : {}),
   };
 }
 
@@ -329,17 +332,44 @@ test("a @lid address is sent to directly, with no lookup", async () => {
   assert.deepEqual(sent, [{ jid: LID, content: { text: "hi" } }]);
 });
 
-// --- Synced (catch-up) messages ---
+// --- Synced (reconnect flush) messages ---
 
-test("messages synced from the phone are stored but flagged not to answer", async () => {
+test("a message flushed on reconnect is reported, flagged, and still answerable", async () => {
   const { manager, events } = harness();
   await manager.handleInbound(SESSION, inbound(), { synced: true });
   assert.equal(events.length, 1, "it belongs in the thread");
   assert.equal(events[0].payload.synced, true);
+  // The API decides answerability from the timestamp, not this flag: Baileys
+  // stamps anything WhatsApp queued during a reconnect as "append", which
+  // includes a campaign reply that arrived seconds ago.
+  assert.equal(events[0].payload.direction, "in");
 });
 
 test("a live message is not flagged as synced", async () => {
   const { manager, events } = harness();
   await manager.handleInbound(SESSION, inbound());
   assert.equal(events[0].payload.synced, false);
+});
+
+// --- Timestamps (how the API tells a fresh reply from a stale one) ---
+
+test("messageTimestamp reads a plain number and a protobuf Long alike", () => {
+  assert.equal(messageTimestamp({ messageTimestamp: 1755500000 }), 1755500000);
+  assert.equal(
+    messageTimestamp({ messageTimestamp: { toNumber: () => 1755500000 } }),
+    1755500000,
+  );
+});
+
+test("messageTimestamp reports 0 when there is nothing usable to read", () => {
+  assert.equal(messageTimestamp({}), 0);
+  assert.equal(messageTimestamp({ messageTimestamp: 0 }), 0);
+  assert.equal(messageTimestamp({ messageTimestamp: "not-a-time" }), 0);
+  assert.equal(messageTimestamp(undefined), 0);
+});
+
+test("an inbound message carries its timestamp through to the API", async () => {
+  const { manager, events } = harness();
+  await manager.handleInbound(SESSION, inbound({ messageTimestamp: 1755500000 }));
+  assert.equal(events[0].payload.timestamp, 1755500000);
 });

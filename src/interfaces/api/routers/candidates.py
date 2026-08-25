@@ -17,9 +17,11 @@ show which number it came in on.
 
 from __future__ import annotations
 
+import uuid
+
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.schemas import CandidatePageResponse, CandidateResponse
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -64,12 +66,43 @@ async def list_candidates(
             s.id: s
             for s in await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
         }
+        counts = await uow.chats.message_counts(
+            principal.tenant_id, [r.session_id for r in rows]
+        )
 
-    candidates = [_to_response(row, channels, sessions) for row in rows]
+    candidates = [_to_response(row, channels, sessions, counts) for row in rows]
     return CandidatePageResponse(candidates=candidates, total=total, page=page, page_size=page_size)
 
 
-def _to_response(row, channels: dict, sessions: dict) -> CandidateResponse:
+@router.get("/{conversation_id}", response_model=CandidateResponse)
+async def get_candidate(
+    conversation_id: uuid.UUID,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+) -> CandidateResponse:
+    """One candidate, for their profile page.
+
+    Exists so the profile survives a refresh or a shared link rather than
+    depending on the grid having been loaded first.
+    """
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        row = await uow.whatsapp_conversations.get_by_id(principal.tenant_id, conversation_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        channels = {
+            c.id: c for c in await uow.whatsapp_channels.list_for_tenant(principal.tenant_id)
+        }
+        sessions = {
+            s.id: s
+            for s in await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
+        }
+        counts = await uow.chats.message_counts(principal.tenant_id, [row.session_id])
+
+    return _to_response(row, channels, sessions, counts)
+
+
+def _to_response(row, channels: dict, sessions: dict, counts: dict) -> CandidateResponse:
     channel = channels.get(row.whatsapp_channel_id)
     session = sessions.get(row.whatsapp_channel_id)
     if channel is not None:
@@ -98,4 +131,8 @@ def _to_response(row, channels: dict, sessions: dict) -> CandidateResponse:
         channel_kind=channel_kind,
         channel_label=channel_label,
         session_id=session_id,
+        message_count=counts.get(row.session_id, (0, 0))[0],
+        document_count=counts.get(row.session_id, (0, 0))[1],
+        followups_sent=row.followups_sent,
+        awaiting_reply=row.awaiting_reply_since is not None,
     )

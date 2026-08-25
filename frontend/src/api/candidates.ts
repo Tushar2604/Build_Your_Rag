@@ -22,6 +22,12 @@ export interface Candidate {
   /** Only set for a "personal" (QR-linked) number — the only kind with a live
    * reply inbox today. Lets the profile view offer "keep replying" there. */
   session_id: string | null;
+  message_count: number;
+  document_count: number;
+  /** How far down the follow-up ladder this contact is, and whether we are
+   * currently waiting on them — see the backend's SendFollowUps. */
+  followups_sent: number;
+  awaiting_reply: boolean;
 }
 
 export interface CandidatePage {
@@ -49,4 +55,9 @@ export function listCandidates(filters: CandidateFilters = {}): Promise<Candidat
   params.set("page", String(filters.page ?? 1));
   params.set("page_size", String(filters.pageSize ?? 30));
   return api.get<CandidatePage>(`/candidates?${params}`);
+}
+
+/** One candidate, so their profile survives a refresh or a shared link. */
+export function getCandidate(conversationId: string): Promise<Candidate> {
+  return api.get<Candidate>(`/candidates/${conversationId}`);
 }

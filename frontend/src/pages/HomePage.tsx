@@ -101,9 +101,9 @@ export default function HomePage() {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   return (
-    <div className="page max-w-6xl">
+    <div className="page">
       {/* Header */}
-      <div className="flex items-start justify-between mb-8">
+      <div className="page-header">
         <div>
           <h1 className="font-display text-[32px] font-light text-gray-500 tracking-[-0.03em] leading-none">
             {greeting.split(" ")[0]} <span className="font-semibold text-gray-950">{greeting.split(" ")[1]}</span>

@@ -667,6 +667,35 @@ class ChatRepositoryImpl:
             ).scalar_one()
         )
 
+    async def message_counts(
+        self, tenant_id: TenantId, session_ids: list[SessionId]
+    ) -> dict[uuid.UUID, tuple[int, int]]:
+        """`{session_id: (messages, attachments)}` for a page of threads.
+
+        One grouped query rather than two per card: the Candidates grid shows
+        both numbers on every tile, and a per-thread count would turn a
+        30-card page into 60 round trips against a free-tier database.
+        """
+        if not session_ids:
+            return {}
+        rows = (
+            await self._s.execute(
+                select(
+                    m.ChatMessageModel.session_id,
+                    func.count().label("total"),
+                    # `media_kind` is NULL for a plain text message, so a plain
+                    # COUNT of it is exactly the attachment tally.
+                    func.count(m.ChatMessageModel.media_kind).label("media"),
+                )
+                .where(
+                    m.ChatMessageModel.tenant_id == tenant_id,
+                    m.ChatMessageModel.session_id.in_(session_ids),
+                )
+                .group_by(m.ChatMessageModel.session_id)
+            )
+        ).all()
+        return {row.session_id: (int(row.total), int(row.media)) for row in rows}
+
     async def message_exists(
         self, tenant_id: TenantId, session_id: SessionId, provider_message_id: str
     ) -> bool:

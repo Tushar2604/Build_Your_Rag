@@ -55,7 +55,7 @@ function CreateChatbotModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-bot-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      className="modal-overlay"
     >
       <div className="card w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">

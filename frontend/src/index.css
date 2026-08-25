@@ -746,11 +746,66 @@
   /* Inline text link */
   .link { @apply text-brand-600 font-medium hover:text-brand-700 hover:underline underline-offset-2 transition-colors; }
 
-  /* ── Page layout ── */
-  .page       { @apply relative max-w-6xl mx-auto px-6 py-8 animate-fade-in; }
-  .page-sm    { @apply relative max-w-3xl mx-auto px-6 py-8 animate-fade-in; }
+  /* ── Page layout ─────────────────────────────────────────────────────
+     Every routed page inside the app shell opens with exactly one of these.
+     They are the only place a page may set its own gutter, width or vertical
+     rhythm, which is what keeps the content column from jumping sideways as
+     you move through the nav.
+
+     Before this, pages each invented their own wrapper — max-w-2xl through
+     max-w-7xl, px-4 / px-6 / px-8, and several with no wrapper at all (the
+     Broadcast pages among them, which is why clicking Broadcast visibly threw
+     the content against the left edge). The width is deliberately identical
+     across `page` and `page-sm`; only the *measure* of the content differs,
+     so the left gutter never moves.
+
+       .page      — the default. Lists, dashboards, detail views.
+       .page-sm   — long-form reading/forms, where a full-width measure hurts.
+                    Same gutter and same top edge as .page.
+       .page-flush— pages that own their own scrolling and fill the viewport
+                    (the WhatsApp inbox, chat). No max-width, no padding:
+                    the page paints to the edges on purpose.
+
+     `.page-header` gives every page the same title block spacing, so headings
+     line up from route to route. */
+  .page {
+    @apply relative w-full max-w-6xl mx-auto px-6 py-8 animate-fade-in;
+  }
+  .page-sm {
+    @apply relative w-full max-w-6xl mx-auto px-6 py-8 animate-fade-in;
+  }
+  /* The narrower measure lives on an inner rail so the outer gutter — the
+     thing the eye actually tracks between routes — stays put. */
+  .page-sm > * { @apply max-w-3xl; }
+  .page-flush { @apply relative flex h-full min-h-0 flex-col overflow-hidden; }
+
+  /* Standard title block: title, optional subtitle, optional right-hand
+     actions. `page-header` owns the gap beneath itself so pages stop
+     hand-rolling mb-4/mb-5/mb-6 and drifting apart. */
+  .page-header {
+    @apply mb-6 flex flex-wrap items-start justify-between gap-4;
+  }
+  .page-header-actions { @apply flex flex-wrap items-center gap-2; }
+
   .page-title { @apply font-display text-[24px] font-semibold text-gray-900 tracking-tight; }
   .page-subtitle { @apply text-sm text-gray-500 mt-1; }
+
+  /* ── Modal scrim ──────────────────────────────────────────────────────
+     One overlay for every dialog in the app. These had drifted into four
+     different treatments (bg-black/40 flat, bg-black/60 blurred, bg-ink-950/40
+     blurred, and one with no fade), so dialogs dimmed the page by visibly
+     different amounts depending on which page you opened them from.
+     `ink-950` rather than pure black: it carries the same violet cast as the
+     rest of the chrome, so the scrim reads as part of the product. */
+  .modal-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center
+           bg-ink-950/40 backdrop-blur-sm px-4 animate-fade-in;
+  }
+  /* Right-hand drawer variant — same scrim, different anchor. */
+  .drawer-overlay {
+    @apply fixed inset-0 z-50 flex justify-end
+           bg-ink-950/40 backdrop-blur-sm animate-fade-in;
+  }
   .section-title { @apply font-display text-sm font-semibold text-gray-900; }
   .eyebrow    { @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400; }
 

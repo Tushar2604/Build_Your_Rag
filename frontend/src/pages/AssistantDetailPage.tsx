@@ -811,7 +811,7 @@ function AskAiModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="askai-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+      className="modal-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <form onSubmit={submit} className="card w-full max-w-xl p-6 space-y-4 animate-scale-in">
@@ -898,7 +898,7 @@ function SlideOver({
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-sm"
+      className="drawer-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
@@ -1346,7 +1346,7 @@ export default function AssistantDetailPage() {
       </header>
 
         {/* ── Body ── */}
-        <div className="max-w-6xl mx-auto px-6 py-6">
+        <div className="page">
         {saveError && (
           <div role="alert" className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
             {saveError}

@@ -359,9 +359,11 @@ export default function SettingsPage() {
 
   return (
     <div className="page">
-      <div className="mb-6">
-        <h1 className="page-title">Settings</h1>
-        <p className="text-sm text-gray-500 mt-1">Organisation configuration, API access, and platform audit log.</p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Settings</h1>
+          <p className="text-sm text-gray-500 mt-1">Organisation configuration, API access, and platform audit log.</p>
+        </div>
       </div>
 
       <div className="tab-bar mb-6">

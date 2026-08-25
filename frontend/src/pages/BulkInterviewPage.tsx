@@ -213,7 +213,7 @@ export default function BulkInterviewPage() {
     : 0;
 
   return (
-    <div className="page max-w-3xl">
+    <div className="page-sm">
       <div className="flex items-center gap-2 mb-1">
         <Link to="/interviews" className="text-xs text-gray-400 hover:text-gray-600">Interviews</Link>
         <span className="text-xs text-gray-400">/</span>

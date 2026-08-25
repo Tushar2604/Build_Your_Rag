@@ -473,21 +473,31 @@ export default function BroadcastDetailPage() {
     }
   }
 
+  // Both interim states sit in the same page shell as the loaded view, so the
+  // content column doesn't jump sideways once the campaign arrives.
   if (error && !broadcast) {
     return (
-      <div className="card p-8 text-center">
-        <p className="text-sm text-red-700">{error}</p>
-        <Link to="/broadcasts" className="btn-secondary text-sm mt-4 inline-block">
-          Back to campaigns
-        </Link>
+      <div className="page">
+        <div className="card p-8 text-center">
+          <p className="text-sm text-red-700">{error}</p>
+          <Link to="/broadcasts" className="btn-secondary text-sm mt-4 inline-block">
+            Back to campaigns
+          </Link>
+        </div>
       </div>
     );
   }
-  if (!broadcast) return <p className="text-sm text-gray-400">Loading…</p>;
+  if (!broadcast) {
+    return (
+      <div className="page">
+        <p className="text-sm text-gray-400">Loading…</p>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div className="flex items-start justify-between gap-4 mb-6">
+    <div className="page">
+      <div className="page-header">
         <div className="min-w-0">
           <Link to="/broadcasts" className="text-xs text-gray-400 hover:text-gray-700">
             ← Broadcast
@@ -499,7 +509,7 @@ export default function BroadcastDetailPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 justify-end">
+        <div className="page-header-actions justify-end">
           {broadcast.status !== "sending" && broadcast.status !== "completed" && (
             <button
               type="button"

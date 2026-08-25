@@ -46,7 +46,7 @@ function ConfirmModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      className="modal-overlay"
     >
       <div className="card w-full max-w-sm p-6">
         <h2 id="confirm-title" className="text-base font-semibold text-gray-900">

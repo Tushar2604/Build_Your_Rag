@@ -53,7 +53,7 @@ function ConnectModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="connect-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      className="modal-overlay"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <form onSubmit={submit} className="card w-full max-w-lg p-6 space-y-4 animate-scale-in">
@@ -149,7 +149,7 @@ export default function IntegrationsPage() {
   const oneClickCount = cards.filter((c) => c.auth === "oauth" && c.wired).length;
 
   return (
-    <div className="max-w-6xl mx-auto px-8 py-8 animate-fade-in">
+    <div className="page">
       {credentialCard && (
         <ConnectModal
           card={credentialCard}
@@ -161,9 +161,10 @@ export default function IntegrationsPage() {
         />
       )}
 
-      <header className="mb-6">
-        <h1 className="text-[30px] font-bold text-gray-900 tracking-tight">Integrations</h1>
-        <p className="text-[15px] text-gray-500 mt-1">
+      <header className="page-header">
+        <div>
+          <h1 className="page-title">Integrations</h1>
+          <p className="page-subtitle">
           Connect the tools your assistants act through.{" "}
           {oneClickCount > 0 && (
             <span className="text-gray-400">
@@ -171,7 +172,8 @@ export default function IntegrationsPage() {
               account, no keys to copy.
             </span>
           )}
-        </p>
+          </p>
+        </div>
       </header>
 
       {/* Summary + search */}

@@ -135,7 +135,7 @@ export default function BroadcastCreatePage() {
 
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto px-8 py-8 space-y-4">
+      <div className="page-sm space-y-4">
         <div className="skeleton h-8 w-64" />
         <div className="skeleton h-40 rounded-2xl" />
       </div>
@@ -143,7 +143,7 @@ export default function BroadcastCreatePage() {
   }
 
   return (
-    <form onSubmit={submit} className="max-w-4xl mx-auto px-8 py-8 animate-fade-in space-y-5">
+    <form onSubmit={submit} className="page-sm space-y-5">
       <header>
         <Link
           to="/broadcasts"
