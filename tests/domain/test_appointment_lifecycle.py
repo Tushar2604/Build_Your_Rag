@@ -279,3 +279,35 @@ class TestSlotHold:
         assert not hold.is_expired(START)
         assert not hold.is_expired(START + DEFAULT_HOLD_TTL - timedelta(seconds=1))
         assert hold.is_expired(START + DEFAULT_HOLD_TTL)
+
+
+class TestIdempotencyMustNotResurrectDeadAppointments:
+    """A regression from live testing, and a section-61-class failure.
+
+    Booking used the same idempotency key for the same (customer, slot), so
+    rebooking a slot the customer had previously CANCELLED returned the old
+    cancelled row as an "already booked" replay. The AI agent then told the
+    customer their appointment was confirmed — into a row that no longer
+    existed as a booking.
+
+    The rule that fixes it lives on the entity: only an appointment that still
+    occupies its slot can be a replay.
+    """
+
+    def test_a_cancelled_appointment_is_not_a_valid_replay(self) -> None:
+        appointment = _appointment(status="confirmed")
+        appointment.transition_to("cancelled", actor_kind="customer")
+        # `occupies_slot` is the check BookAppointment now makes before treating
+        # an idempotency hit as a replay.
+        assert not appointment.occupies_slot
+
+    def test_a_live_appointment_is_a_valid_replay(self) -> None:
+        for status in ("pending", "confirmed", "checked_in", "completed"):
+            assert _appointment(status=status).occupies_slot
+
+    def test_a_no_show_is_not_a_valid_replay_either(self) -> None:
+        # Same reasoning: the slot went back to the calendar, so a customer
+        # rebooking it is making a new appointment, not retrying an old request.
+        appointment = _appointment(status="confirmed")
+        appointment.transition_to("no_show", actor_kind="system")
+        assert not appointment.occupies_slot

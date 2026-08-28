@@ -34,6 +34,7 @@ from fastapi.responses import Response
 from src.application.dtos import AskInput
 from src.application.ports.repositories import WhatsAppConversation
 from src.application.use_cases.ask_chatbot import AskChatbot
+from src.application.use_cases.front_office import AskFrontOffice
 from src.config.container import get_container
 from src.config.settings import get_settings
 from src.domain.chat.entities import ChatSession, Message, MessageRole
@@ -797,27 +798,64 @@ async def _generate_and_send_reply(
     text: str,
 ) -> None:
     """The reply pipeline itself, run under the concurrency gate above."""
-    use_case = AskChatbot(container.unit_of_work(), container.embedder, container.llm)
+    # Which brain answers this message is the assistant's own setting. An
+    # assistant with appointments enabled runs the front-office agent, which can
+    # check real availability and book; everything else keeps the retrieval path
+    # it has always used. Read here rather than passed in because the setting can
+    # change between messages on a long-lived thread.
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(tenant_id)
+        bot = await uow.chatbots.get(tenant_id, chatbot_id)
+    books_appointments = bool(bot and bot.assistant.appointments_enabled)
+
     started = time.perf_counter()
     # AskChatbot persists a successful answer itself; a fallback bypasses it and
     # has to be written here, or the inbox shows the contact's message with no
     # sign of what they were actually sent back.
     persist_answer = False
     try:
-        result = await use_case.execute(
-            tenant_id,
-            chat_session_id,
-            AskInput(message=text, persist_user_message=False, chatbot_id=chatbot_id),
-        )
-        answer = result.answer
-        log.info(
-            "whatsapp.reply.generated",
-            session_id=str(session_id),
-            chatbot_id=str(chatbot_id),
-            citations=len(result.citations),
-            provider=result.provider,
-            latency_ms=int((time.perf_counter() - started) * 1000),
-        )
+        if books_appointments:
+            # The agent persists its own answer, same as AskChatbot does.
+            reply = await AskFrontOffice(
+                container.unit_of_work(), container.front_office_agent
+            ).execute(
+                tenant_id,
+                chat_session_id,
+                message=text,
+                chatbot_id=chatbot_id,
+                source="whatsapp",
+                channel="whatsapp",
+                # So the agent can look up "my appointments" without asking a
+                # contact for the number they are literally messaging from.
+                customer_phone=phone,
+                persist_user_message=False,
+            )
+            answer = reply.answer
+            log.info(
+                "whatsapp.reply.generated",
+                session_id=str(session_id),
+                chatbot_id=str(chatbot_id),
+                mode="front_office",
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+        else:
+            result = await AskChatbot(
+                container.unit_of_work(), container.embedder, container.llm
+            ).execute(
+                tenant_id,
+                chat_session_id,
+                AskInput(message=text, persist_user_message=False, chatbot_id=chatbot_id),
+            )
+            answer = result.answer
+            log.info(
+                "whatsapp.reply.generated",
+                session_id=str(session_id),
+                chatbot_id=str(chatbot_id),
+                mode="rag",
+                citations=len(result.citations),
+                provider=result.provider,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
     except Exception as exc:  # noqa: BLE001 — always answer, even on a pipeline failure
         log.exception(
             "whatsapp.reply.failed",

@@ -18,18 +18,31 @@ real commitment should not be registered before anything is ready to use it.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
-from typing import Any
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Any, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 
 from src.application.agent.tools import ToolContext, ToolResult, ToolSpec
 from src.application.ports.repositories import UnitOfWork
+from src.application.use_cases.appointments import (
+    BookAppointment,
+    RescheduleAppointment,
+    TransitionAppointment,
+)
 from src.application.use_cases.availability import FindAvailability, HoldSlot
+from src.domain.scheduling.entities import ALL_SOURCES, BookingSource
 from src.domain.shared.errors import DomainError
-from src.domain.shared.identifiers import LocationId, ResourceId, ServiceId
+from src.domain.shared.identifiers import (
+    AppointmentId,
+    LocationId,
+    ResourceId,
+    ServiceId,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -72,6 +85,116 @@ def _parse_uuid(value: Any) -> uuid.UUID | None:
         return uuid.UUID(value.strip())
     except ValueError:
         return None
+
+
+# Statuses a customer would still call "my appointment". A cancelled one is not
+# reschedulable and must not appear in a lookup.
+LIVE_STATUSES = (
+    "draft",
+    "requested",
+    "pending",
+    "awaiting_confirmation",
+    "confirmed",
+    "arrived",
+    "checked_in",
+    "in_progress",
+)
+
+
+# Rough parts of the day, in branch-local hours. A customer says "evening", not
+# "17:00-21:00", and turning the one into the other is arithmetic — so it is done
+# here rather than asked of the model.
+TIME_OF_DAY_HOURS: dict[str, tuple[int, int]] = {
+    "morning": (6, 12),
+    "afternoon": (12, 17),
+    "evening": (17, 22),
+    "any": (0, 24),
+}
+
+
+def _local_day_window(
+    day: str, time_of_day: str, timezone: str, now: datetime
+) -> tuple[datetime, datetime] | None:
+    """Turn "2026-08-31" + "morning" into a UTC window, read in the branch's zone.
+
+    This exists because the alternative is asking the model to do timezone
+    arithmetic. It does not know the branch's offset, does not reliably know
+    today's date, and gets both wrong in ways that look like "no availability"
+    rather than like an error — which is how an AI receptionist tells a customer
+    the clinic is closed on a day it is open.
+    """
+    try:
+        zone = ZoneInfo(timezone or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+
+    try:
+        target = date.fromisoformat(day.strip())
+    except (ValueError, AttributeError):
+        return None
+
+    start_hour, end_hour = TIME_OF_DAY_HOURS.get(
+        (time_of_day or "any").strip().lower(), TIME_OF_DAY_HOURS["any"]
+    )
+    start_local = datetime.combine(target, time(start_hour, 0), tzinfo=zone)
+    end_local = (
+        datetime.combine(target, time.max, tzinfo=zone)
+        if end_hour >= 24
+        else datetime.combine(target, time(end_hour, 0), tzinfo=zone)
+    )
+    # Never offer a time that has already passed today.
+    return max(start_local.astimezone(UTC), now), end_local.astimezone(UTC)
+
+
+def _reference(appointment_id: uuid.UUID) -> str:
+    """A short handle a customer can read back over the phone.
+
+    The first eight hex characters of the id, upper-cased. Not a new column: it
+    is derived, so it cannot drift from the id, and `_resolve_reference` matches
+    on the same prefix. Collisions inside one tenant's upcoming appointments are
+    vanishingly unlikely, and the lookup is scoped to exactly that set.
+    """
+    return f"APT-{appointment_id.hex[:8].upper()}"
+
+
+def _source_for(ctx: ToolContext) -> BookingSource:
+    """Channel attribution (spec section 44), taken from what the channel said.
+
+    Falls back to `api` rather than guessing: a wrong attribution silently
+    corrupts the "which channel produces business" report, which is the whole
+    point of storing it.
+    """
+    source = str(ctx.extras.get("source") or "").strip()
+    # The membership check IS the validation, so the cast is safe — but it has
+    # to be spelled out, because a value that reaches the appointment row
+    # unchecked corrupts channel attribution silently.
+    return cast("BookingSource", source) if source in ALL_SOURCES else "api"
+
+
+async def _resolve_reference(
+    uow_factory: UowFactory, ctx: ToolContext, reference: str
+) -> AppointmentId | None:
+    """Turn a customer-facing reference back into an id, within this tenant.
+
+    Scoped to the tenant's own upcoming appointments, so a guessed reference
+    cannot reach another tenant's booking or a historical one.
+    """
+    handle = reference.strip().upper().removeprefix("APT-")
+    if not handle:
+        return None
+    now = datetime.now(UTC)
+    async with uow_factory() as uow:
+        uow.set_tenant_scope(ctx.tenant_id)
+        appointments = await uow.appointments.list_for_tenant(
+            ctx.tenant_id,
+            window_start=now,
+            statuses=list(LIVE_STATUSES),
+            limit=200,
+        )
+    for appointment in appointments:
+        if appointment.id.hex[:8].upper() == handle:
+            return appointment.id
+    return None
 
 
 class ListServicesTool:
@@ -154,20 +277,21 @@ class FindAvailableSlotsTool:
             "Find real available appointment times for a service at a location. "
             "You MUST call this before offering any time to a customer, and you "
             "may only offer times it returns — never guess or invent a slot. "
-            "Args: service_id and location_id (from list_services), optional "
-            "from_date and to_date as ISO timestamps, optional resource_id to "
-            "request a specific staff member."
+            "Give `date` as YYYY-MM-DD and optionally `time_of_day` as morning, "
+            "afternoon or evening — both are read in the BRANCH's local time, so "
+            "do not convert anything yourself. Omit `date` to search the next "
+            "week. If a day comes back empty, try a different date."
         ),
         parameters={
             "service_id": {"type": "string", "description": "Service to book."},
             "location_id": {"type": "string", "description": "Branch to book at."},
-            "from_date": {
+            "date": {
                 "type": "string",
-                "description": "ISO start of the search window. Defaults to now.",
+                "description": "YYYY-MM-DD in the branch's local time. Omit to search a week.",
             },
-            "to_date": {
+            "time_of_day": {
                 "type": "string",
-                "description": "ISO end of the search window. Defaults to a week out.",
+                "description": "morning | afternoon | evening | any. Branch-local.",
             },
             "resource_id": {
                 "type": "string",
@@ -192,12 +316,51 @@ class FindAvailableSlotsTool:
             )
 
         now = datetime.now(UTC)
-        range_start = _parse_dt(kwargs.get("from_date")) or now
-        range_end = _parse_dt(kwargs.get("to_date")) or (
-            range_start + timedelta(days=DEFAULT_SEARCH_DAYS)
+
+        # The branch's timezone decides what "Monday morning" means, so it has to
+        # be read before the window can be built. One extra lookup, and it is
+        # what stops the agent searching the wrong eight hours of the day.
+        timezone = "UTC"
+        requested_day = str(kwargs.get("date") or "").strip()
+        if requested_day:
+            async with self._uow_factory() as uow:
+                uow.set_tenant_scope(ctx.tenant_id)
+                location = await uow.locations.get(ctx.tenant_id, LocationId(location_id))
+            if location is None:
+                return ToolResult(
+                    observation="That location was not found. Call list_services again.",
+                    ok=False,
+                )
+            timezone = location.timezone
+
+        window = (
+            _local_day_window(
+                requested_day, str(kwargs.get("time_of_day") or "any"), timezone, now
+            )
+            if requested_day
+            else None
         )
-        if range_end <= range_start:
-            range_end = range_start + timedelta(days=DEFAULT_SEARCH_DAYS)
+        if requested_day and window is None:
+            return ToolResult(
+                observation=(
+                    f"{requested_day!r} is not a date I can read. Use YYYY-MM-DD."
+                ),
+                ok=False,
+            )
+        if window is not None:
+            range_start, range_end = window
+            if range_end <= range_start:
+                # The requested part of that day is already over.
+                return ToolResult(
+                    observation=(
+                        "That time of day has already passed. Offer a later time "
+                        "today or a different date — do not invent one."
+                    ),
+                    data={"slots": []},
+                )
+        else:
+            range_start = now
+            range_end = now + timedelta(days=DEFAULT_SEARCH_DAYS)
 
         try:
             slots, location, service = await FindAvailability(
@@ -263,6 +426,7 @@ class CreateSlotHoldTool:
     spec = ToolSpec(
         name="create_slot_hold",
         description=(
+            "Only for a NEW booking — never when moving an existing appointment. "
             "Temporarily reserve one of the exact times returned by "
             "find_available_slots, while you collect the customer's details. "
             "Only use a starts_at value that find_available_slots returned. "
@@ -343,6 +507,383 @@ class CreateSlotHoldTool:
         )
 
 
+class BookAppointmentTool:
+    """Complete the booking. The only tool that creates a real commitment.
+
+    Spec section 61's second half: the agent may not claim an appointment is
+    booked unless the backend confirms it. That is enforced structurally — this
+    tool returns an appointment reference on success and an explicit failure the
+    planner must react to otherwise, and the observation text says so.
+
+    Prefers a `hold_token` when the agent has one: converting a hold is the only
+    path where the slot cannot be taken between offering it and confirming it.
+    """
+
+    spec = ToolSpec(
+        name="book_appointment",
+        description=(
+            "Actually book the appointment. Call this ONLY after you have the "
+            "customer's full name and a phone number or email, and after "
+            "find_available_slots gave you the exact starts_at. Pass the "
+            "hold_token from create_slot_hold if you have one. "
+            "Never tell the customer their appointment is booked unless this "
+            "tool returns success — if it fails, the slot was taken and you "
+            "must offer them a different time."
+        ),
+        parameters={
+            "service_id": {"type": "string", "description": "Service to book."},
+            "location_id": {"type": "string", "description": "Branch to book at."},
+            "starts_at": {
+                "type": "string",
+                "description": "Exact ISO start from find_available_slots.",
+            },
+            "customer_name": {"type": "string", "description": "The customer's full name."},
+            "customer_phone": {"type": "string", "description": "Their phone number."},
+            "customer_email": {"type": "string", "description": "Their email address."},
+            "hold_token": {
+                "type": "string",
+                "description": "Token from create_slot_hold, if you held the slot.",
+            },
+        },
+    )
+
+    def __init__(self, uow_factory: UowFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        service_id = _parse_uuid(kwargs.get("service_id"))
+        location_id = _parse_uuid(kwargs.get("location_id"))
+        starts_at = _parse_dt(kwargs.get("starts_at"))
+        name = str(kwargs.get("customer_name") or "").strip()
+        # Falls back to the identity the channel already knows. On WhatsApp or a
+        # phone call the number is not a question worth asking — the customer is
+        # literally messaging from it, and asking makes the assistant look like
+        # it is not paying attention.
+        phone = (
+            str(kwargs.get("customer_phone") or "").strip()
+            or str(ctx.extras.get("customer_phone") or "").strip()
+        )
+        email = str(kwargs.get("customer_email") or "").strip()
+        hold_token = str(kwargs.get("hold_token") or "").strip()
+
+        if service_id is None or location_id is None or starts_at is None:
+            return ToolResult(
+                observation=(
+                    "book_appointment needs service_id, location_id and an exact "
+                    "starts_at from find_available_slots."
+                ),
+                ok=False,
+            )
+        if not name:
+            return ToolResult(
+                observation="Ask the customer for their full name before booking.",
+                ok=False,
+            )
+        # The channel supplies a phone for WhatsApp and voice, so this usually
+        # passes. Asked for explicitly rather than assumed, because without a way
+        # to reach them the appointment cannot be confirmed or reminded.
+        if not phone and not email:
+            return ToolResult(
+                observation=(
+                    "Ask the customer for a phone number or an email address — "
+                    "without one we cannot send them a confirmation."
+                ),
+                ok=False,
+            )
+
+        # Scoped to the conversation, not just to (customer, slot): idempotency
+        # protects against the same request arriving twice, and the same person
+        # rebooking a slot they cancelled last week is a different request.
+        conversation = str(ctx.extras.get("conversation_id") or "")
+        fingerprint = (
+            f"{ctx.tenant_id}:{conversation}:{service_id}:"
+            f"{starts_at.isoformat()}:{phone or email}"
+        )
+        idempotency_key = hashlib.sha256(fingerprint.encode()).hexdigest()[:64]
+
+        try:
+            appointment, created = await BookAppointment(self._uow_factory()).execute(
+                ctx.tenant_id,
+                location_id=LocationId(location_id),
+                service_id=ServiceId(service_id),
+                starts_at=starts_at,
+                customer_name=name,
+                customer_phone=phone,
+                customer_email=email,
+                hold_token=hold_token,
+                source=_source_for(ctx),
+                status="confirmed",
+                idempotency_key=idempotency_key,
+                actor_kind="ai_agent",
+                actor_label="AI assistant",
+                channel=str(ctx.extras.get("channel") or ""),
+            )
+        except DomainError as exc:
+            return ToolResult(
+                observation=(
+                    f"The booking did NOT go through: {exc} "
+                    "Tell the customer that time is no longer free, call "
+                    "find_available_slots again, and offer what is actually left."
+                ),
+                ok=False,
+            )
+
+        local = _in_zone(appointment.starts_at, appointment.timezone)
+        return ToolResult(
+            observation=(
+                f"{'Booked' if created else 'Already booked'}: "
+                f"{appointment.customer_name} on {local:%A %d %B at %H:%M} "
+                f"({appointment.timezone}). Reference {_reference(appointment.id)}. "
+                "You may now confirm this to the customer."
+            ),
+            data={
+                "appointment_id": str(appointment.id),
+                "reference": _reference(appointment.id),
+                "starts_at": appointment.starts_at.isoformat(),
+                "status": appointment.status,
+                "created": created,
+            },
+        )
+
+
+class FindCustomerAppointmentsTool:
+    """"What appointments do I have?" — looked up by the number they contacted from.
+
+    Scoped to a phone or email rather than an id, because that is what a channel
+    actually knows about whoever is talking. It returns references the other
+    tools accept, so a customer never has to recite a UUID.
+    """
+
+    spec = ToolSpec(
+        name="find_customer_appointments",
+        description=(
+            "Look up a customer's upcoming appointments by their phone number or "
+            "email. Use this when someone asks about, wants to change, or wants "
+            "to cancel an existing appointment. Returns a reference for each one "
+            "that you pass to reschedule_appointment or cancel_appointment."
+        ),
+        parameters={
+            "customer_phone": {"type": "string", "description": "Their phone number."},
+            "customer_email": {"type": "string", "description": "Their email address."},
+        },
+    )
+
+    def __init__(self, uow_factory: UowFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        # Falls back to the identity the channel already knows, so the agent does
+        # not have to ask a WhatsApp contact for the number they messaged from.
+        search = (
+            str(kwargs.get("customer_phone") or "").strip()
+            or str(kwargs.get("customer_email") or "").strip()
+            or str(ctx.extras.get("customer_phone") or "").strip()
+        )
+        if not search:
+            return ToolResult(
+                observation=(
+                    "Ask the customer for the phone number or email their "
+                    "appointment was booked under."
+                ),
+                ok=False,
+            )
+
+        now = datetime.now(UTC)
+        async with self._uow_factory() as uow:
+            uow.set_tenant_scope(ctx.tenant_id)
+            appointments = await uow.appointments.list_for_tenant(
+                ctx.tenant_id,
+                window_start=now,
+                search=search,
+                statuses=list(LIVE_STATUSES),
+                limit=10,
+            )
+            services = {s.id: s.name for s in await uow.services.list_for_tenant(ctx.tenant_id)}
+            locations = {
+                loc.id: loc.name for loc in await uow.locations.list_for_tenant(ctx.tenant_id)
+            }
+
+        if not appointments:
+            return ToolResult(
+                observation=(
+                    f"No upcoming appointments found for {search}. Do not invent "
+                    "one — offer to book a new appointment instead."
+                ),
+                data={"appointments": []},
+            )
+
+        lines = ["Upcoming appointments:"]
+        payload = []
+        for appointment in appointments:
+            local = _in_zone(appointment.starts_at, appointment.timezone)
+            reference = _reference(appointment.id)
+            # The ids belong in the observation, not only in `data`: the loop
+            # feeds the observation text back to the planner and nothing else, so
+            # an id that lives only in `data` is invisible to the model. Without
+            # them a reschedule cannot call find_available_slots, and the symptom
+            # is the assistant reporting no availability on a day the branch is
+            # open — which is what this line was originally missing.
+            lines.append(
+                f"- {reference}: {services.get(appointment.service_id, 'Appointment')} "
+                f"at {locations.get(appointment.location_id, '')} on "
+                f"{local:%A %d %B at %H:%M} ({appointment.status.replace('_', ' ')}) "
+                f"[service_id={appointment.service_id} location_id={appointment.location_id}]"
+            )
+            payload.append(
+                {
+                    "reference": reference,
+                    "appointment_id": str(appointment.id),
+                    "starts_at": appointment.starts_at.isoformat(),
+                    "service_id": str(appointment.service_id),
+                    "location_id": str(appointment.location_id),
+                    "status": appointment.status,
+                }
+            )
+        return ToolResult(observation="\n".join(lines), data={"appointments": payload})
+
+
+class CancelAppointmentTool:
+    """Cancel, and release the slot back to the calendar."""
+
+    spec = ToolSpec(
+        name="cancel_appointment",
+        description=(
+            "Cancel an existing appointment. Get the reference from "
+            "find_customer_appointments first. Confirm with the customer that "
+            "they want to cancel before calling this — it cannot be undone. "
+            "Never say an appointment is cancelled unless this returns success."
+        ),
+        parameters={
+            "reference": {
+                "type": "string",
+                "description": "Reference from find_customer_appointments.",
+            },
+            "reason": {"type": "string", "description": "Why they are cancelling."},
+        },
+    )
+
+    def __init__(self, uow_factory: UowFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        appointment_id = await _resolve_reference(
+            self._uow_factory, ctx, str(kwargs.get("reference") or "")
+        )
+        if appointment_id is None:
+            return ToolResult(
+                observation=(
+                    "That reference does not match an upcoming appointment. Call "
+                    "find_customer_appointments to get the right one."
+                ),
+                ok=False,
+            )
+
+        try:
+            appointment = await TransitionAppointment(self._uow_factory()).execute(
+                ctx.tenant_id,
+                appointment_id,
+                "cancelled",
+                actor_kind="ai_agent",
+                actor_label="AI assistant",
+                channel=str(ctx.extras.get("channel") or ""),
+                reason=str(kwargs.get("reason") or "Cancelled by customer")[:500],
+            )
+        except DomainError as exc:
+            return ToolResult(observation=f"Could not cancel it: {exc}", ok=False)
+
+        return ToolResult(
+            observation=(
+                f"Cancelled {_reference(appointment.id)}. The time is free again. "
+                "You may confirm the cancellation to the customer."
+            ),
+            data={"appointment_id": str(appointment.id), "status": appointment.status},
+        )
+
+
+class RescheduleAppointmentTool:
+    """Move an existing appointment, keeping its identity and its history."""
+
+    spec = ToolSpec(
+        name="reschedule_appointment",
+        description=(
+            "Move an existing appointment to a new time. Get the reference from "
+            "find_customer_appointments, then call find_available_slots for that "
+            "appointment's service to get real new times — never guess one. "
+            "This is the ONLY call a reschedule needs: do NOT hold the slot "
+            "first, and do NOT ask for a name, phone or email — the appointment "
+            "already has them. As soon as the customer picks a time, call this. "
+            "Never say an appointment has moved unless this returns success."
+        ),
+        parameters={
+            "reference": {
+                "type": "string",
+                "description": "Reference from find_customer_appointments.",
+            },
+            "starts_at": {
+                "type": "string",
+                "description": "Exact new ISO start from find_available_slots.",
+            },
+            "reason": {"type": "string", "description": "Why they are moving it."},
+        },
+    )
+
+    def __init__(self, uow_factory: UowFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        appointment_id = await _resolve_reference(
+            self._uow_factory, ctx, str(kwargs.get("reference") or "")
+        )
+        starts_at = _parse_dt(kwargs.get("starts_at"))
+        if appointment_id is None:
+            return ToolResult(
+                observation=(
+                    "That reference does not match an upcoming appointment. Call "
+                    "find_customer_appointments to get the right one."
+                ),
+                ok=False,
+            )
+        if starts_at is None:
+            return ToolResult(
+                observation=(
+                    "reschedule_appointment needs an exact starts_at from "
+                    "find_available_slots."
+                ),
+                ok=False,
+            )
+
+        try:
+            appointment = await RescheduleAppointment(self._uow_factory()).execute(
+                ctx.tenant_id,
+                appointment_id,
+                starts_at=starts_at,
+                actor_kind="ai_agent",
+                actor_label="AI assistant",
+                channel=str(ctx.extras.get("channel") or ""),
+                reason=str(kwargs.get("reason") or "")[:500],
+            )
+        except DomainError as exc:
+            return ToolResult(
+                observation=(
+                    f"The appointment was NOT moved: {exc} "
+                    "Call find_available_slots again and offer a time that is free."
+                ),
+                ok=False,
+            )
+
+        local = _in_zone(appointment.starts_at, appointment.timezone)
+        return ToolResult(
+            observation=(
+                f"Moved {_reference(appointment.id)} to {local:%A %d %B at %H:%M} "
+                f"({appointment.timezone}). You may confirm this to the customer."
+            ),
+            data={
+                "appointment_id": str(appointment.id),
+                "starts_at": appointment.starts_at.isoformat(),
+            },
+        )
+
+
 def _in_zone(moment: datetime, timezone: str) -> datetime:
     """Render a UTC instant in a branch's local time, safely.
 
@@ -359,9 +900,18 @@ def _in_zone(moment: datetime, timezone: str) -> datetime:
 
 
 def build_scheduling_tools(uow_factory: UowFactory) -> list[Any]:
-    """The appointment tools, in the order an agent naturally needs them."""
+    """The appointment tools, in the order an agent naturally needs them.
+
+    Read-only first, then the two that change something. The ordering is not
+    cosmetic: it is the order they appear in the planner's catalogue, and a
+    model reads that as a rough sequence.
+    """
     return [
         ListServicesTool(uow_factory),
         FindAvailableSlotsTool(uow_factory),
+        FindCustomerAppointmentsTool(uow_factory),
         CreateSlotHoldTool(uow_factory),
+        BookAppointmentTool(uow_factory),
+        RescheduleAppointmentTool(uow_factory),
+        CancelAppointmentTool(uow_factory),
     ]

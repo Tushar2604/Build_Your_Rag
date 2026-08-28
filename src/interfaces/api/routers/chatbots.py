@@ -95,6 +95,7 @@ def _to_response(
             welcome_message=bot.assistant.welcome_message,
             welcome_dynamic=bot.assistant.welcome_dynamic,
             welcome_interruptible=bot.assistant.welcome_interruptible,
+            appointments_enabled=bot.assistant.appointments_enabled,
         ),
         top_k=bot.retrieval.top_k,
         is_public=bot.is_public,
@@ -418,6 +419,7 @@ async def update_chatbot(
                 welcome_message=body.assistant.welcome_message,
                 welcome_dynamic=body.assistant.welcome_dynamic,
                 welcome_interruptible=body.assistant.welcome_interruptible,
+                appointments_enabled=body.assistant.appointments_enabled,
             ).normalized()
         if body.allowed_document_ids is not None:
             bot.allowed_document_ids = [DocumentId(d) for d in body.allowed_document_ids]

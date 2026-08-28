@@ -150,6 +150,7 @@ def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
             welcome_message=ac.get("welcome_message", ""),
             welcome_dynamic=bool(ac.get("welcome_dynamic", True)),
             welcome_interruptible=bool(ac.get("welcome_interruptible", False)),
+            appointments_enabled=bool(ac.get("appointments_enabled", False)),
         ),
         voice_profile_id=row.voice_profile_id,
         allowed_document_ids=[DocumentId(uuid.UUID(d)) for d in (row.allowed_document_ids or [])],
@@ -188,6 +189,7 @@ def assistant_config_to_jsonb(ac: AssistantConfig) -> dict:
         "welcome_message": ac.welcome_message,
         "welcome_dynamic": ac.welcome_dynamic,
         "welcome_interruptible": ac.welcome_interruptible,
+        "appointments_enabled": ac.appointments_enabled,
     }
 
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import structlog
 
@@ -73,22 +74,51 @@ class AgentLoop:
         refusal_answer: str,
         max_steps: int = 6,
         tracer: Tracer | None = None,
+        system_template: str | None = None,
     ) -> None:
         self._registry = registry
         self._router = router
         self._refusal = refusal_answer
         self._max_steps = max_steps
         self._tracer = tracer or NoOpTracer()
+        # Injectable so one loop can serve different jobs. The document-answering
+        # agent and the front-office booking agent share all the ReAct machinery
+        # — step budget, defensive action parsing, tracing — and differ only in
+        # their tools and in how they are told to behave. Defaulting to the
+        # original template leaves every existing caller unchanged.
+        self._system_template = system_template or _SYSTEM_TEMPLATE
 
     def _system_prompt(self) -> str:
-        return _SYSTEM_TEMPLATE.format(
-            catalog=self._registry.render_catalog(), refusal=self._refusal
+        """Render the template, including today's date.
+
+        A model has no clock. Without being told the date it cannot resolve
+        "tomorrow" or "Monday" into anything a tool will accept, and the failure
+        looks like "no availability" rather than like a mistake — which is how an
+        AI receptionist tells someone the business is shut on a day it is open.
+        """
+        return self._system_template.format(
+            catalog=self._registry.render_catalog(),
+            refusal=self._refusal,
+            today=datetime.now(UTC).strftime("%A %d %B %Y"),
         )
 
-    async def run(self, ctx: ToolContext, question: str) -> AgentResult:
+    async def run(
+        self, ctx: ToolContext, question: str, *, history: str = ""
+    ) -> AgentResult:
+        """Answer `question`, optionally in the context of a conversation.
+
+        `history` is what makes anything multi-turn possible. Booking is a
+        conversation — "I need physio", "tomorrow evening", "6:15 works" — and
+        each of those turns is meaningless alone. Without the prior turns the
+        planner re-asks which service they wanted on every single message.
+        """
         trace = AgentTrace(question=question)
         system = self._system_prompt()
-        transcript = f"Question: {question}"
+        transcript = (
+            f"Conversation so far:\n{history}\n\nLatest message: {question}"
+            if history
+            else f"Question: {question}"
+        )
 
         # Root span = one trace per answer. Every step/tool span nests inside it,
         # so a single answer opens as one tree in Langfuse / any OTel backend.

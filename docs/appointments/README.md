@@ -42,14 +42,22 @@ transaction interleaving or how many web workers are running. See
 | [database.md](database.md) | The nine tables, their constraints, and why each one is shaped that way |
 | [api.md](api.md) | Every endpoint, with the status codes that carry meaning |
 | [availability-engine.md](availability-engine.md) | The slot calculation, timezones, and the concurrency guard |
+| [ai-agent.md](ai-agent.md) | The AI receptionist: tools, guardrails, and what had to be taken away from the model |
 | [testing.md](testing.md) | What is tested where, and the one test that needs a real database |
+
+## The AI receptionist
+
+Set `appointments_enabled` on an assistant (Assistant Details tab) and it stops
+being a document-answering bot and becomes a booking-capable receptionist on
+WhatsApp and web chat: it checks real availability, holds the slot, and books.
+See [ai-agent.md](ai-agent.md).
 
 ## Feature flags
 
 | Setting | Default | Effect |
 |---|---|---|
 | `APPOINTMENTS_ENABLED` | `true` | Mounts the module's routes and the hold-expiry sweep |
-| `APPOINTMENT_AGENT_TOOLS_ENABLED` | `false` | Gives the shared agent loop the booking tools. Off until a channel is wired to use them — turning it on changes the existing document-answering agent's tool catalogue |
+| `APPOINTMENT_AGENT_TOOLS_ENABLED` | `false` | Adds the booking tools to the **document-answering** agent (`/agent`). Not needed for the receptionist — that is per-assistant, see below |
 | `SLOT_HOLD_TTL_MINUTES` | `10` | How long a held slot survives without being converted |
 
 ## Roadmap
@@ -58,7 +66,7 @@ transaction interleaving or how many web workers are running. See
 |---|---|---|
 | 1 | Scheduling core, availability, concurrency, calendar UI, manual booking | **Done** |
 | 2 | Public booking page + widget, customer entity, intake forms | Not started |
-| 3 | WhatsApp appointment agent | Not started |
+| 3 | WhatsApp + web-chat AI booking agent | **Done** |
 | 4 | Twilio Voice telephony + voice booking | Not started |
 | 5 | Durable job infrastructure, then reminder rules | Not started |
 | 6 | Waitlist, payments, recurrence, QR check-in, two-way calendar sync | Not started |

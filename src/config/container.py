@@ -13,8 +13,8 @@ from functools import lru_cache
 
 from src.config.settings import Settings, get_settings
 from src.infrastructure.agent.builder import build_agent_loop
+from src.infrastructure.agent.front_office import build_front_office_agent
 from src.infrastructure.calendar.google import GoogleCalendarClient
-from src.infrastructure.oauth.providers import OAuthBroker
 from src.infrastructure.email.resend import ResendEmailSender
 from src.infrastructure.llm.embeddings import GeminiEmbedder
 from src.infrastructure.llm.providers import FailoverLLM, build_llm
@@ -23,6 +23,7 @@ from src.infrastructure.messaging.slack import SlackSender
 from src.infrastructure.messaging.twilio_whatsapp import TwilioWhatsAppSender
 from src.infrastructure.messaging.webhook import WebhookSender
 from src.infrastructure.messaging.whatsapp_bridge import WhatsAppBridgeClient
+from src.infrastructure.oauth.providers import OAuthBroker
 from src.infrastructure.observability.tracing import build_tracer
 from src.infrastructure.parsing.chunker import RecursiveChunker
 from src.infrastructure.parsing.parser import MultiFormatParser
@@ -93,6 +94,12 @@ class Container:
         )
         # Reusable multi-tool agent (registry + router + step budget) built once.
         self.agent_loop = build_agent_loop(self)
+        # The booking-capable receptionist. Same loop machinery, different
+        # tools and prompt. Built unconditionally — it costs nothing until an
+        # assistant turns `appointments_enabled` on, and building it lazily
+        # would put a first-message latency spike on the one path where a
+        # customer is waiting on WhatsApp.
+        self.front_office_agent = build_front_office_agent(self)
         self._sessionmaker = get_sessionmaker()
 
     def unit_of_work(self) -> SqlAlchemyUnitOfWork:

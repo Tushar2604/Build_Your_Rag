@@ -13,6 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 from src.application.dtos import AskInput
 from src.application.ports.repositories import RequestLog
 from src.application.use_cases.ask_chatbot import AskChatbot
+from src.application.use_cases.front_office import AskFrontOffice
 from src.domain.chat.entities import ChatSession, Message, MessageRole
 from src.domain.chatbot.entities import opener_instruction, static_welcome
 from src.domain.safety.guardrails import (
@@ -64,6 +65,38 @@ async def ask(
     principal: PrincipalDep,
     container: ContainerDep,
 ) -> AnswerResponse:
+    # An assistant with appointments enabled answers through the front-office
+    # agent, so this endpoint can complete a real booking rather than only
+    # describing one. Everything else keeps the retrieval path unchanged.
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        session = await uow.chats.get_session(principal.tenant_id, SessionId(session_id))
+        bot = (
+            await uow.chatbots.get(principal.tenant_id, session.chatbot_id)
+            if session and session.chatbot_id
+            else None
+        )
+
+    if bot and bot.assistant.appointments_enabled:
+        reply = await AskFrontOffice(
+            container.unit_of_work(), container.front_office_agent
+        ).execute(
+            principal.tenant_id,
+            SessionId(session_id),
+            message=body.message,
+            source="web_widget",
+            channel="web",
+        )
+        # No citations: the agent's answer is grounded in tool results, and the
+        # retrieval trace belongs to whichever search it happened to run.
+        return AnswerResponse(
+            message_id=reply.message_id,
+            answer=reply.answer,
+            citations=[],
+            tokens_used=reply.tokens_used,
+            provider=reply.provider or "agent",
+        )
+
     use_case = AskChatbot(container.unit_of_work(), container.embedder, container.llm)
     result = await use_case.execute(
         principal.tenant_id, SessionId(session_id), AskInput(message=body.message)

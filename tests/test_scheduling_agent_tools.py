@@ -12,6 +12,7 @@ database and actually fail when the guarantee regresses.
 from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from src.application.agent.tools import ToolContext
@@ -54,6 +55,11 @@ MONDAY = _next_monday()
 FIRST_SLOT = MONDAY + timedelta(hours=5)
 # 07:00 local, before the branch opens: a time the engine will never offer.
 BEFORE_OPENING = MONDAY + timedelta(hours=3)
+# The same Monday as the branch in Dubai sees it. The tool reads `date` in the
+# branch's zone, so the test must speak the same language.
+MONDAY_LOCAL_DATE = (MONDAY + timedelta(hours=5)).astimezone(
+    ZoneInfo("Asia/Dubai")
+).date().isoformat()
 
 
 class _FakeUow:
@@ -277,8 +283,7 @@ class TestFindAvailableSlots:
             _ctx(),
             service_id=str(world.service.id),  # type: ignore[attr-defined]
             location_id=str(world.location.id),  # type: ignore[attr-defined]
-            from_date=MONDAY.isoformat(),
-            to_date=(MONDAY + timedelta(days=1)).isoformat(),
+            date=MONDAY_LOCAL_DATE,
         )
         assert result.ok
         assert result.data["slots"], "an open Monday must yield slots"
@@ -297,8 +302,7 @@ class TestFindAvailableSlots:
             _ctx(),
             service_id=str(world.service.id),  # type: ignore[attr-defined]
             location_id=str(world.location.id),  # type: ignore[attr-defined]
-            from_date=MONDAY.isoformat(),
-            to_date=(MONDAY + timedelta(days=1)).isoformat(),
+            date=MONDAY_LOCAL_DATE,
         )
         assert result.data["slots"] == []
         assert "do not invent a time" in result.observation
@@ -311,7 +315,7 @@ class TestFindAvailableSlots:
             _ctx(),
             service_id=str(world.service.id),  # type: ignore[attr-defined]
             location_id=str(world.location.id),  # type: ignore[attr-defined]
-            from_date=MONDAY.isoformat(),
+            date=MONDAY_LOCAL_DATE,
         )
         assert "Offer ONLY these times" in result.observation
 
@@ -324,8 +328,7 @@ class TestFindAvailableSlots:
             _ctx(),
             service_id=str(world.service.id),  # type: ignore[attr-defined]
             location_id=str(world.location.id),  # type: ignore[attr-defined]
-            from_date=MONDAY.isoformat(),
-            to_date=(MONDAY + timedelta(days=1)).isoformat(),
+            date=MONDAY_LOCAL_DATE,
         )
         starts = {s["starts_at"] for s in result.data["slots"]}
         assert FIRST_SLOT.isoformat() not in starts
@@ -349,7 +352,7 @@ class TestFindAvailableSlots:
             _ctx(OTHER_TENANT),
             service_id=str(world.service.id),  # type: ignore[attr-defined]
             location_id=str(world.location.id),  # type: ignore[attr-defined]
-            from_date=MONDAY.isoformat(),
+            date=MONDAY_LOCAL_DATE,
         )
         # Reads as absent rather than forbidden, so an id probe learns nothing.
         assert not result.ok
@@ -362,7 +365,7 @@ class TestFindAvailableSlots:
             _ctx(),
             service_id=str(world.service.id),  # type: ignore[attr-defined]
             location_id=str(world.location.id),  # type: ignore[attr-defined]
-            from_date=MONDAY.isoformat(),
+            date=MONDAY_LOCAL_DATE,
         )
         assert len(result.data["slots"]) <= 8
 
@@ -430,7 +433,18 @@ class TestRegistration:
     def test_the_tools_have_distinct_names_and_usable_specs(self) -> None:
         tools = build_scheduling_tools(_World().uow_factory)
         names = [t.spec.name for t in tools]
-        assert names == ["list_services", "find_available_slots", "create_slot_hold"]
+        # Read-only tools first, then the ones that change something: this is the
+        # order they appear in the planner's catalogue, which a model reads as a
+        # rough sequence.
+        assert names == [
+            "list_services",
+            "find_available_slots",
+            "find_customer_appointments",
+            "create_slot_hold",
+            "book_appointment",
+            "reschedule_appointment",
+            "cancel_appointment",
+        ]
         assert len(set(names)) == len(names)
 
     def test_every_description_forbids_inventing_a_slot(self) -> None:

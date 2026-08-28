@@ -145,6 +145,9 @@ class AssistantConfigSchema(BaseModel):
     welcome_message: str = Field(default="", max_length=600)
     welcome_dynamic: bool = True
     welcome_interruptible: bool = False
+    # Gives this assistant the appointment tools — it can then check real
+    # availability and book, not just answer questions.
+    appointments_enabled: bool = False
 
 
 class AssistantOptionsResponse(BaseModel):

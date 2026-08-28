@@ -106,8 +106,19 @@ class BookAppointment:
                 existing = await uow.appointments.get_by_idempotency_key(
                     tenant_id, idempotency_key
                 )
-                if existing is not None:
+                # A cancelled or no-showed appointment is NOT a replay. The slot
+                # went back to the calendar when it was cancelled, so a request
+                # carrying the same key is a customer genuinely rebooking — and
+                # returning the dead row instead would report success for an
+                # appointment that does not exist. Seen in testing: an AI agent
+                # told a customer they were booked, into a cancelled row.
+                if existing is not None and existing.occupies_slot:
                     return existing, False
+                if existing is not None:
+                    # The key is spent. Booking again must not collide with the
+                    # dead row on the partial unique index.
+                    idempotency_key = ""
+
 
             location, service = await load_location_and_service(
                 uow, tenant_id, location_id, service_id

@@ -277,6 +277,11 @@ class AssistantConfig:
     # verbatim. Interruptible = the caller can talk over it.
     welcome_dynamic: bool = True
     welcome_interruptible: bool = False
+    # Turns this assistant into a booking-capable receptionist: it gains the
+    # appointment tools and answers through the front-office agent instead of
+    # plain retrieval. Off by default, so an existing document-answering
+    # assistant keeps behaving exactly as it did.
+    appointments_enabled: bool = False
 
     def normalized(self) -> AssistantConfig:
         return AssistantConfig(
@@ -293,6 +298,7 @@ class AssistantConfig:
             welcome_message=self.welcome_message.strip()[:MAX_WELCOME_MESSAGE],
             welcome_dynamic=self.welcome_dynamic,
             welcome_interruptible=self.welcome_interruptible,
+            appointments_enabled=self.appointments_enabled,
         )
 
     def render_welcome(self, variables: dict[str, str]) -> str:
