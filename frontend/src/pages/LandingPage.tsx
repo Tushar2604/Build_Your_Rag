@@ -244,7 +244,7 @@ function NavBar() {
       {/* Right actions */}
       <div className="flex items-center gap-2.5 flex-shrink-0">
         <Link
-          to={isAuthenticated ? "/home" : "/login"}
+          to={isAuthenticated ? "/dashboard" : "/login"}
           className="rounded-full border border-white/[0.12] bg-ink-950/80 px-5 py-2 text-[13px] font-semibold
                      text-white backdrop-blur-md transition-colors hover:bg-ink-800"
         >

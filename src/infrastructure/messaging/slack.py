@@ -10,6 +10,8 @@ from __future__ import annotations
 import httpx
 import structlog
 
+from src.infrastructure.http_client import get_client
+
 log = structlog.get_logger(__name__)
 
 TIMEOUT_SECONDS = 15
@@ -27,8 +29,8 @@ class SlackSender:
         if blocks:
             payload["blocks"] = blocks
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-                resp = await client.post(webhook_url, json=payload)
+            client = await get_client("slack", timeout=TIMEOUT_SECONDS)
+            resp = await client.post(webhook_url, json=payload)
         except httpx.HTTPError as exc:
             log.warning("slack.send_error", error=str(exc))
             return False, f"Could not reach Slack: {exc}"

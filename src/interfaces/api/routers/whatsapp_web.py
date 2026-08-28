@@ -39,6 +39,7 @@ from src.config.settings import get_settings
 from src.domain.chat.entities import ChatSession, Message, MessageRole
 from src.domain.shared.identifiers import ChatbotId, SessionId, TenantId
 from src.domain.whatsapp_web.entities import WhatsAppWebSession
+from src.infrastructure.llm.resilience import Bulkhead
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.routers.broadcasts import mark_replied
 from src.interfaces.api.schemas import (
@@ -76,6 +77,20 @@ _MAX_THREADS_TO_REPOINT = 500
 # Matches the bridge's own inbound cap (BRIDGE_MAX_MEDIA_MB, default 16) so an
 # operator never uploads a file the outbound send is going to reject anyway.
 _MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+
+# Caps how many auto-replies are generated at once in this process. Lazily
+# built so the semaphore binds to the event loop actually serving requests
+# (a module-level `asyncio.Semaphore` binds to whichever loop imported it,
+# which is not the same one under Uvicorn's reloader or in tests).
+_reply_bulkhead: Bulkhead | None = None
+
+
+def _reply_gate() -> Bulkhead:
+    global _reply_bulkhead
+    if _reply_bulkhead is None:
+        _reply_bulkhead = Bulkhead(get_settings().whatsapp_reply_max_concurrency)
+    return _reply_bulkhead
+
 
 # How old an inbound message may be and still get an automatic answer.
 # Generous on purpose: the failure being guarded against is replying to a
@@ -754,8 +769,34 @@ async def _reply_to_message(
     Every outcome is logged. This runs after the response has gone back to the
     bridge, so a silent failure here is invisible from both ends — which is
     exactly how "I attached an agent and nothing ever replies" stays a mystery.
+
+    Concurrency is capped by `_reply_gate`. Inbound WhatsApp traffic is bursty
+    by nature — a campaign to hundreds of contacts produces a cluster of
+    replies within seconds, across every linked account at once — and each
+    reply is a full RAG pipeline holding a database connection while it calls
+    out to a provider. Unbounded, a burst exhausts the connection pool and the
+    provider quota simultaneously, so every conversation fails instead of all
+    of them simply taking a little longer. Waiting here is backpressure, not
+    loss: the message is already stored, and the queue drains in order.
     """
     container = get_container()
+    async with _reply_gate()():
+        await _generate_and_send_reply(
+            container, tenant_id, chat_session_id, session_id, chatbot_id, jid, phone, text
+        )
+
+
+async def _generate_and_send_reply(
+    container,
+    tenant_id: TenantId,
+    chat_session_id: SessionId,
+    session_id: uuid.UUID,
+    chatbot_id: ChatbotId,
+    jid: str,
+    phone: str,
+    text: str,
+) -> None:
+    """The reply pipeline itself, run under the concurrency gate above."""
     use_case = AskChatbot(container.unit_of_work(), container.embedder, container.llm)
     started = time.perf_counter()
     # AskChatbot persists a successful answer itself; a fallback bypasses it and

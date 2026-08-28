@@ -32,7 +32,7 @@ export default function AcceptInvitePage() {
     try {
       const resp = await acceptInvite(token, password);
       applySession(resp);
-      navigate("/home");
+      navigate("/dashboard");
     } catch (err) {
       setError((err as Error).message || "Could not accept this invite. Please try again.");
     } finally {

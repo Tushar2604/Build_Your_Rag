@@ -16,6 +16,8 @@ import contextlib
 import httpx
 import structlog
 
+from src.infrastructure.http_client import get_client
+
 log = structlog.get_logger(__name__)
 
 _API_BASE = "https://api.twilio.com/2010-04-01"
@@ -57,8 +59,8 @@ class TwilioWhatsAppSender:
             form["StatusCallback"] = status_callback
 
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-                resp = await client.post(url, data=form, auth=(account_sid, auth_token))
+            client = await get_client("twilio", timeout=TIMEOUT_SECONDS)
+            resp = await client.post(url, data=form, auth=(account_sid, auth_token))
         except httpx.HTTPError as exc:
             log.warning("whatsapp.send_error", to=to_number, error=str(exc))
             return False, "", f"Could not reach Twilio: {exc}"

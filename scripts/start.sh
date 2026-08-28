@@ -42,5 +42,22 @@ else
 fi
 
 PORT="${PORT:-8000}"
-echo "Starting API on :${PORT}"
-exec uvicorn src.interfaces.api.app:app --host 0.0.0.0 --port "${PORT}"
+
+# Worker processes. One by default, because that is what a small/free instance
+# has CPU for and because more workers multiply the database connection count:
+# the ceiling is WEB_CONCURRENCY * (DB_POOL_SIZE + DB_MAX_OVERFLOW), which must
+# stay under the database's own connection limit. Raise both together.
+#
+# Running more than one worker is safe: the follow-up sweep takes a Postgres
+# advisory lock so exactly one process sweeps per tick (see `_sweep_lease`),
+# and every other background job either claims rows with FOR UPDATE SKIP
+# LOCKED or is idempotent. In-process state that is merely best-effort — the
+# anonymous rate limiter, the LLM circuit breakers — becomes per-worker, which
+# is a deliberate trade: they degrade gracefully rather than needing Redis.
+WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}"
+echo "Starting API on :${PORT} with ${WEB_CONCURRENCY} worker(s)"
+exec uvicorn src.interfaces.api.app:app \
+  --host 0.0.0.0 \
+  --port "${PORT}" \
+  --workers "${WEB_CONCURRENCY}" \
+  --timeout-keep-alive 65

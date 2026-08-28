@@ -43,6 +43,13 @@ dependencies = [
     "tenacity>=9.0",
     "structlog>=24.4",
     "prometheus-client>=0.21",
+    # --- Scheduling ---
+    # The IANA timezone database. `zoneinfo` reads the system copy on Linux and
+    # macOS but Windows ships none, so a developer machine raises
+    # ZoneInfoNotFoundError on every availability query without this. Scheduling
+    # is the first feature that cannot degrade gracefully when a zone is
+    # unresolvable, so it is a hard dependency rather than an extra.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

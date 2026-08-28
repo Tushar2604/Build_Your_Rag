@@ -37,7 +37,7 @@ export default function ResetPasswordPage() {
     setError(null);
     try {
       applySession(await resetPassword(token, password));
-      navigate("/home", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not reset the password.");
       setSaving(false);

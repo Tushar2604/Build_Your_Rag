@@ -61,3 +61,36 @@ export function listCandidates(filters: CandidateFilters = {}): Promise<Candidat
 export function getCandidate(conversationId: string): Promise<Candidate> {
   return api.get<Candidate>(`/candidates/${conversationId}`);
 }
+
+// --- CRM export -------------------------------------------------------------
+//
+// The destination is a workspace-level setting (Integrations → "Your CRM
+// (Webhook)"), not a per-candidate one, so the UI asks for it once per page
+// and every card on that page shares the answer.
+
+export interface CrmDestination {
+  connected: boolean;
+  /** Host only — the backend never returns the full URL, because the path of
+   * a catch-hook URL is its credential. */
+  endpoint_host: string;
+  /** Where an admin goes to set it up. */
+  settings_path: string;
+}
+
+export interface CrmExportResult {
+  delivered: boolean;
+  /** Confirmation on success; whatever the CRM said on failure. */
+  message: string;
+  endpoint_host: string;
+}
+
+export function getCrmDestination(): Promise<CrmDestination> {
+  return api.get<CrmDestination>("/candidates/crm/destination");
+}
+
+/** Push one candidate's whole record to the workspace's CRM endpoint.
+ * Resolves with the delivery outcome — a CRM that rejects the payload is news
+ * to show the operator, not an exception to swallow. */
+export function exportCandidateToCrm(conversationId: string): Promise<CrmExportResult> {
+  return api.post<CrmExportResult>(`/candidates/${conversationId}/crm/export`, {});
+}

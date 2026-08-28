@@ -21,6 +21,7 @@ import {
 } from "../api/broadcasts";
 import { Chatbot, listChatbots } from "../api/chatbots";
 import { ApiError } from "../api/client";
+import DictateButton from "../components/DictateButton";
 import ContactPicker from "../components/ContactPicker";
 
 const MAX_MESSAGE = 1600;
@@ -320,14 +321,21 @@ export default function BroadcastCreatePage() {
           label="Message"
           hint="Placeholders are filled per contact: {{name}}, {{first_name}}, {{phone}}. An unknown placeholder is left visible rather than blanked, so a typo is obvious in a test send."
         >
-          <textarea
-            className="input resize-y text-[13.5px] leading-relaxed bg-surface-2"
-            rows={5}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            maxLength={MAX_MESSAGE}
-            placeholder="Hi {{first_name}}, we're running a special this month — want the details?"
-          />
+          <div className="relative">
+            <textarea
+              className="input resize-y text-[13.5px] leading-relaxed bg-surface-2 pb-12"
+              rows={5}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              maxLength={MAX_MESSAGE}
+              placeholder="Hi {{first_name}}, we're running a special this month — want the details?"
+            />
+            <DictateButton
+              value={message}
+              onChange={setMessage}
+              className="absolute bottom-3 right-3"
+            />
+          </div>
           <p className="text-[11px] text-gray-500 text-right mt-1 tabular-nums">
             {message.length}/{MAX_MESSAGE}
           </p>

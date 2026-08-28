@@ -9,6 +9,7 @@ import RegisterPage       from "./pages/RegisterPage";
 import WidgetChatPage     from "./pages/WidgetChatPage";
 import EmbedChatPage      from "./pages/EmbedChatPage";
 import InterviewCallPage  from "./pages/InterviewCallPage";
+import DashboardPage      from "./pages/DashboardPage";
 import HomePage           from "./pages/HomePage";
 import AssistantsPage     from "./pages/AssistantsPage";
 import AssistantDetailPage from "./pages/AssistantDetailPage";
@@ -33,6 +34,12 @@ import SettingsPage       from "./pages/SettingsPage";
 import HiringAgentPage    from "./pages/HiringAgentPage";
 import TeamPage           from "./pages/TeamPage";
 import AcceptInvitePage   from "./pages/AcceptInvitePage";
+import AppointmentsCalendarPage from "./pages/AppointmentsCalendarPage";
+import AppointmentsPage  from "./pages/AppointmentsPage";
+import ServicesPage      from "./pages/ServicesPage";
+import ResourcesPage     from "./pages/ResourcesPage";
+import LocationsPage     from "./pages/LocationsPage";
+import AvailabilityPage  from "./pages/AvailabilityPage";
 
 export default function App() {
   return (
@@ -63,6 +70,9 @@ export default function App() {
           {/* Authenticated routes */}
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
+              {/* The landing screen after sign-in. `/home` stays the
+                  operational Overview it has always been. */}
+              <Route path="/dashboard"  element={<DashboardPage />}      />
               <Route path="/home"       element={<HomePage />}           />
               <Route path="/assistants" element={<AssistantsPage />}     />
               <Route path="/assistants/:id" element={<AssistantDetailPage />} />
@@ -70,6 +80,12 @@ export default function App() {
               <Route path="/analytics"  element={<AnalyticsPage />}      />
               <Route path="/clone-voice" element={<CloneVoicePage />}   />
               <Route path="/report-issue" element={<ReportIssuePage />} />
+
+              {/* Appointments. The calendar and the list are open to any
+                  signed-in user (receptionists need them); the
+                  configuration screens are admin-only, below. */}
+              <Route path="/appointments/calendar" element={<AppointmentsCalendarPage />} />
+              <Route path="/appointments" element={<AppointmentsPage />} />
 
               {/* Admin panel: Owner/Admin roles only */}
               <Route element={<ProtectedRoute requireAdmin />}>
@@ -90,6 +106,10 @@ export default function App() {
                 <Route path="/hiring-agent" element={<HiringAgentPage />}  />
                 <Route path="/team"       element={<TeamPage />}           />
                 <Route path="/settings"   element={<SettingsPage />}       />
+                <Route path="/appointments/services"     element={<ServicesPage />} />
+                <Route path="/appointments/resources"    element={<ResourcesPage />} />
+                <Route path="/appointments/locations"    element={<LocationsPage />} />
+                <Route path="/appointments/availability" element={<AvailabilityPage />} />
               </Route>
 
               {/* Legacy redirects so old bookmarks keep working */}

@@ -16,6 +16,7 @@ import {
 
 import { Candidate, getCandidate } from "../api/candidates";
 import { ApiError } from "../api/client";
+import SendToCrmButton, { useCrmDestination } from "../components/SendToCrmButton";
 import { InboxMessage, fetchMediaObjectUrl, listMessages } from "../api/whatsappInbox";
 import {
   Avatar, ConversationThread, MediaIcon, sizeLabel,
@@ -147,6 +148,7 @@ export default function CandidateProfilePage() {
   const [messages, setMessages] = useState<InboxMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const crm = useCrmDestination();
 
   useEffect(() => {
     if (!candidateId) return;
@@ -237,15 +239,24 @@ export default function CandidateProfilePage() {
             )}
           </div>
         </div>
-        {candidate.channel_kind === "personal" && candidate.session_id && (
-          <Link
-            to={`/channels/whatsapp/${candidate.session_id}/inbox`}
-            className="btn-sm btn-primary flex-shrink-0"
-          >
-            <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
-            Reply in inbox
-          </Link>
-        )}
+        {/* The two things you do *with* a candidate once you have read them:
+            keep talking, or hand them to the system that tracks the hire. */}
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+          <SendToCrmButton
+            candidateId={candidate.id}
+            candidateName={candidate.display_name || candidate.phone_number}
+            destination={crm}
+          />
+          {candidate.channel_kind === "personal" && candidate.session_id && (
+            <Link
+              to={`/channels/whatsapp/${candidate.session_id}/inbox`}
+              className="btn-sm btn-secondary"
+            >
+              <MessageCircle className="w-3.5 h-3.5" strokeWidth={2} />
+              Reply in inbox
+            </Link>
+          )}
+        </div>
       </header>
 
       {/* --- At a glance --- */}

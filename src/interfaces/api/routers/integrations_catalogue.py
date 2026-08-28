@@ -190,6 +190,29 @@ async def test_connection(
             ok=ok, message="Endpoint accepted the payload." if ok else error
         )
 
+    if integration_id == "crm_webhook":
+        # Same shape as a real export, so what the CRM's intake sees here is
+        # what it will see in production — a test that validates a different
+        # payload validates nothing about the mapping.
+        auth_header = connection.config.get("auth_header", "")
+        ok, error = await container.webhook.send(
+            connection.webhook_url(),
+            {
+                "event": "candidate.exported",
+                "source": "Evara AI",
+                "test": True,
+                "candidate": {
+                    "id": "00000000-0000-0000-0000-000000000000",
+                    "name": "Test Candidate",
+                    "phone_number": "+10000000000",
+                },
+            },
+            extra_headers={"Authorization": auth_header} if auth_header else None,
+        )
+        return IntegrationTestResponse(
+            ok=ok, message="Your CRM accepted a sample candidate." if ok else error
+        )
+
     return IntegrationTestResponse(
         ok=False, message=f"{spec.name} has no test action yet."
     )

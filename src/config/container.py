@@ -33,6 +33,7 @@ from src.infrastructure.security.hashing import Argon2PasswordHasher
 from src.infrastructure.security.tokens import JwtTokenService
 from src.infrastructure.storage.object_storage import build_storage
 from src.infrastructure.voice.elevenlabs import ElevenLabsVoiceCloner
+from src.infrastructure.voice.transcription import WhisperTranscriber
 
 
 class Container:
@@ -72,6 +73,10 @@ class Container:
         # Voice cloning. A no-op (`.enabled is False`) until ELEVENLABS_API_KEY
         # is set; the Clone Voice page still records and stores samples.
         self.voice_cloner = ElevenLabsVoiceCloner(settings)
+        # Dictation. Rides on whichever LLM key is already set (see
+        # Settings.resolve_stt); `.enabled is False` with neither, and the mic
+        # button then falls back to the browser's own recogniser.
+        self.transcriber = WhisperTranscriber(settings)
         # Node sidecar owning the personal-WhatsApp sockets. Disabled
         # (`.enabled is False`) until BRIDGE_TOKEN is set.
         self.whatsapp_bridge = WhatsAppBridgeClient(settings)

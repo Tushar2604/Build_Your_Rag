@@ -83,7 +83,7 @@ _NEEDS_OAUTH_APP = (
 )
 
 CATALOGUE: tuple[IntegrationSpec, ...] = (
-    # --- Calendar & CRM (6) ---
+    # --- Calendar & CRM (7) ---
     IntegrationSpec(
         id="google_calendar",
         name="Google Calendar",
@@ -151,6 +151,41 @@ CATALOGUE: tuple[IntegrationSpec, ...] = (
             CredentialField(key="access_token", label="Private app access token", secret=True),
         ),
         unavailable_reason=_NEEDS_OAUTH_APP,
+    ),
+    IntegrationSpec(
+        id="crm_webhook",
+        name="Your CRM (Webhook)",
+        description=(
+            "Push a candidate — profile, documents, shared links and transcript "
+            "— straight into whatever CRM you run, over an endpoint you own."
+        ),
+        category="calendar_crm",
+        timing="post_call",
+        # Wired, unlike the named-vendor CRM cards above it: those each need a
+        # vendor OAuth app and an adapter for their object model, whereas this
+        # one only needs an HTTPS endpoint, which every CRM worth the name can
+        # be given (natively, or through Zapier/Make/n8n in front of it). It is
+        # what makes "send this candidate to my CRM" work today rather than
+        # after six vendor integrations land.
+        credential_fields=(
+            CredentialField(
+                key="webhook_url",
+                label="CRM endpoint URL",
+                placeholder="https://hooks.zapier.com/hooks/catch/000000/abcdef",
+                help_text="Receives an HMAC-signed POST per candidate. Verify "
+                "X-Signature against '{timestamp}.{body}' using your JWT secret.",
+            ),
+            CredentialField(
+                key="auth_header",
+                label="Authorization header",
+                placeholder="Bearer sk_live_…",
+                secret=True,
+                required=False,
+                help_text="Optional. Sent verbatim as the Authorization header, "
+                "for CRMs that authenticate with a key rather than a signature.",
+            ),
+        ),
+        wired=True,
     ),
     IntegrationSpec(
         id="zoho_crm",

@@ -17,6 +17,8 @@ import time
 import httpx
 import structlog
 
+from src.infrastructure.http_client import get_client
+
 log = structlog.get_logger(__name__)
 
 TIMEOUT_SECONDS = 15
@@ -32,24 +34,37 @@ class WebhookSender:
     def __init__(self, signing_secret: str) -> None:
         self._secret = signing_secret
 
-    async def send(self, url: str, payload: dict) -> tuple[bool, str]:
+    async def send(
+        self,
+        url: str,
+        payload: dict,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> tuple[bool, str]:
         """POST the payload. Returns (delivered, error_message).
 
         Never raises: a customer's broken endpoint must not fail the
         conversation that produced the payload, so every failure mode comes back
         as a message the operator can read in the delivery log.
+
+        `extra_headers` exists for endpoints that authenticate by header rather
+        than by verifying our signature — most CRMs do, and a bare `Bearer`
+        token is the whole of what they ask for. It cannot overwrite the
+        signature headers: an endpoint that could be told to drop them would
+        make the signature worthless.
         """
         body = json.dumps(payload, default=str).encode()
         timestamp = str(int(time.time()))
         headers = {
             "Content-Type": "application/json",
             "User-Agent": "rag-platform-postcall/1",
+            **{k: v for k, v in (extra_headers or {}).items() if v},
             "X-Signature-Timestamp": timestamp,
             "X-Signature": sign_payload(self._secret, timestamp, body),
         }
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-                resp = await client.post(url, content=body, headers=headers)
+            client = await get_client("postcall-webhook", timeout=TIMEOUT_SECONDS)
+            resp = await client.post(url, content=body, headers=headers)
         except httpx.HTTPError as exc:
             log.warning("postcall.webhook_error", url=url, error=str(exc))
             return False, f"Could not reach the webhook: {exc}"

@@ -44,6 +44,14 @@ from src.infrastructure.persistence.repositories import (
     WhatsAppConversationRepositoryImpl,
     WhatsAppWebSessionRepositoryImpl,
 )
+from src.infrastructure.persistence.scheduling_repositories import (
+    AppointmentRepositoryImpl,
+    AvailabilityRepositoryImpl,
+    LocationRepositoryImpl,
+    ReservationRepositoryImpl,
+    ResourceRepositoryImpl,
+    ServiceRepositoryImpl,
+)
 
 
 class SqlAlchemyUnitOfWork:
@@ -101,6 +109,14 @@ class SqlAlchemyUnitOfWork:
         self.issue_reports = IssueReportRepositoryImpl(s)
         self.voice_profiles = VoiceProfileRepositoryImpl(s)
         self.whatsapp_web_sessions = WhatsAppWebSessionRepositoryImpl(s)
+        # Scheduling. `reservations` is the one that carries the
+        # double-booking guarantee — see its module docstring.
+        self.locations = LocationRepositoryImpl(s)
+        self.services = ServiceRepositoryImpl(s)
+        self.resources = ResourceRepositoryImpl(s)
+        self.availability = AvailabilityRepositoryImpl(s)
+        self.appointments = AppointmentRepositoryImpl(s)
+        self.reservations = ReservationRepositoryImpl(s)
 
     async def _bind_scope(self) -> None:
         if self._session is None or self._tenant_id is None:

@@ -7,7 +7,7 @@ of internal use-case signatures.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
@@ -1106,3 +1106,369 @@ class CandidatePageResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class TranscriptionStatusResponse(BaseModel):
+    """Whether server dictation is available, so the mic button can choose its
+    path before the user presses it rather than after."""
+
+    enabled: bool
+    provider: str = ""
+    model: str = ""
+    max_seconds: int = 120
+
+
+class TranscriptionResponse(BaseModel):
+    text: str
+    provider: str = ""
+
+
+class CrmDestinationResponse(BaseModel):
+    """Where "Send to CRM" would send, so the UI can offer the action, or say
+    what is missing, without first firing a request that would 400."""
+
+    connected: bool
+    # Host only, never the full URL: the path of a catch-hook URL is its
+    # credential, and this response is read by anyone who can see a candidate.
+    endpoint_host: str = ""
+    # Where an admin goes to set it up. Constant, but returned so the message
+    # and the link stay together.
+    settings_path: str = "/integrations"
+
+
+class CrmExportResponse(BaseModel):
+    delivered: bool
+    message: str
+    endpoint_host: str = ""
+
+
+# --- Scheduling / Appointments ----------------------------------------------
+#
+# The wire contract for the appointment engine. Statuses and sources are Literals
+# rather than plain strings so an unknown value is a 422 at the boundary instead
+# of a row the calendar cannot render.
+
+AppointmentStatusLiteral = Literal[
+    "draft",
+    "requested",
+    "pending",
+    "awaiting_confirmation",
+    "confirmed",
+    "arrived",
+    "checked_in",
+    "in_progress",
+    "completed",
+    "cancelled",
+    "no_show",
+    "rescheduled",
+    "waitlisted",
+]
+BookingSourceLiteral = Literal[
+    "staff",
+    "ai_voice",
+    "whatsapp",
+    "web_widget",
+    "booking_page",
+    "sms",
+    "email",
+    "mobile_app",
+    "portal",
+    "api",
+    "campaign",
+]
+ResourceKindLiteral = Literal["staff", "room", "equipment", "vehicle", "other"]
+OwnerKindLiteral = Literal["location", "resource"]
+
+
+class LocationRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    # IANA name. Validated against the tz database in the domain, so a typo is a
+    # 422 here rather than an exception on the first availability query.
+    timezone: str = Field(default="UTC", max_length=64)
+    address: str = Field(default="", max_length=2000)
+    phone: str = Field(default="", max_length=32)
+    email: str = Field(default="", max_length=320)
+    is_active: bool = True
+
+
+class LocationResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    timezone: str
+    address: str = ""
+    phone: str = ""
+    email: str = ""
+    is_active: bool = True
+    created_at: datetime
+
+
+class ServiceRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    duration_minutes: int = Field(ge=1, le=1440)
+    category: str = Field(default="", max_length=160)
+    description: str = Field(default="", max_length=4000)
+    buffer_before_minutes: int = Field(default=0, ge=0, le=480)
+    buffer_after_minutes: int = Field(default=0, ge=0, le=480)
+    # Minor units, never a float — a rounded price is a support ticket.
+    price_cents: int = Field(default=0, ge=0)
+    deposit_cents: int = Field(default=0, ge=0)
+    currency: str = Field(default="AED", max_length=3)
+    min_notice_minutes: int = Field(default=0, ge=0)
+    max_horizon_days: int = Field(default=60, ge=1, le=730)
+    cancellation_window_hours: int = Field(default=0, ge=0)
+    online_bookable: bool = True
+    is_active: bool = True
+
+
+class ServiceResourceLink(BaseModel):
+    """One eligible resource, in one role.
+
+    The role is what lets a service require a practitioner AND a room: two links
+    with different roles, both of which must be fillable for a slot to exist.
+    """
+
+    resource_id: uuid.UUID
+    role: str = Field(default="primary", max_length=40)
+    required: bool = True
+
+
+class ServiceResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    category: str = ""
+    description: str = ""
+    duration_minutes: int
+    buffer_before_minutes: int = 0
+    buffer_after_minutes: int = 0
+    price_cents: int = 0
+    deposit_cents: int = 0
+    currency: str = "AED"
+    min_notice_minutes: int = 0
+    max_horizon_days: int = 60
+    cancellation_window_hours: int = 0
+    online_bookable: bool = True
+    is_active: bool = True
+    resources: list[ServiceResourceLink] = Field(default_factory=list)
+    created_at: datetime
+
+
+class SetServiceResourcesRequest(BaseModel):
+    """The complete intended eligibility for a service.
+
+    Replaces rather than merges — the editor always sends the full set, and
+    diffing here would silently keep a resource the user removed.
+    """
+
+    resources: list[ServiceResourceLink] = Field(default_factory=list)
+
+
+class ResourceRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    kind: ResourceKindLiteral = "staff"
+    location_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
+    email: str = Field(default="", max_length=320)
+    phone: str = Field(default="", max_length=32)
+    capacity: int = Field(default=1, ge=1, le=1000)
+    timezone: str = Field(default="", max_length=64)
+    color: str = Field(default="", max_length=16)
+    is_active: bool = True
+
+
+class ResourceResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    kind: str
+    location_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
+    email: str = ""
+    phone: str = ""
+    capacity: int = 1
+    timezone: str = ""
+    color: str = ""
+    is_active: bool = True
+    created_at: datetime
+
+
+class AvailabilityRuleRequest(BaseModel):
+    owner_kind: OwnerKindLiteral
+    owner_id: uuid.UUID
+    # Monday = 0, matching `datetime.weekday()`.
+    weekday: int = Field(ge=0, le=6)
+    # Wall-clock local time ("09:00"), NOT an instant: "Mondays 09:00" must stay
+    # 09:00 across a daylight-saving change.
+    start_time: time
+    end_time: time
+    effective_from: datetime | None = None
+    effective_until: datetime | None = None
+
+
+class AvailabilityRuleResponse(BaseModel):
+    id: uuid.UUID
+    owner_kind: str
+    owner_id: uuid.UUID
+    weekday: int
+    start_time: time
+    end_time: time
+    effective_from: datetime | None = None
+    effective_until: datetime | None = None
+    is_active: bool = True
+
+
+class BlockedPeriodRequest(BaseModel):
+    owner_kind: OwnerKindLiteral
+    owner_id: uuid.UUID
+    starts_at: datetime
+    ends_at: datetime
+    reason: str = Field(default="", max_length=300)
+
+
+class BlockedPeriodResponse(BaseModel):
+    id: uuid.UUID
+    owner_kind: str
+    owner_id: uuid.UUID
+    starts_at: datetime
+    ends_at: datetime
+    reason: str = ""
+
+
+class SlotResponse(BaseModel):
+    """One bookable start time.
+
+    `resource_ids` is part of the contract, not decoration: booking this slot
+    reserves exactly these resources, which is what makes the booking call a
+    confirmation of this offer rather than a second, racing search.
+    """
+
+    starts_at: datetime
+    ends_at: datetime
+    resource_ids: list[uuid.UUID]
+
+
+class AvailabilityResponse(BaseModel):
+    location_id: uuid.UUID
+    service_id: uuid.UUID
+    # The branch's zone, so a client can render these instants in local time
+    # without a second lookup.
+    timezone: str
+    duration_minutes: int
+    slots: list[SlotResponse]
+
+
+class SlotHoldRequest(BaseModel):
+    location_id: uuid.UUID
+    service_id: uuid.UUID
+    starts_at: datetime
+    resource_id: uuid.UUID | None = None
+
+
+class SlotHoldResponse(BaseModel):
+    token: str
+    starts_at: datetime
+    ends_at: datetime
+    expires_at: datetime
+    resource_ids: list[uuid.UUID]
+
+
+class CreateAppointmentRequest(BaseModel):
+    location_id: uuid.UUID
+    service_id: uuid.UUID
+    starts_at: datetime
+    customer_name: str = Field(min_length=1, max_length=160)
+    customer_phone: str = Field(default="", max_length=32)
+    customer_email: str = Field(default="", max_length=320)
+    customer_timezone: str = Field(default="", max_length=64)
+    resource_id: uuid.UUID | None = None
+    # Present when the caller already held the slot. The hold is converted in
+    # place, so the slot is never free for an instant in between.
+    hold_token: str = Field(default="", max_length=64)
+    source: BookingSourceLiteral = "staff"
+    status: AppointmentStatusLiteral = "pending"
+    customer_notes: str = Field(default="", max_length=4000)
+    internal_notes: str = Field(default="", max_length=4000)
+    # Supplied by the caller so a retried POST returns the booking it already
+    # made instead of creating a second one.
+    idempotency_key: str = Field(default="", max_length=128)
+
+
+class UpdateAppointmentRequest(BaseModel):
+    """Details only. Moving an appointment in time goes through /reschedule, so
+    a general PATCH can never reach the reservation logic by accident."""
+
+    customer_name: str | None = Field(default=None, max_length=160)
+    customer_phone: str | None = Field(default=None, max_length=32)
+    customer_email: str | None = Field(default=None, max_length=320)
+    customer_timezone: str | None = Field(default=None, max_length=64)
+    customer_notes: str | None = Field(default=None, max_length=4000)
+    internal_notes: str | None = Field(default=None, max_length=4000)
+
+
+class RescheduleAppointmentRequest(BaseModel):
+    starts_at: datetime
+    resource_id: uuid.UUID | None = None
+    reason: str = Field(default="", max_length=500)
+
+
+class AppointmentActionRequest(BaseModel):
+    """Body for confirm / cancel / check-in / complete / no-show."""
+
+    reason: str = Field(default="", max_length=500)
+
+
+class AppointmentResponse(BaseModel):
+    id: uuid.UUID
+    location_id: uuid.UUID
+    service_id: uuid.UUID
+    starts_at: datetime
+    ends_at: datetime
+    timezone: str
+    status: str
+    source: str
+    customer_name: str
+    customer_phone: str = ""
+    customer_email: str = ""
+    customer_timezone: str = ""
+    resource_ids: list[uuid.UUID] = Field(default_factory=list)
+    customer_notes: str = ""
+    internal_notes: str = ""
+    cancellation_reason: str = ""
+    rescheduled_from_id: uuid.UUID | None = None
+    # Denormalized labels so a calendar render needs one request, not four.
+    location_name: str = ""
+    service_name: str = ""
+    resource_names: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class AppointmentPageResponse(BaseModel):
+    appointments: list[AppointmentResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class AppointmentHistoryEntry(BaseModel):
+    """One line of the audit trail (spec section 40)."""
+
+    from_status: str
+    to_status: str
+    actor_kind: str
+    actor_label: str = ""
+    channel: str = ""
+    reason: str = ""
+    occurred_at: datetime
+
+
+class AppointmentHistoryResponse(BaseModel):
+    appointment_id: uuid.UUID
+    entries: list[AppointmentHistoryEntry]
+
+
+class AppointmentSummaryResponse(BaseModel):
+    """Status tallies for the dashboard, over one window."""
+
+    window_start: datetime
+    window_end: datetime
+    total: int
+    by_status: dict[str, int]

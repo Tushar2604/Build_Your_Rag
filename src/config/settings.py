@@ -63,6 +63,26 @@ class Settings(BaseSettings):
     # it stops the app booting, while Neon's chain is publicly trusted. Turn on
     # where the provider supports it.
     database_ssl_verify: bool = False
+    # --- Connection pool ---
+    # These were hardcoded (5 + 5) and were the app's hardest scaling ceiling:
+    # every request takes a connection for its whole transaction, so ten
+    # concurrent chats saturated the pool and the eleventh queued.
+    #
+    # Size the pool against the *database's* connection cap, not the traffic:
+    # `db_pool_size + db_max_overflow`, multiplied by the number of web
+    # processes, must stay under it. Neon/Supabase free tiers cap low, and
+    # Supabase's transaction pooler wants a small direct pool because it is
+    # already multiplexing behind the scenes.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+    # How long a request waits for a free connection before giving up. Without
+    # this, SQLAlchemy's 30s default means a saturated pool turns into requests
+    # that hang for half a minute and then fail anyway — the client has usually
+    # timed out and retried by then, adding still more load. Failing fast sheds
+    # the spike instead of amplifying it.
+    db_pool_timeout_seconds: float = 10.0
+    # Recycle before a managed provider silently closes an idle connection.
+    db_pool_recycle_seconds: int = 300
 
     # --- LLM providers ---
     openai_api_key: str = ""
@@ -78,6 +98,32 @@ class Settings(BaseSettings):
     generation_primary: Literal["openai", "groq", "gemini", "ollama"] = "openai"
     generation_secondary: Literal["openai", "groq", "gemini", "ollama"] = "groq"
     generation_tertiary: Literal["openai", "groq", "gemini", "ollama"] = "gemini"
+    # --- Failover behaviour under concurrent load ---
+    # How many provider-level failures (rate limits, outages) in a row before a
+    # backend is skipped entirely. Low on purpose: the point is to stop paying
+    # the failure cost on every concurrent request once one provider is clearly
+    # unhealthy, and the chain has other accounts to serve from meanwhile.
+    llm_breaker_threshold: int = 5
+    # How long a tripped provider stays out of rotation before one probe
+    # request is allowed through. Roughly the length of a provider's own
+    # short-window rate limit, so a throttle clears without manual action.
+    llm_breaker_cooldown_seconds: float = 30.0
+    # Ceiling on in-flight calls to a single provider, per web process. This is
+    # what keeps a traffic burst inside each account's quota instead of
+    # self-inflicting the 429s the failover chain exists to survive. Raise it
+    # for a paid account with generous limits; lower it for a free tier.
+    llm_max_concurrency_per_provider: int = 16
+    # Ceiling on concurrent embedding calls. Embeddings run on every retrieval,
+    # so this is the busiest external dependency in the chat path.
+    embedding_max_concurrency: int = 8
+    # Ceiling on WhatsApp auto-replies generated at once. Each reply is a full
+    # RAG pipeline — embed, retrieve (holding a database connection), generate —
+    # and inbound messages arrive in bursts: a campaign to 500 contacts can
+    # produce dozens of replies in the same second, across every linked account.
+    # Without a cap those all run at once and exhaust the database pool and the
+    # provider quota together. Queued work is not dropped, only paced, so a
+    # burst costs latency rather than failed answers.
+    whatsapp_reply_max_concurrency: int = 8
     openai_model: str = "gpt-4o-mini"
     # Optional override for an OpenAI-compatible gateway (Azure, OpenRouter, etc.).
     openai_base_url: str = ""
@@ -172,6 +218,22 @@ class Settings(BaseSettings):
     voice_sample_max_seconds: int = 300
     voice_sample_max_mb: int = 25
 
+    # --- Dictation / speech-to-text ---
+    # Powers the mic button on every text field. Reuses an existing LLM key
+    # rather than adding a provider: both Groq and OpenAI expose the same
+    # OpenAI-shaped /audio/transcriptions endpoint, so one adapter serves both
+    # and whichever key is already set works with no extra configuration.
+    #
+    # Groq first by default — it hosts the same Whisper weights at a fraction
+    # of the latency, and dictation is a foreground interaction where the wait
+    # is the whole experience.
+    stt_provider: str = "groq"  # groq | openai
+    stt_model: str = "whisper-large-v3-turbo"
+    # A dictated phrase, not a lecture. The ceiling bounds both the upload and
+    # the bill; the browser stops recording at it and says why.
+    stt_max_seconds: int = 120
+    stt_max_mb: int = 20
+
     # --- WhatsApp bridge (personal-account QR linking) ---
     # The Node sidecar that owns the WhatsApp multi-device sockets. Blank token
     # = the feature is off and the Channels page says so; the bridge itself
@@ -198,6 +260,25 @@ class Settings(BaseSettings):
     # Set HIRING_AGENT_ENABLED=true to mount the /api/v1/hiring/* routes.
     # Off by default so the module is invisible to existing chatbot traffic.
     hiring_agent_enabled: bool = False
+
+    # --- Appointments / scheduling ---
+    # Gates the appointment module's API surface. On by default: the tables ship
+    # with migration 0025 and a tenant that configures nothing simply has no
+    # locations or services, so the module is invisible until it is used.
+    appointments_enabled: bool = True
+    # Whether the shared agent loop is given the appointment tools.
+    #
+    # OFF by default, and deliberately so. The loop that exists today answers
+    # questions about a tenant's documents, and adding booking tools to its
+    # catalogue changes how that agent behaves for every existing tenant, in
+    # exchange for a capability nothing is wired to use yet. The tools are built
+    # and tested; turn this on when a channel (WhatsApp in phase 3, voice in
+    # phase 4) is actually ready to book.
+    appointment_agent_tools_enabled: bool = False
+    # How long a held slot survives without being converted into a booking. Long
+    # enough for a phone conversation, short enough that an abandoned booking
+    # frees the slot while the customer is still on the page.
+    slot_hold_ttl_minutes: int = 10
 
     # --- Agent ---
     # Hard ceiling on agent reasoning steps per request (defence against a loop
@@ -303,6 +384,34 @@ class Settings(BaseSettings):
     @property
     def voice_cloning_enabled(self) -> bool:
         return bool(self.elevenlabs_api_key)
+
+    def resolve_stt(self) -> tuple[str, str]:
+        """`(provider, api_key)` for dictation, or `("", "")` when unavailable.
+
+        Falls back to the other provider when the preferred one has no key.
+        Dictation rides on keys this deployment already has, so going dark
+        because `STT_PROVIDER` happens to name the unconfigured one would be a
+        pointless way to fail. Provider and model are resolved together (see
+        `stt_model_for`) — the two vendors do not share model names, so
+        falling back on the key alone would send Groq's model id to OpenAI.
+        """
+        order = ("groq", "openai") if self.stt_provider == "groq" else ("openai", "groq")
+        keys = {"groq": self.groq_api_key, "openai": self.openai_api_key}
+        for provider in order:
+            if keys[provider]:
+                return provider, keys[provider]
+        return "", ""
+
+    def stt_model_for(self, provider: str) -> str:
+        """`STT_MODEL` applies to the provider it was configured for; a
+        fallback to the other vendor uses that vendor's own default."""
+        if provider == self.stt_provider and self.stt_model:
+            return self.stt_model
+        return "whisper-large-v3-turbo" if provider == "groq" else "whisper-1"
+
+    @property
+    def stt_enabled(self) -> bool:
+        return bool(self.resolve_stt()[1])
 
     @property
     def whatsapp_bridge_enabled(self) -> bool:

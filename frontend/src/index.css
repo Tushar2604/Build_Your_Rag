@@ -774,9 +774,15 @@
   .page-sm {
     @apply relative w-full max-w-6xl mx-auto px-6 py-8 animate-fade-in;
   }
-  /* The narrower measure lives on an inner rail so the outer gutter — the
-     thing the eye actually tracks between routes — stays put. */
-  .page-sm > * { @apply max-w-3xl; }
+  /* The narrower measure lives on an inner rail, centred inside the same
+     max-w-6xl frame `.page` uses. It used to be left-aligned, on the theory
+     that a fixed left gutter is what the eye tracks between routes. In
+     practice it read as broken: on a wide screen the Bulk Call and Broadcast
+     forms sat in the left two-thirds of the column with a bare 380px of dead
+     space beside them, which looks like a layout bug rather than a measure.
+     Centred, the rail is symmetric within the frame and the page reads as
+     deliberate at every width. */
+  .page-sm > * { @apply max-w-3xl mx-auto; }
   .page-flush { @apply relative flex h-full min-h-0 flex-col overflow-hidden; }
 
   /* Standard title block: title, optional subtitle, optional right-hand

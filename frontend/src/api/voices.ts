@@ -1,4 +1,4 @@
-import { api } from "./client";
+import { api, ApiError } from "./client";
 
 export type VoiceGender = "female" | "male" | "neutral";
 export type VoiceStatus = "pending" | "ready" | "failed";
@@ -117,4 +117,50 @@ export async function speakUrl(id: string, text: string): Promise<string> {
     throw new Error(detail);
   }
   return URL.createObjectURL(await res.blob());
+}
+
+// --- Dictation --------------------------------------------------------------
+
+export interface TranscriptionStatus {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  max_seconds: number;
+}
+
+export function getTranscriptionStatus(): Promise<TranscriptionStatus> {
+  return api.get<TranscriptionStatus>("/voices/transcribe/status");
+}
+
+/**
+ * Send one recorded clip and get its text back. Multipart for the same reason
+ * `createVoice` is — the shared client forces a JSON content-type, and fetch
+ * has to set its own boundary for the server to parse the parts.
+ *
+ * Throws an `ApiError` carrying the server's message, so the mic button can
+ * show "no speech detected" rather than a generic failure.
+ */
+export async function transcribe(clip: Blob, language = ""): Promise<string> {
+  const form = new FormData();
+  const ext = clip.type.includes("mp4") ? "mp4" : clip.type.includes("ogg") ? "ogg" : "webm";
+  form.append("audio", clip, `dictation.${ext}`);
+  if (language) form.append("language", language);
+
+  const token = localStorage.getItem("access_token");
+  const res = await fetch("/api/v1/voices/transcribe", {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      // keep the status text
+    }
+    throw new ApiError(res.status, detail);
+  }
+  const body = (await res.json()) as { text: string };
+  return body.text;
 }

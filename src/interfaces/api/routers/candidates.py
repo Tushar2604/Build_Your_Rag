@@ -17,15 +17,36 @@ show which number it came in on.
 
 from __future__ import annotations
 
+import re
 import uuid
+from urllib.parse import urlsplit
 
+from src.domain.chat.entities import MessageRole
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
-from src.interfaces.api.schemas import CandidatePageResponse, CandidateResponse
+from src.interfaces.api.schemas import (
+    CandidatePageResponse,
+    CandidateResponse,
+    CrmDestinationResponse,
+    CrmExportResponse,
+)
 from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
 _MAX_PAGE_SIZE = 100
+
+# The integration whose credentials the CRM export uses. A generic signed
+# webhook rather than a named vendor: "whatever CRM we have" is the actual
+# requirement, and every CRM can be handed an HTTPS endpoint (natively or via
+# Zapier/Make/n8n) where none of them share an object model.
+_CRM_INTEGRATION_ID = "crm_webhook"
+
+# How much transcript travels with a candidate. Enough to be the record of the
+# conversation, bounded so one long thread cannot produce a multi-megabyte POST
+# that a CRM's intake silently truncates or rejects.
+_MAX_EXPORT_MESSAGES = 200
+
+_URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
 
 @router.get("", response_model=CandidatePageResponse)
@@ -136,3 +157,164 @@ def _to_response(row, channels: dict, sessions: dict, counts: dict) -> Candidate
         followups_sent=row.followups_sent,
         awaiting_reply=row.awaiting_reply_since is not None,
     )
+
+
+# --- CRM export -------------------------------------------------------------
+#
+# "Open a candidate, press one button, and they are in my CRM." The destination
+# is the tenant's `crm_webhook` integration, so the workspace configures it once
+# on the Integrations page and every candidate becomes exportable — rather than
+# each page growing its own URL field.
+#
+# Synchronous, unlike post-call delivery, which dispatches in the background.
+# This one is a person pressing a button and waiting for an answer: told
+# "queued" they would have no way to find out it never arrived, and the whole
+# value of the button is knowing the record landed.
+
+
+def _host_of(url: str) -> str:
+    """The endpoint's host, for display. Never the path — for a catch-hook URL
+    the path *is* the credential, and these responses are read by anyone who
+    can see a candidate."""
+    try:
+        return urlsplit(url).netloc
+    except ValueError:
+        return ""
+
+
+async def _crm_connection(container, tenant_id):
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(tenant_id)
+        connection = await uow.tenant_integrations.get(tenant_id, _CRM_INTEGRATION_ID)
+    if connection is None or not connection.enabled or not connection.webhook_url():
+        return None
+    return connection
+
+
+@router.get("/crm/destination", response_model=CrmDestinationResponse)
+async def crm_destination(
+    principal: AdminPrincipalDep, container: ContainerDep
+) -> CrmDestinationResponse:
+    """Whether this workspace has a CRM wired up, so the UI can show a live
+    button or a "connect your CRM first" hint instead of firing a request it
+    already knows will fail."""
+    connection = await _crm_connection(container, principal.tenant_id)
+    if connection is None:
+        return CrmDestinationResponse(connected=False)
+    return CrmDestinationResponse(
+        connected=True, endpoint_host=_host_of(connection.webhook_url())
+    )
+
+
+@router.post("/{conversation_id}/crm/export", response_model=CrmExportResponse)
+async def export_candidate_to_crm(
+    conversation_id: uuid.UUID,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+) -> CrmExportResponse:
+    """POST one candidate's whole record to the workspace's CRM endpoint.
+
+    Returns the delivery outcome rather than raising on a rejected webhook: a
+    CRM answering 422 is news about the CRM, not a failure of this request, and
+    the operator needs to read what it said.
+    """
+    connection = await _crm_connection(container, principal.tenant_id)
+    if connection is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No CRM is connected. Add your CRM endpoint under "
+            "Integrations → Your CRM (Webhook) first.",
+        )
+
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        row = await uow.whatsapp_conversations.get_by_id(principal.tenant_id, conversation_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        channels = {
+            c.id: c for c in await uow.whatsapp_channels.list_for_tenant(principal.tenant_id)
+        }
+        sessions = {
+            s.id: s
+            for s in await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
+        }
+        counts = await uow.chats.message_counts(principal.tenant_id, [row.session_id])
+        messages = await uow.chats.list_messages(
+            principal.tenant_id, row.session_id, limit=_MAX_EXPORT_MESSAGES
+        )
+
+    candidate = _to_response(row, channels, sessions, counts)
+    payload = _crm_payload(principal, candidate, messages)
+
+    url = connection.webhook_url()
+    auth_header = connection.config.get("auth_header", "")
+    delivered, error = await container.webhook.send(
+        url, payload, extra_headers={"Authorization": auth_header} if auth_header else None
+    )
+    host = _host_of(url)
+    return CrmExportResponse(
+        delivered=delivered,
+        message=f"Sent to {host}." if delivered else error,
+        endpoint_host=host,
+    )
+
+
+def _crm_payload(principal, candidate: CandidateResponse, messages: list) -> dict:
+    """The record a CRM receives. Flat and self-describing: the receiving end is
+    usually a no-code mapping step, and anything that needs a join to be
+    understood there will not get mapped."""
+    documents = [
+        {
+            "filename": msg.media_filename or "",
+            "kind": msg.media_kind or "",
+            "mime_type": msg.media_mime_type or "",
+            "size_bytes": msg.media_size_bytes or 0,
+            "received_at": msg.created_at,
+            # The bytes stay behind auth — a CRM record gets the manifest, and
+            # anyone who needs the file downloads it from the candidate's page.
+            "stored": bool(msg.media_storage_key),
+        }
+        for msg in messages
+        if msg.media_kind
+    ]
+
+    links: list[str] = []
+    for msg in messages:
+        for raw in _URL_RE.findall(msg.content or ""):
+            url = raw.rstrip(".,;:!?)]}>")
+            if url not in links:
+                links.append(url)
+
+    return {
+        "event": "candidate.exported",
+        "source": "Evara AI",
+        "tenant_id": str(principal.tenant_id),
+        "candidate": {
+            "id": str(candidate.id),
+            "name": candidate.display_name or "",
+            "phone_number": candidate.phone_number,
+            "channel": candidate.channel_label,
+            "status": "handled_by_human" if not candidate.auto_reply else "assistant_replying",
+            "first_contacted_at": messages[0].created_at if messages else None,
+            "last_message_at": candidate.last_message_at,
+            "last_message_preview": candidate.last_message_preview,
+            "message_count": candidate.message_count,
+            "document_count": candidate.document_count,
+            "unread_count": candidate.unread_count,
+            "followups_sent": candidate.followups_sent,
+            "awaiting_reply": candidate.awaiting_reply,
+        },
+        "documents": documents,
+        "links_shared": links,
+        "transcript": [
+            {
+                "direction": "in" if msg.role == MessageRole.USER else "out",
+                "content": msg.content,
+                "at": msg.created_at,
+            }
+            for msg in messages
+        ],
+        # Says out loud that a long thread was trimmed, so a receiver storing
+        # this as "the transcript" knows when it is only the tail of one.
+        "transcript_truncated": len(messages) >= _MAX_EXPORT_MESSAGES,
+    }

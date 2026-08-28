@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, is_dataclass
+from datetime import date, datetime
 
 import structlog
 
@@ -23,9 +24,32 @@ log = structlog.get_logger(__name__)
 Handler = Callable[[DomainEvent], Awaitable[None]]
 
 
+def _to_jsonable(value: object) -> object:
+    """Coerce a field into something `json.dumps` accepts.
+
+    UUIDs and datetimes are the two types domain events actually carry that
+    JSONB cannot take directly. Datetimes were added when the first event with a
+    timestamp field arrived (AppointmentCreated.starts_at): without this the
+    audit INSERT raises, and because events are dispatched AFTER commit, that
+    turned a successful write into a 500.
+
+    Anything else is passed through — an unknown type will still raise, which is
+    the right outcome for a field nobody thought about.
+    """
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_to_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    return value
+
+
 def _serialize(event: DomainEvent) -> dict:
     raw = asdict(event) if is_dataclass(event) else {}
-    return {k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in raw.items()}
+    return {k: _to_jsonable(v) for k, v in raw.items()}
 
 
 class InProcessEventBus:
@@ -38,7 +62,15 @@ class InProcessEventBus:
     async def publish(self, event: object) -> None:
         if not isinstance(event, DomainEvent):
             return
-        await self._persist_audit(event)
+        # Guarded for the same reason the handler loop below is: events are
+        # dispatched AFTER the business transaction commits, so an audit write
+        # that raises here would turn a booking that genuinely succeeded into a
+        # 500 the caller retries. Losing an audit row is bad; losing the
+        # appointment's response is worse, and the row is recoverable from logs.
+        try:
+            await self._persist_audit(event)
+        except Exception:  # noqa: BLE001 - never fail a committed write
+            log.exception("event.audit_failed", event_name=event.name)
         log.info("event.published", event_name=event.name, tenant_id=str(event.tenant_id))
         for handler in self._handlers.get(event.name, []):
             try:

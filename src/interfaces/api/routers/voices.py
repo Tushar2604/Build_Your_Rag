@@ -26,6 +26,8 @@ from src.domain.voice.entities import (
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep, PrincipalDep
 from src.interfaces.api.schemas import (
     SpeakRequest,
+    TranscriptionResponse,
+    TranscriptionStatusResponse,
     VoiceOptionsResponse,
     VoiceProfileResponse,
 )
@@ -307,3 +309,84 @@ def _extension(content_type: str) -> str:
         "audio/wave": ".wav",
         "audio/flac": ".flac",
     }.get(content_type, ".webm")
+
+
+# --- Dictation -------------------------------------------------------------
+#
+# Speak instead of type, on any text field in the console. Lives on this router
+# because it is the same capability the rest of the file is about — a
+# microphone pointed at a provider — and because a caller already holding a
+# voice token should not need to discover a second prefix for it.
+#
+# Registered *after* /{voice_id} routes with a literal two-segment path, so the
+# uuid-typed parameter routes cannot shadow it.
+
+
+@router.get("/transcribe/status", response_model=TranscriptionStatusResponse)
+async def transcription_status(
+    principal: PrincipalDep, container: ContainerDep
+) -> TranscriptionStatusResponse:
+    """What the mic button needs to decide its path before it is pressed.
+
+    Without this the button would have to record first and discover only on
+    upload that the server cannot transcribe — having already taken the
+    microphone and thrown away what the user said.
+    """
+    t = container.transcriber
+    return TranscriptionStatusResponse(
+        enabled=t.enabled,
+        provider=t.provider,
+        model=t.model,
+        max_seconds=get_settings().stt_max_seconds,
+    )
+
+
+@router.post("/transcribe", response_model=TranscriptionResponse)
+async def transcribe(
+    principal: PrincipalDep,
+    container: ContainerDep,
+    audio: UploadFile = File(...),
+    language: str = Form(""),
+) -> TranscriptionResponse:
+    """One recorded clip in, its text out.
+
+    Not admin-gated: dictation is a typing aid, and every field it fills is one
+    the caller can already write to by hand.
+
+    Nothing is persisted. The clip exists for the duration of this request —
+    it is a keystroke, not a document, and storing every half-spoken sentence
+    someone dictated would be a liability with no reader.
+    """
+    settings = get_settings()
+    if not container.transcriber.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Server dictation isn't configured on this server.",
+        )
+
+    clip = await audio.read()
+    if not clip:
+        raise HTTPException(status_code=400, detail="The recording is empty.")
+
+    max_bytes = settings.stt_max_mb * 1024 * 1024
+    if len(clip) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"That recording is larger than {settings.stt_max_mb} MB. "
+            "Dictate in shorter passes.",
+        )
+
+    ok, text, error = await container.transcriber.transcribe(
+        clip,
+        content_type=(audio.content_type or "").split(";")[0].strip() or "audio/webm",
+        filename=audio.filename or "dictation.webm",
+        # Trimmed rather than validated against a list: Whisper takes any
+        # ISO-639-1 code, and an unknown one is ignored by the provider.
+        language=(language or "").strip()[:8],
+    )
+    if not ok:
+        # 422, not 500: the request was well-formed and the failure is about
+        # the audio or the vendor, which is what the message says.
+        raise HTTPException(status_code=422, detail=error)
+
+    return TranscriptionResponse(text=text, provider=container.transcriber.provider)

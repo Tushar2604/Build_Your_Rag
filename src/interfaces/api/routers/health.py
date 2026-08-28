@@ -40,6 +40,29 @@ async def bridge_liveness() -> dict[str, object]:
     return {"configured": True, "reachable": reachable, "error": error[:200]}
 
 
+@router.get("/healthz/providers")
+async def provider_health() -> dict[str, object]:
+    """Per-provider circuit-breaker state for the generation chain.
+
+    Answers "which of my accounts is throttling right now?" directly, instead
+    of leaving it to be inferred from a latency graph. A provider shows as
+    open when consecutive rate limits or outages have taken it out of
+    rotation, along with how long until it is probed again.
+
+    Reports names and health only — never keys — so it is safe to check
+    without a login, which is the point when replies have gone slow and nobody
+    can tell whether it is the app or the provider.
+    """
+    llm = get_container().llm
+    health = llm.health() if hasattr(llm, "health") else {}
+    return {
+        # Chain order is the failover order, so the first healthy entry is the
+        # one currently serving.
+        "chain": list(health.keys()),
+        "providers": health,
+    }
+
+
 @router.get("/readyz")
 async def readiness() -> Response:
     # Readiness depends on the database being reachable.

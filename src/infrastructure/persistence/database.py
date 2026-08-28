@@ -34,10 +34,14 @@ def get_engine() -> AsyncEngine:
             settings.database_url_async,
             connect_args=settings.database_connect_args,
             echo=settings.app_debug and not settings.is_production,
-            pool_size=5,
-            max_overflow=5,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
             pool_pre_ping=True,
-            pool_recycle=300,  # Neon closes idle conns; recycle proactively
+            # Fail fast rather than hanging on a saturated pool — see the
+            # `db_pool_timeout_seconds` note in settings for why a long wait
+            # makes a traffic spike worse instead of absorbing it.
+            pool_timeout=settings.db_pool_timeout_seconds,
+            pool_recycle=settings.db_pool_recycle_seconds,
         )
     return _engine
 

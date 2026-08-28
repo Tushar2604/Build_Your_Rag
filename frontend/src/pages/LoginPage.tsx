@@ -27,7 +27,7 @@ export default function LoginPage() {
     setError(null); setLoading(true);
     try {
       await login(email, password);
-      navigate("/home");
+      navigate("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Invalid email or password.");
     } finally { setLoading(false); }
@@ -122,7 +122,7 @@ export default function LoginPage() {
               intent="signin"
               onSignedIn={(session) => {
                 applySession(session);
-                navigate("/home", { replace: true });
+                navigate("/dashboard", { replace: true });
               }}
             />
 

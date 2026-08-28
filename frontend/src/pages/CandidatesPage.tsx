@@ -11,9 +11,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileText, MessageSquare, Paperclip, Search, Users } from "lucide-react";
 
-import { Candidate, listCandidates } from "../api/candidates";
+import { Candidate, CrmDestination, listCandidates } from "../api/candidates";
 import { ApiError } from "../api/client";
 import { Avatar, timeLabel } from "../components/ConversationThread";
+import SendToCrmButton, { useCrmDestination } from "../components/SendToCrmButton";
 
 type FilterKey = "all" | "unread" | "documents";
 
@@ -62,16 +63,26 @@ function statusFor(c: Candidate): { label: string; className: string } {
   return { label: "Assistant replying", className: "bg-brand-500/10 text-brand-600 ring-brand-500/20" };
 }
 
-function CandidateCard({ candidate }: { candidate: Candidate }) {
+function CandidateCard({
+  candidate, crm,
+}: { candidate: Candidate; crm: CrmDestination | null }) {
   const status = statusFor(candidate);
   return (
-    <Link
-      to={`/candidates/${candidate.id}`}
-      className="group flex flex-col rounded-2xl border border-gray-200 bg-surface p-4
+    // The whole card is still one click target, but it is now a container with
+    // a stretched link inside it rather than an <a> wrapping everything: the
+    // CRM action is a button, and a button nested in an anchor is invalid
+    // markup that browsers resolve by ignoring one of them.
+    <div
+      className="group relative flex flex-col rounded-2xl border border-gray-200 bg-surface p-4
                  shadow-xs transition-all hover:-translate-y-0.5 hover:border-brand-500/40
-                 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                 hover:shadow-md focus-within:ring-2 focus-within:ring-brand-500"
     >
-      <div className="flex items-start gap-3">
+      <Link
+        to={`/candidates/${candidate.id}`}
+        aria-label={`Open ${candidate.display_name || candidate.phone_number}`}
+        className="absolute inset-0 z-0 rounded-2xl focus:outline-none"
+      />
+      <div className="pointer-events-none relative z-[1] flex items-start gap-3">
         <Avatar name={candidate.display_name} phone={candidate.phone_number} size={48} emoji />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[14.5px] font-semibold text-gray-900">
@@ -91,11 +102,13 @@ function CandidateCard({ candidate }: { candidate: Candidate }) {
         </span>
       </div>
 
-      <p className="mt-3 line-clamp-2 min-h-[2.4em] text-[12.5px] leading-snug text-gray-500">
+      <p className="pointer-events-none relative z-[1] mt-3 line-clamp-2 min-h-[2.4em]
+                    text-[12.5px] leading-snug text-gray-500">
         {candidate.last_message_preview || "No messages yet."}
       </p>
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-3">
+      <div className="pointer-events-none relative z-[1] mt-3 flex flex-wrap items-center gap-1.5
+                      border-t border-gray-100 pt-3">
         <span
           className={`rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 ring-inset ${status.className}`}
         >
@@ -117,7 +130,19 @@ function CandidateCard({ candidate }: { candidate: Candidate }) {
           )}
         </span>
       </div>
-    </Link>
+
+      {/* Sits above the stretched link and takes its own clicks back. Always
+          rendered rather than revealed on hover: a touch device has no hover,
+          and this is the row's only action. */}
+      <div className="pointer-events-auto relative z-[2] mt-2.5">
+        <SendToCrmButton
+          size="sm"
+          candidateId={candidate.id}
+          candidateName={candidate.display_name || candidate.phone_number}
+          destination={crm}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -128,6 +153,9 @@ export default function CandidatesPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Asked once for the page, not once per card — the destination is a
+  // workspace setting and cannot differ between the cards on screen.
+  const crm = useCrmDestination();
 
   const load = useCallback(async () => {
     try {
@@ -228,7 +256,7 @@ export default function CandidatesPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {candidates.map((c) => (
-            <CandidateCard key={c.id} candidate={c} />
+            <CandidateCard key={c.id} candidate={c} crm={crm} />
           ))}
         </div>
       )}

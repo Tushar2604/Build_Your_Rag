@@ -22,6 +22,7 @@ import {
 } from "../api/chatbots";
 import { ApiError } from "../api/client";
 import FlowWritingView, { WritingSection } from "../components/assistant/FlowWritingView";
+import DictateButton from "../components/DictateButton";
 
 const MAX_DESCRIPTION = 4000;
 const MIN_DESCRIPTION = 10;
@@ -114,21 +115,30 @@ function CreateAssistantCard({ onCreated }: { onCreated: (bot: Chatbot) => void 
         </div>
       ) : (
       <div className="px-6 py-5">
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          maxLength={MAX_DESCRIPTION}
-          rows={7}
-          autoFocus
-          aria-label="Assistant description"
-          placeholder="Describe your voice AI assistant's purpose, personality, and how it should handle calls."
-          className="input resize-y text-[13.5px] leading-relaxed bg-surface-2 rounded-xl px-4 py-3.5"
-          // Ctrl/⌘+Enter submits — the button is a long way from the caret in a
-          // box this tall.
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit(e);
-          }}
-        />
+        {/* Relative, so the mic can sit inside the box's bottom-right corner
+            rather than stealing a row beneath it. */}
+        <div className="relative">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={MAX_DESCRIPTION}
+            rows={7}
+            autoFocus
+            aria-label="Assistant description"
+            placeholder="Describe your voice AI assistant's purpose, personality, and how it should handle calls. Or press the mic and just say it."
+            className="input resize-y text-[13.5px] leading-relaxed bg-surface-2 rounded-xl px-4 py-3.5 pb-12"
+            // Ctrl/⌘+Enter submits — the button is a long way from the caret in a
+            // box this tall.
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit(e);
+            }}
+          />
+          <DictateButton
+            value={description}
+            onChange={setDescription}
+            className="absolute bottom-3 right-3"
+          />
+        </div>
 
         {error && (
           <div role="alert" className="mt-3 rounded-lg bg-red-50 border border-red-200 px-4 py-2.5 text-sm text-red-700">

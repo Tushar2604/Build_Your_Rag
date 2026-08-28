@@ -12,6 +12,7 @@ import httpx
 import structlog
 
 from src.config.settings import Settings
+from src.infrastructure.http_client import get_client
 
 log = structlog.get_logger(__name__)
 
@@ -39,12 +40,12 @@ class WhatsAppBridgeClient:
         if not self.enabled:
             return False, _DISABLED
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-                resp = await client.post(
-                    f"{self._base}{path}",
-                    json=payload or {},
-                    headers={"X-Bridge-Token": self._token},
-                )
+            client = await get_client("whatsapp-bridge", timeout=TIMEOUT_SECONDS)
+            resp = await client.post(
+                f"{self._base}{path}",
+                json=payload or {},
+                headers={"X-Bridge-Token": self._token},
+            )
         except httpx.HTTPError as exc:
             log.warning("bridge.unreachable", path=path, error=str(exc))
             return False, (
@@ -95,16 +96,16 @@ class WhatsAppBridgeClient:
             "caption": caption,
         }
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-                resp = await client.post(
-                    f"{self._base}/sessions/{session_id}/send-media",
-                    params=params,
-                    content=data,
-                    headers={
-                        "X-Bridge-Token": self._token,
-                        "Content-Type": mime_type or "application/octet-stream",
-                    },
-                )
+            client = await get_client("whatsapp-bridge", timeout=TIMEOUT_SECONDS)
+            resp = await client.post(
+                f"{self._base}/sessions/{session_id}/send-media",
+                params=params,
+                content=data,
+                headers={
+                    "X-Bridge-Token": self._token,
+                    "Content-Type": mime_type or "application/octet-stream",
+                },
+            )
         except httpx.HTTPError as exc:
             log.warning("bridge.unreachable", path="send-media", error=str(exc))
             return False, (
@@ -119,8 +120,8 @@ class WhatsAppBridgeClient:
         if not self.enabled:
             return False, _DISABLED
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{self._base}/healthz")
+            client = await get_client("whatsapp-bridge-health", timeout=5)
+            resp = await client.get(f"{self._base}/healthz")
         except httpx.HTTPError as exc:
             return False, f"Bridge unreachable: {exc}"
         return (resp.status_code < 400), "" if resp.status_code < 400 else _detail(resp)

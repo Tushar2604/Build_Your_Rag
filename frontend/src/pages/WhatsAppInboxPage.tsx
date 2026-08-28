@@ -13,6 +13,7 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Bot, Paperclip, Search, Send, User, X } from "lucide-react";
 
 import { ApiError } from "../api/client";
+import DictateButton from "../components/DictateButton";
 import {
   InboxConversation,
   InboxMessage,
@@ -510,6 +511,16 @@ export default function WhatsAppInboxPage() {
                       void submitReply();
                     }
                   }}
+                />
+                {/* Between the field and Send, where the eye already is on the
+                    way to sending. Interim preview suppressed — the composer
+                    sits at the bottom of a scrolling thread, and a chip above
+                    it would cover the last message. */}
+                <DictateButton
+                  value={draft}
+                  onChange={setDraft}
+                  showInterim={false}
+                  className="mb-px self-end"
                 />
                 <button
                   type="button"

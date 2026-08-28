@@ -22,16 +22,33 @@ from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
 from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
+from src.domain.scheduling.availability import Interval
+from src.domain.scheduling.entities import (
+    Appointment,
+    AvailabilityRule,
+    BlockedPeriod,
+    Location,
+    Resource,
+    Service,
+    ServiceResource,
+    StatusChange,
+)
 from src.domain.support.entities import IssueReport
 from src.domain.voice.entities import VoiceProfile
 from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.domain.shared.identifiers import (
+    AppointmentId,
+    AvailabilityRuleId,
     BatchCandidateId,
+    BlockedPeriodId,
     ChatbotId,
     DocumentId,
     InterviewBatchId,
     InterviewId,
+    LocationId,
     MessageId,
+    ResourceId,
+    ServiceId,
     SessionId,
     TenantId,
     UserId,
@@ -659,6 +676,172 @@ class WhatsAppWebSessionRepository(Protocol):
     async def delete(self, tenant_id: TenantId, session_id: uuid.UUID) -> None: ...
 
 
+# --- Scheduling ports -------------------------------------------------------
+#
+# The seams the appointment use cases depend on. Same rule as everything above:
+# every method is tenant-scoped, and the SQLAlchemy implementations live in
+# infrastructure/persistence/scheduling_repositories.py.
+
+
+@dataclass(frozen=True)
+class HeldReservation:
+    """One row behind a live slot hold.
+
+    A DTO rather than the ORM model: the booking use case needs the resource and
+    the reserved window, and handing it a SQLAlchemy object would put persistence
+    types in the application layer for the sake of two fields.
+    """
+
+    resource_id: ResourceId
+    starts_at: datetime
+    ends_at: datetime
+
+
+@runtime_checkable
+class LocationRepository(Protocol):
+    async def add(self, location: Location) -> None: ...
+    async def get(self, tenant_id: TenantId, location_id: LocationId) -> Location | None: ...
+    async def list_for_tenant(
+        self, tenant_id: TenantId, *, active_only: bool = False
+    ) -> list[Location]: ...
+    async def update(self, location: Location) -> None: ...
+
+
+@runtime_checkable
+class ServiceRepository(Protocol):
+    async def add(self, service: Service) -> None: ...
+    async def get(self, tenant_id: TenantId, service_id: ServiceId) -> Service | None: ...
+    async def list_for_tenant(
+        self, tenant_id: TenantId, *, active_only: bool = False
+    ) -> list[Service]: ...
+    async def update(self, service: Service) -> None: ...
+    async def set_eligibility(
+        self, tenant_id: TenantId, service_id: ServiceId, links: list[ServiceResource]
+    ) -> None: ...
+    async def eligibility_for(
+        self, tenant_id: TenantId, service_id: ServiceId
+    ) -> list[ServiceResource]: ...
+
+
+@runtime_checkable
+class ResourceRepository(Protocol):
+    async def add(self, resource: Resource) -> None: ...
+    async def get(self, tenant_id: TenantId, resource_id: ResourceId) -> Resource | None: ...
+    async def list_for_tenant(
+        self,
+        tenant_id: TenantId,
+        *,
+        location_id: LocationId | None = None,
+        kind: str = "",
+        active_only: bool = False,
+    ) -> list[Resource]: ...
+    async def list_by_ids(
+        self, tenant_id: TenantId, ids: list[ResourceId]
+    ) -> list[Resource]: ...
+    async def update(self, resource: Resource) -> None: ...
+
+
+@runtime_checkable
+class AvailabilityRepository(Protocol):
+    async def add_rule(self, rule: AvailabilityRule) -> None: ...
+    async def rules_for_owners(
+        self, tenant_id: TenantId, owner_ids: list[uuid.UUID]
+    ) -> dict[object, list[AvailabilityRule]]: ...
+    async def list_rules(
+        self, tenant_id: TenantId, owner_id: uuid.UUID
+    ) -> list[AvailabilityRule]: ...
+    async def delete_rule(
+        self, tenant_id: TenantId, rule_id: AvailabilityRuleId
+    ) -> None: ...
+    async def add_block(self, block: BlockedPeriod) -> None: ...
+    async def blocks_for_owners(
+        self,
+        tenant_id: TenantId,
+        owner_ids: list[uuid.UUID],
+        window_start: datetime,
+        window_end: datetime,
+    ) -> dict[object, list[BlockedPeriod]]: ...
+    async def list_blocks(
+        self, tenant_id: TenantId, owner_id: uuid.UUID
+    ) -> list[BlockedPeriod]: ...
+    async def delete_block(
+        self, tenant_id: TenantId, block_id: BlockedPeriodId
+    ) -> None: ...
+
+
+@runtime_checkable
+class AppointmentRepository(Protocol):
+    async def add(self, appointment: Appointment) -> None: ...
+    async def get(
+        self, tenant_id: TenantId, appointment_id: AppointmentId
+    ) -> Appointment | None: ...
+    async def get_by_idempotency_key(
+        self, tenant_id: TenantId, key: str
+    ) -> Appointment | None: ...
+    async def list_for_tenant(
+        self,
+        tenant_id: TenantId,
+        *,
+        window_start: datetime | None = None,
+        window_end: datetime | None = None,
+        location_id: LocationId | None = None,
+        service_id: ServiceId | None = None,
+        resource_id: ResourceId | None = None,
+        statuses: list[str] | None = None,
+        search: str = "",
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[Appointment]: ...
+    async def update(self, appointment: Appointment) -> None: ...
+    async def add_status_change(self, change: StatusChange) -> None: ...
+    async def history(
+        self, tenant_id: TenantId, appointment_id: AppointmentId
+    ) -> list[StatusChange]: ...
+    async def counts_by_status(
+        self, tenant_id: TenantId, window_start: datetime, window_end: datetime
+    ) -> dict[str, int]: ...
+
+
+@runtime_checkable
+class ReservationRepository(Protocol):
+    """Claimed time. `reserve` raises ConflictError when the slot has gone —
+    that is the database's exclusion constraint speaking, not a pre-check."""
+
+    async def busy_intervals(
+        self,
+        tenant_id: TenantId,
+        resource_ids: list[ResourceId],
+        window_start: datetime,
+        window_end: datetime,
+        now: datetime,
+    ) -> dict[ResourceId, list[Interval]]: ...
+    async def purge_expired_holds(
+        self, tenant_id: TenantId, resource_ids: list[ResourceId], now: datetime
+    ) -> int: ...
+    async def reserve(
+        self,
+        tenant_id: TenantId,
+        resource_ids: list[ResourceId],
+        window: Interval,
+        *,
+        kind: str,
+        appointment_id: AppointmentId | None = None,
+        hold_token: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> None: ...
+    async def hold_by_token(
+        self, tenant_id: TenantId, token: str, now: datetime
+    ) -> list[HeldReservation]: ...
+    async def convert_hold(
+        self, tenant_id: TenantId, token: str, appointment_id: AppointmentId
+    ) -> int: ...
+    async def release_hold(self, tenant_id: TenantId, token: str, now: datetime) -> int: ...
+    async def release_for_appointment(
+        self, tenant_id: TenantId, appointment_id: AppointmentId, now: datetime
+    ) -> int: ...
+    async def sweep_expired(self, now: datetime, limit: int = 500) -> int: ...
+
+
 @runtime_checkable
 class UnitOfWork(Protocol):
     """Transaction boundary. A use case opens one UoW, does its work through the
@@ -691,6 +874,13 @@ class UnitOfWork(Protocol):
     issue_reports: IssueReportRepository
     voice_profiles: VoiceProfileRepository
     whatsapp_web_sessions: WhatsAppWebSessionRepository
+    # Scheduling (migration 0025).
+    locations: LocationRepository
+    services: ServiceRepository
+    resources: ResourceRepository
+    availability: AvailabilityRepository
+    appointments: AppointmentRepository
+    reservations: ReservationRepository
 
     async def __aenter__(self) -> UnitOfWork: ...
     async def __aexit__(self, *args: object) -> None: ...

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
+import DictateButton from "../components/DictateButton";
 import { useParams } from "react-router-dom";
 import {
   getPublicConfig,
@@ -224,6 +225,14 @@ function TextWidgetChat({ publicKey, config }: { publicKey: string; config: Publ
             placeholder="Type a message…"
             className="flex-1 rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
             style={{ ["--tw-ring-color" as string]: theme }}
+          />
+          {/* Browser engine only: this page is public, so there is no session
+              to authenticate a server transcription with. */}
+          <DictateButton
+            value={input}
+            onChange={setInput}
+            allowServer={false}
+            className="self-center"
           />
           <button
             type="submit"

@@ -8,7 +8,7 @@ embedding column uses pgvector for similarity search inside Postgres.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy import (
     ARRAY,
@@ -20,6 +20,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Time,
     UniqueConstraint,
     text,
 )
@@ -644,3 +645,321 @@ class WhatsAppWebSessionModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+
+
+# --- Scheduling (migration 0025) --------------------------------------------
+#
+# The appointment engine. Every table here is tenant-scoped and RLS-guarded like
+# the rest of the schema. The one that carries the design is
+# `ResourceReservationModel` — see its docstring.
+
+
+class LocationModel(Base):
+    __tablename__ = "locations"
+    __table_args__ = (UniqueConstraint("tenant_id", "slug", name="uq_location_tenant_slug"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(160))
+    # URL-safe handle, reserved for the public booking pages of a later phase.
+    # Unique per tenant, not globally: two businesses may both have a "downtown".
+    slug: Mapped[str] = mapped_column(String(80))
+    # IANA zone name. The single most load-bearing column in this module: every
+    # weekly availability rule is resolved against it.
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    address: Mapped[str] = mapped_column(Text, default="")
+    phone: Mapped[str] = mapped_column(String(32), default="")
+    email: Mapped[str] = mapped_column(String(320), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class ServiceModel(Base):
+    __tablename__ = "services"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(160))
+    category: Mapped[str] = mapped_column(String(160), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    duration_minutes: Mapped[int] = mapped_column(Integer)
+    buffer_before_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    buffer_after_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    # Money in minor units. Never a float — a rounded price is a support ticket.
+    price_cents: Mapped[int] = mapped_column(Integer, default=0)
+    deposit_cents: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(3), default="AED")
+    min_notice_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    max_horizon_days: Mapped[int] = mapped_column(Integer, default=60)
+    cancellation_window_hours: Mapped[int] = mapped_column(Integer, default=0)
+    online_bookable: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class ResourceModel(Base):
+    """Staff, rooms, equipment, vehicles — one table, discriminated by `kind`.
+
+    Modelling staff separately is what stops a scheduler ever booking a meeting
+    room, so the availability engine treats every row here identically.
+    """
+
+    __tablename__ = "resources"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(160))
+    kind: Mapped[str] = mapped_column(String(20), default="staff", index=True)
+    # SET NULL: closing a branch must not delete the doctors who worked there.
+    location_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("locations.id", ondelete="SET NULL"), nullable=True
+    )
+    # SET NULL for the same reason in reverse: removing someone's login must not
+    # delete the resource their appointments point at.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    email: Mapped[str] = mapped_column(String(320), default="")
+    phone: Mapped[str] = mapped_column(String(32), default="")
+    capacity: Mapped[int] = mapped_column(Integer, default=1)
+    # Blank = inherit the location's zone, which is the usual case.
+    timezone: Mapped[str] = mapped_column(String(64), default="")
+    color: Mapped[str] = mapped_column(String(16), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class ServiceResourceModel(Base):
+    """Which resources can serve which service, and in what role.
+
+    `role` is what makes multi-resource booking work: a consultation requiring
+    one "practitioner" and one "room" is two rows with different roles, and the
+    availability engine fills every distinct required role before offering a slot.
+    """
+
+    __tablename__ = "service_resources"
+    __table_args__ = (
+        UniqueConstraint(
+            "service_id", "resource_id", "role", name="uq_service_resource_role"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    service_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("services.id", ondelete="CASCADE"), index=True
+    )
+    resource_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("resources.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(40), default="primary")
+    required: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class AvailabilityRuleModel(Base):
+    """A recurring weekly window, stored as LOCAL wall-clock time.
+
+    `start_time`/`end_time` are `Time` without a zone on purpose. "Open Mondays
+    09:00" must stay 09:00 through a daylight-saving change; storing the UTC
+    instant would move every branch by an hour twice a year. The zone comes from
+    the owning location (or resource) at query time.
+    """
+
+    __tablename__ = "availability_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    # "location" | "resource". Polymorphic rather than two nullable FKs so the
+    # engine can load every rule for a query in one indexed statement.
+    owner_kind: Mapped[str] = mapped_column(String(16))
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    # Monday = 0, matching `datetime.weekday()`.
+    weekday: Mapped[int] = mapped_column(Integer)
+    start_time: Mapped[time] = mapped_column(Time)
+    end_time: Mapped[time] = mapped_column(Time)
+    effective_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    effective_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class BlockedPeriodModel(Base):
+    """Leave, holidays, maintenance — absolute UTC intervals, not recurrences.
+
+    These genuinely are one-off ("that Tuesday off"), which is why they are
+    instants here while `availability_rules` are wall-clock.
+    """
+
+    __tablename__ = "blocked_periods"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    owner_kind: Mapped[str] = mapped_column(String(16))
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class AppointmentModel(Base):
+    """The canonical booking. Every channel writes one of these and nothing else."""
+
+    __tablename__ = "appointments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    # RESTRICT, not CASCADE: deleting a branch or a service must not silently
+    # erase the appointments booked against it. The UI deactivates instead.
+    location_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("locations.id", ondelete="RESTRICT"), index=True
+    )
+    service_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("services.id", ondelete="RESTRICT"), index=True
+    )
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Customer identity as columns, not a FK: this phase has no CRM entity yet.
+    # Named to match the one that will replace them so the later change is a
+    # backfill rather than a redesign.
+    customer_name: Mapped[str] = mapped_column(String(160))
+    customer_phone: Mapped[str] = mapped_column(String(32), default="", index=True)
+    customer_email: Mapped[str] = mapped_column(String(320), default="")
+    customer_timezone: Mapped[str] = mapped_column(String(64), default="")
+    # Copied from the location at booking time, so correcting a branch's zone
+    # later cannot retroactively move appointments that already happened.
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    # Channel attribution (spec section 44). Never changes after creation.
+    source: Mapped[str] = mapped_column(String(20), default="staff", index=True)
+    # Denormalized copy of the reserved resources, so rendering a calendar does
+    # not need a join per appointment. `resource_reservations` remains the
+    # authority on what is actually booked.
+    resource_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    customer_notes: Mapped[str] = mapped_column(Text, default="")
+    internal_notes: Mapped[str] = mapped_column(Text, default="")
+    rescheduled_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("appointments.id", ondelete="SET NULL"), nullable=True
+    )
+    cancellation_reason: Mapped[str] = mapped_column(String(500), default="")
+    # Empty string rather than NULL is NOT usable here: the unique index below is
+    # partial on non-empty values, so unkeyed bookings never collide.
+    idempotency_key: Mapped[str] = mapped_column(String(128), default="")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class AppointmentStatusHistoryModel(Base):
+    """Append-only record of every status change (spec section 40).
+
+    Never updated and never deleted with the appointment intact: this is the
+    answer to "who cancelled this, and when".
+    """
+
+    __tablename__ = "appointment_status_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    appointment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("appointments.id", ondelete="CASCADE"), index=True
+    )
+    from_status: Mapped[str] = mapped_column(String(24))
+    to_status: Mapped[str] = mapped_column(String(24))
+    # "staff" | "customer" | "ai_agent" | "system". Deliberately distinct from
+    # the appointment's `source`: an AI can create what a receptionist cancels.
+    actor_kind: Mapped[str] = mapped_column(String(16))
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    actor_label: Mapped[str] = mapped_column(String(160), default="")
+    channel: Mapped[str] = mapped_column(String(32), default="")
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+
+class ResourceReservationModel(Base):
+    """Claimed time on one resource — and the double-booking guard itself.
+
+    Holds and bookings are rows in the SAME table so they compete for the same
+    time on the same constraint. Migration 0025 adds:
+
+        EXCLUDE USING gist (
+            resource_id WITH =,
+            (tstzrange(starts_at, ends_at, '[)')) WITH &&
+        ) WHERE (released_at IS NULL)
+
+    which is the whole of spec section 12. Two customers booking 3:00 PM at the
+    same instant cannot both succeed regardless of transaction interleaving or
+    how many web workers are running: Postgres rejects the loser with a
+    constraint violation the use case turns into a 409 plus fresh slots. This is
+    strictly stronger than SELECT ... FOR UPDATE (which cannot lock a row that
+    does not exist yet) and needs no lock ordering.
+
+    The range is an expression over two ordinary timestamp columns rather than a
+    stored `tstzrange`, so the ORM writes plain datetimes and no driver-specific
+    range type is involved.
+
+    `released_at` rather than DELETE: a cancelled booking's reservation stays as
+    a record of what was held, while dropping out of the constraint's scope.
+    """
+
+    __tablename__ = "resource_reservations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    resource_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("resources.id", ondelete="CASCADE"), index=True
+    )
+    # Includes the service's buffers — this is the block of calendar consumed,
+    # which is wider than the appointment the customer sees.
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # "hold" | "booking".
+    kind: Mapped[str] = mapped_column(String(10), index=True)
+    appointment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("appointments.id", ondelete="CASCADE"), nullable=True
+    )
+    # Unguessable handle returned to whoever created the hold; presenting it is
+    # what converts the hold into a booking.
+    hold_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Set for holds only. A booking never expires.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

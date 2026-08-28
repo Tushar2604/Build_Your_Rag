@@ -28,7 +28,7 @@ export default function RegisterPage() {
     setError(null); setLoading(true);
     try {
       await register(tenantName, email, password);
-      navigate("/home");
+      navigate("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Registration failed. Please try again.");
     } finally { setLoading(false); }
@@ -113,7 +113,7 @@ export default function RegisterPage() {
               intent="signup"
               onSignedIn={(session) => {
                 applySession(session);
-                navigate("/home", { replace: true });
+                navigate("/dashboard", { replace: true });
               }}
             />
 

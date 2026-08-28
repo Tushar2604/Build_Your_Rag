@@ -1521,6 +1521,14 @@ class WhatsAppConversationRepositoryImpl:
 
         Ordered oldest-first so the contact who has been waiting longest is
         served first when a backlog builds up after the host has been asleep.
+
+        `FOR UPDATE SKIP LOCKED` keeps two simultaneous readers from picking up
+        the same slice. It is only half the guard, though: these locks live for
+        the duration of *this* transaction, which commits before any message is
+        sent, so it cannot by itself stop two processes double-nudging a
+        contact. The cross-process guard is the advisory lock the sweep loop
+        takes around the whole tick (see `_follow_up_loop` in the API app) —
+        this clause just keeps concurrent readers from colliding underneath it.
         """
         rows = (
             (
@@ -1536,6 +1544,7 @@ class WhatsAppConversationRepositoryImpl:
                     )
                     .order_by(m.WhatsAppConversationModel.awaiting_reply_since.asc())
                     .limit(limit)
+                    .with_for_update(skip_locked=True)
                 )
             )
             .scalars()

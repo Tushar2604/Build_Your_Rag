@@ -11,6 +11,7 @@ import {
   Bot, BookOpen, LineChart, Settings, LogOut, Users2, PhoneCall, Radio,
   Megaphone, Plug, Mic, LifeBuoy, Search, Bell, Moon, Sun, ChevronLeft,
   ListChecks, LayoutDashboard, PhoneOutgoing, MessageCircle, UserSearch,
+  CalendarDays, CalendarCheck, Briefcase, MapPin, Clock,
 } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { useTheme } from "../store/theme";
@@ -31,6 +32,28 @@ interface NavGroup {
 }
 
 const NAV_GROUPS: NavGroup[] = [
+  {
+    // Its own group, above everything: the dashboard is where sign-in lands
+    // and the one row that should never be hunted for inside a category.
+    title: "Home",
+    items: [
+      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
+    ],
+  },
+  {
+    // Its own group rather than a row inside "Operations": appointments are a
+    // daily workflow with their own configuration underneath, and burying the
+    // calendar in a list of monitoring pages is how it stops being found.
+    title: "Appointments",
+    items: [
+      { to: "/appointments/calendar", label: "Calendar", icon: CalendarDays },
+      { to: "/appointments", label: "Appointments", icon: CalendarCheck, exact: true },
+      { to: "/appointments/services", label: "Services", icon: Briefcase, adminOnly: true },
+      { to: "/appointments/resources", label: "Staff & Resources", icon: Users2, adminOnly: true },
+      { to: "/appointments/locations", label: "Locations", icon: MapPin, adminOnly: true },
+      { to: "/appointments/availability", label: "Availability", icon: Clock, adminOnly: true },
+    ],
+  },
   {
     title: "Voice AI Setup",
     items: [
@@ -60,7 +83,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     title: "Account & Billing",
     items: [
-      { to: "/home", label: "Overview", icon: LayoutDashboard, exact: true },
+      { to: "/home", label: "Overview", icon: ListChecks, exact: true },
       { to: "/hiring-agent", label: "Hiring Agent", icon: Radio, adminOnly: true },
       { to: "/team", label: "Team", icon: Users2, adminOnly: true },
       { to: "/report-issue", label: "Report Issue", icon: LifeBuoy },

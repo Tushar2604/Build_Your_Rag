@@ -5,6 +5,7 @@
 // cost the user their words.
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
+import DictateButton from "../components/DictateButton";
 import {
   IssueOptions,
   IssueReport,
@@ -223,15 +224,24 @@ export default function ReportIssuePage() {
             </div>
             <div>
               <label className="label">Description *</label>
-              <textarea
-                className="input resize-y"
-                rows={7}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                maxLength={MAX_DESCRIPTION}
-                placeholder="What did you expect to happen, and what happened instead? Steps to reproduce help a lot."
-                required
-              />
+              <div className="relative">
+                <textarea
+                  className="input resize-y pb-12"
+                  rows={7}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  maxLength={MAX_DESCRIPTION}
+                  placeholder="What did you expect to happen, and what happened instead? Steps to reproduce help a lot."
+                  required
+                />
+                {/* Describing a bug out loud is faster than typing it, and the
+                    people filing these are usually mid-interruption. */}
+                <DictateButton
+                  value={description}
+                  onChange={setDescription}
+                  className="absolute bottom-3 right-3"
+                />
+              </div>
               <p className="text-xs text-gray-400 text-right mt-1 tabular-nums">
                 {description.length}/{MAX_DESCRIPTION}
                 {description.length > 0 && description.length < 20 && (
