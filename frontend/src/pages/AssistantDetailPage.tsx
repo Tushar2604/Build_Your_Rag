@@ -1117,7 +1117,7 @@ export default function AssistantDetailPage() {
 
       {/* ── Header ── */}
       <header className="sticky top-0 z-30 glass-chrome border-b">
-        <div className="flex items-center gap-3 px-5 h-[58px] flex-wrap">
+        <div className="flex items-center gap-3 px-5 min-h-[58px] py-2 flex-wrap">
           <Link
             to="/assistants"
             aria-label="Back to assistants"
@@ -1249,7 +1249,7 @@ export default function AssistantDetailPage() {
                     onClick={() => startTest("chat")}
                     disabled={startingTest}
                     className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
-                               font-medium text-brand-300 transition-colors hover:bg-brand-600/30
+                               font-medium text-brand-700 transition-colors hover:bg-brand-600/30
                                disabled:opacity-50"
                   >
                     {startingTest ? (
@@ -1263,7 +1263,7 @@ export default function AssistantDetailPage() {
                     onClick={() => startTest("web-call")}
                     disabled={startingTest}
                     className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
-                               font-medium text-brand-300 transition-colors hover:bg-brand-600/30
+                               font-medium text-brand-700 transition-colors hover:bg-brand-600/30
                                border-l chrome-rule disabled:opacity-50"
                   >
                     <Headphones className="w-4 h-4" strokeWidth={1.75} />
@@ -1273,7 +1273,7 @@ export default function AssistantDetailPage() {
                     to="/channels"
                     title="Phone calls run through a connected number — set one up under Phone Numbers."
                     className="inline-flex items-center gap-1.5 bg-brand-600/20 px-3 py-2 text-[13px]
-                               font-medium text-brand-300 transition-colors hover:bg-brand-600/30
+                               font-medium text-brand-700 transition-colors hover:bg-brand-600/30
                                border-l chrome-rule"
                   >
                     <Phone className="w-4 h-4" strokeWidth={1.75} />

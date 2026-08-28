@@ -1,10 +1,11 @@
 // Assistant Details — the tab you land on.
 //
-// Three stacked blocks, in the order you reason about an assistant: what it
+// Four stacked blocks, in the order you reason about an assistant: what it
 // speaks and listens with (Assistant Settings), the first thing it says
-// (Welcome Message), and everything it does after that (Conversational Flow).
+// (Welcome Message), whether it can actually book (Appointments), and
+// everything it does after that (Conversational Flow).
 import { useEffect, useState } from "react";
-import { Brain, Globe, Info, Mic, AudioLines } from "lucide-react";
+import { AudioLines, Brain, CalendarCheck, Globe, Info, Mic } from "lucide-react";
 import {
   AssistantConfig,
   AssistantOptions,
@@ -316,6 +317,48 @@ export default function AssistantDetailsTab({ bot, draft, onDraftChange, onRepla
           <p className="text-xs text-gray-500 -mt-1">
             Leave empty and the assistant opens the conversation itself, following
             its Conversational Flow.
+          </p>
+        )}
+      </section>
+
+      {/* ── Appointments ──
+          Its own card rather than a row of switches beside the welcome message:
+          this one changes what the assistant *is* — from something that answers
+          questions to something that books real appointments — so it should not
+          read as a formatting preference. */}
+      <section className="rounded-2xl border border-gray-200 bg-surface p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="w-7 h-7 rounded-lg bg-brand-500/10 flex items-center justify-center">
+                <CalendarCheck className="w-4 h-4 text-brand-400" strokeWidth={1.75} />
+              </span>
+              <h2 className="text-[15px] font-semibold text-gray-900">Appointments</h2>
+            </div>
+            <p className="text-xs text-gray-500 mt-1.5 ml-9 max-w-xl leading-relaxed">
+              Let this assistant check real availability and book, reschedule or
+              cancel appointments — on WhatsApp and in chat. It can only offer
+              times the calendar actually has, and never says an appointment is
+              booked unless it is.
+            </p>
+          </div>
+          <div className="flex-shrink-0 pt-1">
+            <PillToggle
+              label={a.appointments_enabled ? "On" : "Off"}
+              on={a.appointments_enabled}
+              onChange={(appointments_enabled) => patchAssistant({ appointments_enabled })}
+              hint="Gives this assistant the booking tools. Off: it answers from your knowledge base only."
+            />
+          </div>
+        </div>
+
+        {a.appointments_enabled && (
+          // Named plainly, because a booking assistant with no services silently
+          // has nothing to offer and the reason is not obvious from here.
+          <p className="text-xs text-gray-500 mt-4 ml-9 rounded-lg bg-surface-2 px-3 py-2">
+            Needs at least one location, one service with staff assigned, and
+            opening hours — set those up under <strong>Appointments</strong> in
+            the sidebar.
           </p>
         )}
       </section>

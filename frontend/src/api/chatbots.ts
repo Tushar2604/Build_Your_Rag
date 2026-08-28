@@ -30,6 +30,10 @@ export interface AssistantConfig {
   welcome_dynamic: boolean;
   /** The caller can talk over the opener. */
   welcome_interruptible: boolean;
+  /** Gives this assistant the appointment tools: it can check real
+   *  availability and book, reschedule or cancel. Stored in the same JSONB
+   *  blob as the rest, so existing assistants simply read `false`. */
+  appointments_enabled: boolean;
 }
 
 export interface AssistantOptions {
