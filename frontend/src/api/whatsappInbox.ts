@@ -20,6 +20,8 @@ export type MessageAuthor = "contact" | "assistant" | "operator" | "device";
 /** Empty for a plain text message. */
 export type MediaKind = "" | "image" | "video" | "audio" | "document" | "sticker";
 
+export type ThreadStatus = "open" | "closed";
+
 export interface InboxConversation {
   id: string;
   phone_number: string;
@@ -30,6 +32,68 @@ export interface InboxConversation {
   has_attachment: boolean;
   /** False means a human has taken over and the assistant is staying quiet. */
   auto_reply: boolean;
+  // --- Shared-inbox working state ---
+  /** Null when nobody has picked the thread up — a state the rail filters on. */
+  assignee_id: string | null;
+  /** Resolved server-side; an id is not something a list can render. */
+  assignee_email: string;
+  tags: string[];
+  pinned: boolean;
+  status: ThreadStatus;
+  // --- Contact card. Everything WhatsApp does not tell us. ---
+  company: string;
+  job_title: string;
+  email: string;
+  city: string;
+  country: string;
+  linkedin_url: string;
+  source: string;
+}
+
+/** Fields a client may write back. Everything optional — each gesture in the
+ * inbox sends only what it changed, so two people working the same thread
+ * cannot clobber each other's unrelated edits. */
+export interface ConversationPatch {
+  auto_reply?: boolean;
+  mark_read?: boolean;
+  assignee_id?: string;
+  /** Send with no `assignee_id` to actually clear the owner — "absent" and
+   * "null" would otherwise be indistinguishable over JSON. */
+  unassign?: boolean;
+  tags?: string[];
+  pinned?: boolean;
+  status?: ThreadStatus;
+  company?: string;
+  job_title?: string;
+  email?: string;
+  city?: string;
+  country?: string;
+  linkedin_url?: string;
+  source?: string;
+  display_name?: string;
+}
+
+/** An internal note. Never sent to the contact — see the backend for why it is
+ * not a message. */
+export interface ConversationNote {
+  id: string;
+  body: string;
+  author_email: string;
+  created_at: string;
+}
+
+export interface InboxStats {
+  connected_numbers: number;
+  conversations: number;
+  active_conversations: number;
+  unread: number;
+  messages_sent: number;
+  messages_received: number;
+  delivery_rate: number;
+  read_rate: number;
+  reply_rate: number;
+  active_campaigns: number;
+  period_label: string;
 }
 
 export interface InboxConversationPage {
@@ -60,6 +124,13 @@ export interface ConversationFilters {
   unreadOnly?: boolean;
   /** false selects conversations a human has taken over. */
   autoReply?: boolean;
+  /** Resolved from the caller's token server-side, so "mine" always means the
+   * person looking. */
+  assignedToMe?: boolean;
+  unassigned?: boolean;
+  status?: ThreadStatus;
+  pinned?: boolean;
+  tag?: string;
   page?: number;
   pageSize?: number;
 }
@@ -75,6 +146,11 @@ export function listConversations(
   }
   if (filters.unreadOnly) params.set("unread_only", "true");
   if (filters.autoReply !== undefined) params.set("auto_reply", String(filters.autoReply));
+  if (filters.assignedToMe) params.set("assigned_to_me", "true");
+  if (filters.unassigned) params.set("unassigned", "true");
+  if (filters.status) params.set("status", filters.status);
+  if (filters.pinned !== undefined) params.set("pinned", String(filters.pinned));
+  if (filters.tag) params.set("tag", filters.tag);
   params.set("page", String(filters.page ?? 1));
   params.set("page_size", String(filters.pageSize ?? 30));
   return api.get<InboxConversationPage>(
@@ -112,20 +188,58 @@ export function sendAttachment(
   );
 }
 
+/** The one write for everything about a thread that isn't a message. */
+export function updateConversation(
+  conversationId: string,
+  patch: ConversationPatch,
+): Promise<InboxConversation> {
+  return api.patch<InboxConversation>(`/whatsapp-web/conversations/${conversationId}`, patch);
+}
+
 /** Hand the conversation to a human (false) or back to the assistant (true). */
 export function setAutoReply(
   conversationId: string,
   autoReply: boolean,
 ): Promise<InboxConversation> {
-  return api.patch<InboxConversation>(`/whatsapp-web/conversations/${conversationId}`, {
-    auto_reply: autoReply,
-  });
+  return updateConversation(conversationId, { auto_reply: autoReply });
 }
 
 export function markRead(conversationId: string): Promise<InboxConversation> {
-  return api.patch<InboxConversation>(`/whatsapp-web/conversations/${conversationId}`, {
-    mark_read: true,
+  return updateConversation(conversationId, { mark_read: true });
+}
+
+export function assignConversation(
+  conversationId: string,
+  userId: string | null,
+): Promise<InboxConversation> {
+  return updateConversation(
+    conversationId,
+    userId ? { assignee_id: userId } : { unassign: true },
+  );
+}
+
+// --- Internal notes ---------------------------------------------------------
+
+export function listNotes(conversationId: string): Promise<ConversationNote[]> {
+  return api.get<ConversationNote[]>(`/whatsapp-web/conversations/${conversationId}/notes`);
+}
+
+export function addNote(conversationId: string, body: string): Promise<ConversationNote> {
+  return api.post<ConversationNote>(`/whatsapp-web/conversations/${conversationId}/notes`, {
+    body,
   });
+}
+
+export function deleteNote(conversationId: string, noteId: string): Promise<void> {
+  return api.delete<void>(
+    `/whatsapp-web/conversations/${conversationId}/notes/${noteId}`,
+  );
+}
+
+/** Workspace-wide counters for the inbox header — not scoped to one number, so
+ * switching numbers doesn't make the header jump. */
+export function getInboxStats(): Promise<InboxStats> {
+  return api.get<InboxStats>("/whatsapp-web/stats");
 }
 
 /**

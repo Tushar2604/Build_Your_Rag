@@ -8,7 +8,7 @@ import { ApiError } from "../api/client";
 import WhatsAppQrModal from "../components/WhatsAppQrModal";
 import {
   WhatsAppWebSession, WhatsAppWebOptions, attachAssistant, createWebSession,
-  getWhatsAppWebOptions, listWebSessions, unlinkWebSession,
+  getWhatsAppWebOptions, listWebSessions, mergeDuplicateNumbers, unlinkWebSession,
 } from "../api/whatsappWeb";
 
 function ConnectModal({
@@ -221,6 +221,35 @@ function MethodCard({ method, onPick }: { method: Method; onPick: () => void }) 
 
 /* ── Linked personal (QR) numbers ── */
 
+/** A phone number reduced to what actually identifies it — WhatsApp reports
+ * whatever shape the handset registered, so "+971 50 123 4567" and
+ * "971501234567" are the same number and never string-equal. */
+function digits(phoneNumber: string): string {
+  return phoneNumber.replace(/\D/g, "");
+}
+
+/**
+ * One row per number.
+ *
+ * The server merges duplicates properly (moving the history across and
+ * unlinking the stale device); this is the display-side belt to that braces,
+ * for the window between a second scan landing and the merge running. Keeps
+ * the first of each group, which is the newest — `listWebSessions` returns
+ * newest first, and the newest session is the one holding the live socket.
+ */
+function dedupeByNumber(sessions: WhatsAppWebSession[]): WhatsAppWebSession[] {
+  const seen = new Set<string>();
+  return sessions.filter((s) => {
+    const key = digits(s.phone_number);
+    // A session still pairing has no number yet and is not a duplicate of
+    // anything — every one of them has to stay visible to be scannable.
+    if (!key) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 const WEB_STATUS_STYLES: Record<WhatsAppWebSession["status"], string> = {
   linked: "bg-emerald-100 text-emerald-700",
   awaiting_scan: "bg-amber-100 text-amber-700",
@@ -347,7 +376,22 @@ export default function ChannelsPage() {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Reload the linked numbers, folding any duplicates together first.
+   *
+   * Scanning the QR for a number that is already connected mints a second
+   * session — the row has to exist before the handset reports which number it
+   * is, so there is no way to prevent it up front. New ones are absorbed
+   * server-side at link time; this heals workspaces that already have them,
+   * and is a no-op (and cheap) when there is nothing to merge.
+   */
   async function loadWeb() {
+    try {
+      await mergeDuplicateNumbers();
+    } catch {
+      // Merging is a tidy-up. If it fails, the list is still worth showing —
+      // it will just show the duplicate until the next attempt.
+    }
     try {
       setWebSessions(await listWebSessions());
     } catch {
@@ -462,7 +506,7 @@ export default function ChannelsPage() {
             Twilio numbers, where recipients opted in.
           </p>
           <ul className="divide-y divide-gray-100">
-            {webSessions.map((s) => (
+            {dedupeByNumber(webSessions).map((s) => (
               <WebSessionRow
                 key={s.id}
                 session={s}

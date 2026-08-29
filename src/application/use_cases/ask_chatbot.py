@@ -20,13 +20,14 @@ from src.application.ports.repositories import RequestLog, UnitOfWork
 from src.application.ports.services import Embedder, LLMProvider, LLMResult
 from src.config.settings import get_settings
 from src.domain.chat.entities import Citation, Message, MessageRole
-from src.domain.chat.relevance import prune_citations
 from src.domain.chat.events import MessageAnswered
+from src.domain.chat.relevance import prune_citations
 from src.domain.chatbot.entities import Chatbot
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
     NO_CONTEXT_MARKER,
     build_grounded_prompt,
+    count_repeat_asks,
     format_message_history,
     scan_input,
     scan_output,
@@ -108,7 +109,12 @@ class AskChatbot:
 
             # Fetched BEFORE the current message is added, so it reflects prior
             # turns only — the current message is passed separately as `data.message`.
-            history_text = format_message_history(await uow.chats.list_messages(tenant_id, session_id))
+            prior = await uow.chats.list_messages(tenant_id, session_id)
+            history_text = format_message_history(prior)
+            # Counted here, on the turns that came BEFORE this message, so a
+            # candidate circling back to the same unanswered question gets a
+            # different answer rather than the same sentence again.
+            repeat_count = count_repeat_asks(prior, data.message)
 
             if data.persist_user_message:
                 await uow.chats.add_message(
@@ -129,7 +135,9 @@ class AskChatbot:
         # isolate untrusted text in labelled blocks, and screen the answer for
         # system-prompt leakage. A high-risk verdict short-circuits to a refusal.
         context = _build_context(citations)
-        user_prompt = build_grounded_prompt(context, data.message, history=history_text)
+        user_prompt = build_grounded_prompt(
+            context, data.message, history=history_text, repeat_count=repeat_count
+        )
 
         input_verdict = scan_input(data.message)
         if not input_verdict.allowed:

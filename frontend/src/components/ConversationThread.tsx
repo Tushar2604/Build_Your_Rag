@@ -151,7 +151,7 @@ export function Attachment({
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const isImage = message.media_kind === "image" || message.media_kind === "sticker";
-  // On the green outgoing bubble a neutral tint disappears; on the light
+  // On the solid outgoing bubble a neutral tint disappears; on the light
   // incoming one a white one does.
   const chip = outgoing ? "bg-black/15 hover:bg-black/25" : "bg-gray-900/[0.06] hover:bg-gray-900/[0.12]";
 
@@ -295,7 +295,7 @@ export function ConversationThread({
                 <div
                   className={`relative max-w-[78%] px-3 py-2 text-[14px] leading-snug shadow-xs sm:max-w-[68%] ${
                     outgoing
-                      ? "rounded-2xl rounded-br-md bg-emerald-600 text-white"
+                      ? "rounded-2xl rounded-br-md bg-brand-600 text-white"
                       : "rounded-2xl rounded-bl-md bg-surface text-gray-900"
                   }`}
                 >

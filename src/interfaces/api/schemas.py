@@ -1028,6 +1028,23 @@ class InboxConversationResponse(BaseModel):
     # False means a human has taken the conversation over and the assistant is
     # staying quiet.
     auto_reply: bool
+    # --- Shared-inbox working state ---
+    assignee_id: uuid.UUID | None = None
+    # Resolved server-side: a teammate's id is not something the browser can
+    # render, and asking it to fetch the team to translate one is a round trip
+    # per list.
+    assignee_email: str = ""
+    tags: list[str] = Field(default_factory=list)
+    pinned: bool = False
+    status: Literal["open", "closed"] = "open"
+    # --- Contact card ---
+    company: str = ""
+    job_title: str = ""
+    email: str = ""
+    city: str = ""
+    country: str = ""
+    linkedin_url: str = ""
+    source: str = ""
 
 
 class InboxConversationPageResponse(BaseModel):
@@ -1064,11 +1081,76 @@ class InboxSendRequest(BaseModel):
 
 
 class InboxConversationUpdate(BaseModel):
-    """Both fields optional: the inbox marks a thread read on open, and toggles
-    takeover separately."""
+    """Every field optional, and each edit arrives on its own.
+
+    The inbox marks a thread read on open, toggles takeover from the header,
+    assigns from a menu and saves the contact card from a panel — four
+    independent gestures. A partial patch is what lets each of them send only
+    what it changed, so two people working the same thread cannot clobber each
+    other's unrelated edits.
+
+    `assignee_id` is the one field where "not sent" and "sent as null" must
+    differ — null means *unassign* — so it carries an explicit sentinel rather
+    than relying on None.
+    """
 
     auto_reply: bool | None = None
     mark_read: bool | None = None
+    assignee_id: uuid.UUID | None = None
+    # Set true alongside a null `assignee_id` to actually clear the owner.
+    unassign: bool = False
+    tags: list[str] | None = Field(default=None, max_length=12)
+    pinned: bool | None = None
+    status: Literal["open", "closed"] | None = None
+    company: str | None = Field(default=None, max_length=160)
+    job_title: str | None = Field(default=None, max_length=120)
+    email: str | None = Field(default=None, max_length=254)
+    city: str | None = Field(default=None, max_length=120)
+    country: str | None = Field(default=None, max_length=120)
+    linkedin_url: str | None = Field(default=None, max_length=300)
+    source: str | None = Field(default=None, max_length=60)
+    display_name: str | None = Field(default=None, max_length=160)
+
+
+class InboxNoteRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class InboxNoteResponse(BaseModel):
+    id: uuid.UUID
+    body: str
+    author_email: str = ""
+    created_at: datetime
+
+
+class InboxStatsResponse(BaseModel):
+    """The counters across the top of the inbox.
+
+    Rates are served already computed: the denominator rules ("of threads we
+    wrote to, how many replied") belong in one place, and re-deriving them in
+    the browser is how two surfaces end up disagreeing about the same number.
+    """
+
+    connected_numbers: int = 0
+    conversations: int = 0
+    active_conversations: int = 0
+    unread: int = 0
+    messages_sent: int = 0
+    messages_received: int = 0
+    # 0-100, one decimal.
+    delivery_rate: float = 0.0
+    read_rate: float = 0.0
+    reply_rate: float = 0.0
+    active_campaigns: int = 0
+    # What window `messages_sent` covers, so the label can say so honestly.
+    period_label: str = ""
+
+
+class MergeDuplicateNumbersResponse(BaseModel):
+    """Result of folding re-scanned numbers back together."""
+
+    merged_sessions: int = 0
+    moved_conversations: int = 0
 
 
 # --- Candidates (tenant-wide, read-oriented view over every WhatsApp number) ---

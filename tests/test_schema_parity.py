@@ -29,6 +29,10 @@ NEW_TABLES = {
     "voice_profiles": m.VoiceProfileModel,
     "whatsapp_web_sessions": m.WhatsAppWebSessionModel,
     "oauth_connections": m.OAuthConnectionModel,
+    "whatsapp_conversation_notes": m.WhatsAppConversationNoteModel,
+    # Extended by 0022/0024/0026 long after 0009 created it — exactly the
+    # shape of drift this file exists to catch.
+    "whatsapp_conversations": m.WhatsAppConversationModel,
 }
 
 
@@ -37,8 +41,8 @@ NEW_TABLES = {
 # 0014 backfills the prompt). These are the ranges carrying the DDL this file
 # checks, skipping 0014 in between.
 DDL_RANGES = (
-    ("0011_team_and_custom_questions", "0013_broadcasts"),
-    ("0014_tighten_default_prompt", "0021_campaign_mode_and_sender"),
+    ("0008_interviews", "0013_broadcasts"),
+    ("0014_tighten_default_prompt", "0026_whatsapp_crm_inbox"),
 )
 
 

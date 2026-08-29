@@ -1,15 +1,16 @@
-// Test Mode — talk to the assistant you are editing, beside the thing you edit.
+// Test Mode — talk to the assistant you are editing.
 //
-// A docked right-hand panel rather than a modal, so the flow stays on screen:
-// the point of a test is to read a reply and go change the section that caused
-// it. The header goes into a locked state for the duration, because an
-// assistant that changes mid-conversation makes the transcript meaningless —
-// you would no longer know which version said what.
+// Chat is a docked right-hand panel, so the flow stays on screen: the point of
+// a text test is to read a reply and go change the section that caused it.
+//
+// A web call is not that activity, so it is not that shape. You are listening
+// and speaking for the length of the call, not reading and editing, and it gets
+// a modal instead — see VoiceCallModal for why.
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Send, Sparkles, X } from "lucide-react";
 import { Chatbot } from "../../api/chatbots";
 import { askStream, createSession, greetStream } from "../../api/chat";
-import VoiceCallPanel from "../VoiceCallPanel";
+import VoiceCallModal from "../VoiceCallModal";
 
 export type TestMode = "chat" | "web-call";
 
@@ -180,7 +181,36 @@ function ChatTest({ bot }: { bot: Chatbot }) {
   );
 }
 
+/** Chat docks, a call pops. One entry point so callers keep passing a mode
+ * rather than having to know which shape each test takes. */
 export default function TestModePanel({ bot, mode, onClose }: Props) {
+  if (mode === "web-call") {
+    return (
+      <VoiceCallModal
+        botName={bot.name}
+        onClose={onClose}
+        adapter={{
+          createSession: async () => (await createSession(bot.id)).session_id,
+          greet: (sid, h) =>
+            greetStream(sid, {
+              onToken: h.onToken,
+              onDone: () => h.onDone?.(),
+              onError: h.onError,
+            }),
+          ask: (sid, text, h) =>
+            askStream(sid, text, {
+              onToken: h.onToken,
+              onDone: (tokens) => h.onDone?.(tokens),
+              onError: h.onError,
+            }),
+        }}
+      />
+    );
+  }
+  return <ChatTestPanel onClose={onClose} bot={bot} />;
+}
+
+function ChatTestPanel({ bot, onClose }: { bot: Chatbot; onClose: () => void }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -210,9 +240,7 @@ export default function TestModePanel({ bot, mode, onClose }: Props) {
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-bold text-gray-900 leading-tight">Test Mode</p>
           <p className="text-[11.5px] text-gray-500 leading-tight mt-0.5">
-            {mode === "chat"
-              ? "Chatting directly with the assistant"
-              : "Speaking with the assistant"}
+            Chatting directly with the assistant
           </p>
         </div>
         <button
@@ -224,30 +252,7 @@ export default function TestModePanel({ bot, mode, onClose }: Props) {
         </button>
       </div>
 
-      {mode === "chat" ? (
-        <ChatTest bot={bot} />
-      ) : (
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <VoiceCallPanel
-            botName={bot.name}
-            adapter={{
-              createSession: async () => (await createSession(bot.id)).session_id,
-              greet: (sid, h) =>
-                greetStream(sid, {
-                  onToken: h.onToken,
-                  onDone: () => h.onDone?.(),
-                  onError: h.onError,
-                }),
-              ask: (sid, text, h) =>
-                askStream(sid, text, {
-                  onToken: h.onToken,
-                  onDone: (tokens) => h.onDone?.(tokens),
-                  onError: h.onError,
-                }),
-            }}
-          />
-        </div>
-      )}
+      <ChatTest bot={bot} />
     </aside>
   );
 }

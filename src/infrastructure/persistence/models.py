@@ -427,10 +427,59 @@ class WhatsAppConversationModel(Base):
         DateTime(timezone=True), nullable=True
     )
     followups_sent: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    # --- Shared-inbox working state (0026) ---------------------------------
+    # Who owns this thread. SET NULL on the FK: a teammate leaving unassigns
+    # their conversations, it never deletes them.
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    tags: Mapped[list] = mapped_column(JSONB, default=list, server_default=text("'[]'::jsonb"))
+    pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # "open" | "closed" — see migration 0026 for why this is not a boolean.
+    status: Mapped[str] = mapped_column(String(16), server_default="open")
+    # --- Contact card (0026) ------------------------------------------------
+    # WhatsApp gives us a number and, if they have one set, a pushname. Every
+    # other fact about the person is something an operator learns and types, so
+    # it lives here rather than being re-derived per view.
+    company: Mapped[str] = mapped_column(String(160), server_default="")
+    job_title: Mapped[str] = mapped_column(String(120), server_default="")
+    email: Mapped[str] = mapped_column(String(254), server_default="")
+    city: Mapped[str] = mapped_column(String(120), server_default="")
+    country: Mapped[str] = mapped_column(String(120), server_default="")
+    linkedin_url: Mapped[str] = mapped_column(String(300), server_default="")
+    source: Mapped[str] = mapped_column(String(60), server_default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+
+
+class WhatsAppConversationNoteModel(Base):
+    """An internal note on a thread — what the team tells each other about a
+    contact, never sent to them.
+
+    Separate from `chat_messages` on purpose: a note must never be able to
+    reach WhatsApp, and the surest way to guarantee that is for it not to live
+    in the table the send path reads.
+    """
+
+    __tablename__ = "whatsapp_conversation_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("whatsapp_conversations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Kept alongside the id so the note still says who wrote it once that
+    # account is gone — an audit line that degrades to "someone" is not one.
+    author_email: Mapped[str] = mapped_column(String(254), server_default="")
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class AuditEventModel(Base):

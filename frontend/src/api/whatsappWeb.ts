@@ -64,3 +64,19 @@ export function attachAssistant(
 export function unlinkWebSession(id: string): Promise<void> {
   return api.delete<void>(`/whatsapp-web/sessions/${id}`);
 }
+
+export interface MergeDuplicatesResult {
+  merged_sessions: number;
+  moved_conversations: number;
+}
+
+/**
+ * Fold numbers that were connected more than once back into a single entry.
+ *
+ * New duplicates are absorbed the moment a scan links (server-side), so this is
+ * only for workspaces that already have them. Idempotent — with nothing to
+ * merge it reports zeroes, which is what lets the page call it on load.
+ */
+export function mergeDuplicateNumbers(): Promise<MergeDuplicatesResult> {
+  return api.post<MergeDuplicatesResult>("/whatsapp-web/sessions/merge-duplicates");
+}

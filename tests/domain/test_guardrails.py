@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
+from src.domain.chat.entities import Message, MessageRole
 from src.domain.chatbot.entities import DEFAULT_SYSTEM_PROMPT
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
     NO_CONTEXT_MARKER,
     build_grounded_prompt,
+    count_repeat_asks,
     scan_input,
     scan_output,
 )
@@ -149,3 +153,80 @@ def test_the_marker_is_the_one_the_context_builders_emit() -> None:
 
     assert _build_context([]) == NO_CONTEXT_MARKER
     assert build_context([]) == NO_CONTEXT_MARKER
+
+
+# --- unanswerable questions, and being asked them twice -----------------------
+#
+# The reported failure: a candidate asks about a salary the assistant has no
+# reference material for, gets "I'll check and come back to you", asks again,
+# and gets the identical sentence. Correct on the facts, unmistakably a machine.
+
+def _user(text: str) -> Message:
+    return Message(session_id=uuid.uuid4(), tenant_id=uuid.uuid4(),
+                   role=MessageRole.USER, content=text)
+
+
+def _assistant(text: str) -> Message:
+    return Message(session_id=uuid.uuid4(), tenant_id=uuid.uuid4(),
+                   role=MessageRole.ASSISTANT, content=text)
+
+
+def test_both_wordings_carry_the_unknown_answer_playbook() -> None:
+    # "I don't have that" is the moment the voice matters most, and it happens
+    # with a populated context block too — retrieval can find the role and miss
+    # the pay.
+    for context in ("Role: Site Engineer, Dubai.", NO_CONTEXT_MARKER):
+        prompt = build_grounded_prompt(context, "what's the salary?")
+        assert "WHEN YOU DO NOT HAVE THE ANSWER" in prompt
+        assert "completely fair thing to want to know" in prompt
+
+
+def test_the_playbook_forbids_the_bare_deflection() -> None:
+    prompt = build_grounded_prompt(NO_CONTEXT_MARKER, "what's the salary?")
+    assert "Never send a bare" in prompt
+    # ...and still forbids inventing the number to avoid the awkwardness.
+    assert "inventing the fact" in prompt
+
+
+def test_a_first_ask_gets_no_escalation_wording() -> None:
+    # The escalation is for a loop. Applying it to a fresh question would have
+    # the assistant escalating something nobody had asked twice.
+    assert "THEY HAVE ASKED THIS" not in build_grounded_prompt(
+        NO_CONTEXT_MARKER, "what's the salary?"
+    )
+
+
+def test_a_repeat_ask_tells_the_model_not_to_reuse_its_wording() -> None:
+    prompt = build_grounded_prompt(NO_CONTEXT_MARKER, "what's the salary?", repeat_count=2)
+    assert "THEY HAVE ASKED THIS 3 TIMES NOW" in prompt
+    assert "stuck in a loop" in prompt
+    assert "hold the same line warmly" in prompt
+
+
+def test_repeat_asks_are_counted_across_rewordings() -> None:
+    history = [
+        _user("hi"),
+        _assistant("Hi! Which role are you applying for?"),
+        _user("what is the salary for this role"),
+        _assistant("I'll check and come back to you."),
+        _user("salary for the role please"),
+    ]
+    assert count_repeat_asks(history, "what is the salary for this role?") == 2
+
+
+def test_a_new_subject_is_not_counted_as_a_repeat() -> None:
+    history = [_user("what is the salary for this role"), _assistant("...")]
+    assert count_repeat_asks(history, "where is the office located") == 0
+
+
+def test_only_the_candidates_own_messages_count() -> None:
+    # The assistant echoing the subject back must not inflate the count — that
+    # would escalate on the candidate's very first ask.
+    history = [_assistant("Happy to talk about the salary for this role.")]
+    assert count_repeat_asks(history, "what is the salary for this role") == 0
+
+
+def test_a_bare_acknowledgement_is_never_a_repeat() -> None:
+    # "ok" against "ok" is a perfect string match and says nothing at all.
+    history = [_user("ok"), _user("ok thanks")]
+    assert count_repeat_asks(history, "ok") == 0

@@ -19,6 +19,7 @@ from src.domain.chatbot.entities import opener_instruction, static_welcome
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
     build_grounded_prompt,
+    count_repeat_asks,
     format_message_history,
     scan_input,
     scan_output,
@@ -145,9 +146,11 @@ async def ask_stream(
         # turns only — without this, every turn was generated with no memory
         # of the conversation so far, which is why the assistant could re-ask
         # something the visitor already answered.
-        history_text = format_message_history(
-            await uow.chats.list_messages(principal.tenant_id, SessionId(session_id))
-        )
+        prior = await uow.chats.list_messages(principal.tenant_id, SessionId(session_id))
+        history_text = format_message_history(prior)
+        # How many times they have already asked this. Non-zero makes the
+        # prompt escalate instead of repeating an answer that did not land.
+        repeat_count = count_repeat_asks(prior, body.message)
         await uow.chats.add_message(
             Message(
                 session_id=SessionId(session_id),
@@ -230,7 +233,9 @@ async def ask_stream(
         # Untrusted text is isolated in labelled blocks (build_grounded_prompt).
         prompt = (
             "" if not input_verdict.allowed
-            else build_grounded_prompt(context, body.message, history=history_text)
+            else build_grounded_prompt(
+                context, body.message, history=history_text, repeat_count=repeat_count
+            )
         )
         full: list[str] = []
         served_by: dict[str, str] = {}

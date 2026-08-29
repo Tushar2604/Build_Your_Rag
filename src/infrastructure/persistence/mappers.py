@@ -14,6 +14,7 @@ from src.application.ports.repositories import (
     TenantInvite,
     WhatsAppChannel,
     WhatsAppConversation,
+    WhatsAppConversationNote,
 )
 from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Citation, Message, MessageRole
@@ -29,9 +30,6 @@ from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview, QuestionScore, TranscriptTurn
 from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
-from src.domain.support.entities import IssueReport
-from src.domain.voice.entities import VoiceProfile
-from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.domain.shared.identifiers import (
     BatchCandidateId,
     ChatbotId,
@@ -44,7 +42,10 @@ from src.domain.shared.identifiers import (
     UserId,
     new_id,
 )
+from src.domain.support.entities import IssueReport
 from src.domain.tenant.entities import ApiKey, Role, Tenant, User
+from src.domain.voice.entities import VoiceProfile
+from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.infrastructure.persistence import models as m
 
 
@@ -377,7 +378,9 @@ def whatsapp_channel_to_domain(row: m.WhatsAppChannelModel) -> WhatsAppChannel:
     )
 
 
-def whatsapp_conversation_to_domain(row: m.WhatsAppConversationModel) -> WhatsAppConversation:
+def whatsapp_conversation_to_domain(
+    row: m.WhatsAppConversationModel, assignee_email: str = ""
+) -> WhatsAppConversation:
     return WhatsAppConversation(
         auto_reply=row.auto_reply,
         id=row.id,
@@ -392,8 +395,37 @@ def whatsapp_conversation_to_domain(row: m.WhatsAppConversationModel) -> WhatsAp
         has_attachment=row.has_attachment,
         awaiting_reply_since=row.awaiting_reply_since,
         followups_sent=row.followups_sent,
+        assignee_id=row.assignee_id,
+        # Filled by the repository when it joined the assignee in; the mapper
+        # only ever sees the row, and a thread whose owner was deleted keeps a
+        # blank email rather than a dangling one.
+        assignee_email=assignee_email,
+        tags=list(row.tags or []),
+        pinned=row.pinned,
+        status=row.status or "open",
+        company=row.company or "",
+        job_title=row.job_title or "",
+        email=row.email or "",
+        city=row.city or "",
+        country=row.country or "",
+        linkedin_url=row.linkedin_url or "",
+        source=row.source or "",
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def whatsapp_conversation_note_to_domain(
+    row: m.WhatsAppConversationNoteModel,
+) -> WhatsAppConversationNote:
+    return WhatsAppConversationNote(
+        id=row.id,
+        tenant_id=TenantId(row.tenant_id),
+        conversation_id=row.conversation_id,
+        author_id=row.author_id,
+        author_email=row.author_email or "",
+        body=row.body,
+        created_at=row.created_at,
     )
 
 

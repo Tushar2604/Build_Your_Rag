@@ -9,9 +9,10 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Bot, BookOpen, LineChart, Settings, LogOut, Users2, PhoneCall, Radio,
-  Megaphone, Plug, Mic, LifeBuoy, Search, Bell, Moon, Sun, ChevronLeft,
+  Megaphone, Plug, Mic, LifeBuoy, Search, Bell, Moon, Sun,
   ListChecks, LayoutDashboard, PhoneOutgoing, MessageCircle, UserSearch,
   CalendarDays, CalendarCheck, Briefcase, MapPin, Clock,
+  PanelLeftDashed, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { useTheme } from "../store/theme";
@@ -195,16 +196,80 @@ function CommandSearch() {
   );
 }
 
+/**
+ * What the rail does when the pointer isn't on it.
+ *
+ *   auto   — collapses to icons while you work in the page, and comes back the
+ *            moment you move left. The default: the nav is a place you pass
+ *            through, and the 252px it costs is content width the whole time
+ *            you are not using it.
+ *   open   — always full width.
+ *   closed — always icons.
+ */
+type RailMode = "auto" | "open" | "closed";
+
+const RAIL_MODES: RailMode[] = ["auto", "open", "closed"];
+
+const RAIL_LABEL: Record<RailMode, string> = {
+  auto: "Auto-hide",
+  open: "Keep open",
+  closed: "Keep collapsed",
+};
+
+const RAIL_ICON: Record<RailMode, typeof Bot> = {
+  auto: PanelLeftDashed,
+  open: PanelLeftOpen,
+  closed: PanelLeftClose,
+};
+
+/** Long enough that clipping the rail's corner on the way to a page control
+ * doesn't yank it open, short enough that deliberately going for the nav feels
+ * instant. */
+const RAIL_HOVER_DELAY_MS = 90;
+
+function readRailMode(): RailMode {
+  const stored = localStorage.getItem("sidebarMode");
+  if (stored === "auto" || stored === "open" || stored === "closed") return stored;
+  // Migrates the previous boolean preference, so someone who had pinned the
+  // rail shut does not get it swinging open on their next visit.
+  return localStorage.getItem("sidebarCollapsed") === "1" ? "closed" : "auto";
+}
+
 export default function Layout() {
   const { logout, tenantId, isAdmin, email } = useAuth();
   const navigate = useNavigate();
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem("sidebarCollapsed") === "1",
-  );
+  const [mode, setMode] = useState<RailMode>(readRailMode);
+  // Only meaningful in "auto". Held separately from `mode` so leaving the rail
+  // never rewrites the stored preference.
+  const [railHovered, setRailHovered] = useState(false);
+  const hoverTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    localStorage.setItem("sidebarCollapsed", collapsed ? "1" : "0");
-  }, [collapsed]);
+    localStorage.setItem("sidebarMode", mode);
+  }, [mode]);
+
+  // Clears a pending expand/collapse if the component goes away mid-gesture.
+  useEffect(() => () => {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+  }, []);
+
+  function scheduleHover(next: boolean) {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => setRailHovered(next), RAIL_HOVER_DELAY_MS);
+  }
+
+  /** Keyboard users get the labels too: tabbing into the rail expands it
+   * immediately, with no hover to wait on. */
+  function onRailFocus() {
+    if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    setRailHovered(true);
+  }
+
+  const collapsed = mode === "closed" || (mode === "auto" && !railHovered);
+
+  function cycleMode() {
+    setMode((m) => RAIL_MODES[(RAIL_MODES.indexOf(m) + 1) % RAIL_MODES.length]);
+  }
 
   function handleLogout() {
     logout();
@@ -231,7 +296,21 @@ export default function Layout() {
       {/* ── Sidebar ── */}
       <nav
         aria-label="Primary navigation"
-        className={`relative flex-shrink-0 glass-chrome flex flex-col select-none border-r
+        // Hovering the rail opens it; hovering anything else lets it close
+        // again. Wired here rather than on the main column so the pointer
+        // crossing the gap between them is one event, not two racing ones.
+        onMouseEnter={() => scheduleHover(true)}
+        onMouseLeave={() => scheduleHover(false)}
+        onFocusCapture={onRailFocus}
+        onBlurCapture={(e) => {
+          // Only when focus actually left the rail — moving between two nav
+          // links fires blur as well, and collapsing there would hide the
+          // labels mid-tab.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setRailHovered(false);
+          }
+        }}
+        className={`relative z-20 flex-shrink-0 glass-chrome flex flex-col select-none border-r
                     transition-[width] duration-300 ${collapsed ? "w-[68px]" : "w-[252px]"}`}
       >
         {/* Violet bloom behind the logo, and a coral one at the foot — the rail
@@ -320,16 +399,17 @@ export default function Layout() {
         {/* Footer */}
         <div className="relative px-3 py-3 space-y-0.5 border-t chrome-rule">
           <button
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={cycleMode}
             aria-expanded={!collapsed}
+            title={`Sidebar: ${RAIL_LABEL[mode]} — click to change`}
             className="chrome-item flex w-full items-center gap-3 rounded-full px-3 py-2
                        text-[13px] font-semibold"
           >
-            <ChevronLeft
-              className={`w-[18px] h-[18px] flex-shrink-0 transition-transform ${collapsed ? "rotate-180" : ""}`}
-              strokeWidth={1.75}
-            />
-            {!collapsed && "Collapse"}
+            {(() => {
+              const ModeIcon = RAIL_ICON[mode];
+              return <ModeIcon className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={1.75} />;
+            })()}
+            {!collapsed && RAIL_LABEL[mode]}
           </button>
 
           {isAdmin && (
@@ -359,7 +439,12 @@ export default function Layout() {
       </nav>
 
       {/* ── Main column ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* The other half of the auto-hide gesture: putting the pointer anywhere
+          in the page lets the rail fall back to icons. */}
+      <div
+        className="flex-1 flex flex-col min-w-0"
+        onMouseEnter={() => scheduleHover(false)}
+      >
         {/* Top bar */}
         <header className="relative flex-shrink-0 h-[64px] glass-chrome border-b
                            flex items-center gap-4 px-6">

@@ -27,10 +27,10 @@ from src.infrastructure.persistence.repositories import (
     ChunkRepositoryImpl,
     DocumentRepositoryImpl,
     GoogleConnectionRepositoryImpl,
-    OAuthConnectionRepositoryImpl,
     InterviewBatchRepositoryImpl,
     InterviewRepositoryImpl,
     IssueReportRepositoryImpl,
+    OAuthConnectionRepositoryImpl,
     PostCallConfigRepositoryImpl,
     PostCallDeliveryRepositoryImpl,
     RequestLogRepositoryImpl,
@@ -41,6 +41,7 @@ from src.infrastructure.persistence.repositories import (
     UserRepositoryImpl,
     VoiceProfileRepositoryImpl,
     WhatsAppChannelRepositoryImpl,
+    WhatsAppConversationNoteRepositoryImpl,
     WhatsAppConversationRepositoryImpl,
     WhatsAppWebSessionRepositoryImpl,
 )
@@ -101,6 +102,7 @@ class SqlAlchemyUnitOfWork:
         self.oauth_connections = OAuthConnectionRepositoryImpl(s)
         self.whatsapp_channels = WhatsAppChannelRepositoryImpl(s)
         self.whatsapp_conversations = WhatsAppConversationRepositoryImpl(s)
+        self.whatsapp_conversation_notes = WhatsAppConversationNoteRepositoryImpl(s)
         self.post_call_configs = PostCallConfigRepositoryImpl(s)
         self.post_call_deliveries = PostCallDeliveryRepositoryImpl(s)
         self.broadcasts = BroadcastRepositoryImpl(s)

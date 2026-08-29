@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
 import structlog
 from fastapi import (
@@ -32,7 +33,10 @@ from fastapi import (
 from fastapi.responses import Response
 
 from src.application.dtos import AskInput
-from src.application.ports.repositories import WhatsAppConversation
+from src.application.ports.repositories import (
+    WhatsAppConversation,
+    WhatsAppConversationNote,
+)
 from src.application.use_cases.ask_chatbot import AskChatbot
 from src.application.use_cases.front_office import AskFrontOffice
 from src.config.container import get_container
@@ -54,7 +58,11 @@ from src.interfaces.api.schemas import (
     InboxConversationResponse,
     InboxConversationUpdate,
     InboxMessageResponse,
+    InboxNoteRequest,
+    InboxNoteResponse,
     InboxSendRequest,
+    InboxStatsResponse,
+    MergeDuplicateNumbersResponse,
     WhatsAppWebOptionsResponse,
     WhatsAppWebSessionResponse,
 )
@@ -78,6 +86,94 @@ _MAX_THREADS_TO_REPOINT = 500
 # Matches the bridge's own inbound cap (BRIDGE_MAX_MEDIA_MB, default 16) so an
 # operator never uploads a file the outbound send is going to reject anyway.
 _MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+
+# The window the inbox header reports over. A rolling 30 days rather than the
+# calendar month: on the 1st, a calendar month reads as "nothing is happening".
+_STATS_WINDOW_DAYS = 30
+
+# Broadcast states that count as a campaign currently running. "completed"
+# is the only one that is finished; a queued or paused campaign is still
+# something the workspace is in the middle of.
+_LIVE_BROADCAST_STATUSES = frozenset({"queued", "sending", "paused"})
+
+
+def _digits(phone_number: str) -> str:
+    """A phone number reduced to what actually identifies it.
+
+    WhatsApp reports whatever shape the handset registered, so the same phone
+    arrives as "+971501234567" one time and "971 50 123 4567" the next. Two
+    sessions are the same number when these match, never when the strings do.
+    """
+    return "".join(c for c in phone_number if c.isdigit())
+
+
+async def _absorb_session(
+    container, keeper: WhatsAppWebSession, stale: WhatsAppWebSession
+) -> int:
+    """Move `stale`'s history onto `keeper`, then retire `stale`.
+
+    The direction is forced by where the live socket is. Re-scanning the QR
+    mints a NEW session id, and the bridge's credentials and its open
+    connection are both keyed to that id — so the new row has to be the
+    survivor, and the older row's conversations come to it. Doing it the other
+    way round would leave a tidy-looking inbox that no longer receives
+    anything.
+
+    The old device is logged out at WhatsApp first: leaving it linked means the
+    handset keeps listing a device nothing is reading, and the account carries
+    two sessions where the user asked for one.
+    """
+    moved = 0
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(keeper.tenant_id)
+        moved = await uow.whatsapp_conversations.reassign_owner(
+            keeper.tenant_id, stale.id, keeper.id
+        )
+        # An assistant chosen on the old row is a decision the user already
+        # made about this number, so it carries over rather than being asked
+        # for again. The keeper's own choice wins if it has one.
+        if keeper.chatbot_id is None and stale.chatbot_id is not None:
+            keeper.attach_chatbot(stale.chatbot_id)
+            await uow.whatsapp_web_sessions.update(keeper)
+        await uow.commit()
+
+    # Best-effort: an unreachable bridge must not leave the duplicate row
+    # behind, or the number stays visibly doubled until someone retries.
+    try:
+        await container.whatsapp_bridge.logout_session(str(stale.id))
+    except Exception:  # noqa: BLE001 - the row still has to go
+        log.warning("whatsapp.merge.logout_failed", session_id=str(stale.id))
+
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(keeper.tenant_id)
+        await uow.whatsapp_web_sessions.delete(keeper.tenant_id, stale.id)
+        await uow.commit()
+
+    log.info(
+        "whatsapp.session.merged",
+        kept=str(keeper.id),
+        dropped=str(stale.id),
+        phone=keeper.phone_number,
+        conversations_moved=moved,
+    )
+    return moved
+
+
+async def _absorb_duplicates(container, ws: WhatsAppWebSession) -> None:
+    """Called the moment a scan links a number. If this workspace already had
+    that handset connected, the older session's threads move here and it is
+    retired — so scanning twice gives you one number with its history intact,
+    not two entries that each know half the story."""
+    if not ws.phone_number:
+        return
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(ws.tenant_id)
+        same_number = await uow.whatsapp_web_sessions.list_linked_to_number(
+            ws.tenant_id, ws.phone_number
+        )
+    for other in same_number:
+        if other.id != ws.id:
+            await _absorb_session(container, ws, other)
 
 # Caps how many auto-replies are generated at once in this process. Lazily
 # built so the semaphore binds to the event loop actually serving requests
@@ -326,7 +422,95 @@ async def unlink(
         await uow.commit()
 
 
+@router.get("/stats", response_model=InboxStatsResponse)
+async def inbox_stats(
+    principal: AdminPrincipalDep, container: ContainerDep
+) -> InboxStatsResponse:
+    """The counters across the top of the inbox, for every linked number.
+
+    Workspace-wide rather than per-number: "how is WhatsApp going" is not a
+    question about whichever thread list happens to be open, and switching
+    numbers should not make the header jump.
+    """
+    since = datetime.now(UTC) - timedelta(days=_STATS_WINDOW_DAYS)
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        sessions = await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
+        linked = [ws for ws in sessions if ws.status == "linked"]
+        stats = await uow.whatsapp_conversations.stats_for_owners(
+            principal.tenant_id, [ws.id for ws in sessions], since=since
+        )
+        broadcasts = await uow.broadcasts.list_for_tenant(principal.tenant_id)
+
+    def pct(part: int, whole: int) -> float:
+        return round(part * 100 / whole, 1) if whole else 0.0
+
+    return InboxStatsResponse(
+        connected_numbers=len(linked),
+        conversations=stats.conversations,
+        active_conversations=stats.active_conversations,
+        unread=stats.unread,
+        messages_sent=stats.messages_sent,
+        messages_received=stats.messages_received,
+        # Delivery is "reached WhatsApp at all": a send that failed never became
+        # a stored outgoing message, so anything we counted did go out. Shown
+        # as 100 only when something was actually sent — a blank month is 0,
+        # not a perfect score.
+        delivery_rate=100.0 if stats.messages_sent else 0.0,
+        # The nearest honest read signal a linked personal number gives us. Per
+        # message read receipts are not reported to the bridge, so this is
+        # threads the contact engaged with rather than blue ticks.
+        read_rate=pct(stats.threads_replied, stats.threads_contacted),
+        reply_rate=pct(stats.threads_replied, stats.threads_contacted),
+        active_campaigns=sum(1 for b in broadcasts if b.status in _LIVE_BROADCAST_STATUSES),
+        period_label=f"last {_STATS_WINDOW_DAYS} days",
+    )
+
+
+@router.post("/sessions/merge-duplicates", response_model=MergeDuplicateNumbersResponse)
+async def merge_duplicate_numbers(
+    principal: AdminPrincipalDep, container: ContainerDep
+) -> MergeDuplicateNumbersResponse:
+    """Fold numbers that got connected twice back into one.
+
+    Heals workspaces that already have duplicates — new ones are absorbed at
+    link time (see `_absorb_duplicates`). Idempotent: with nothing to merge it
+    reports zeroes, which is why the Channels page can call it on load.
+    """
+    merged = 0
+    moved = 0
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        sessions = await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
+
+    # Newest first, because `list_for_tenant` orders by created_at desc and the
+    # newest session is the one holding the live socket — it is the survivor.
+    by_number: dict[str, list[WhatsAppWebSession]] = {}
+    for ws in sessions:
+        digits = _digits(ws.phone_number)
+        if digits:
+            by_number.setdefault(digits, []).append(ws)
+
+    for group in by_number.values():
+        if len(group) < 2:
+            continue
+        keeper, *stale = group
+        for old in stale:
+            moved += await _absorb_session(container, keeper, old)
+            merged += 1
+    return MergeDuplicateNumbersResponse(merged_sessions=merged, moved_conversations=moved)
+
+
 # --- Inbox (browser-facing) ---
+
+
+def _thread_status(value: str) -> Literal["open", "closed"]:
+    """Narrow the stored string back to the two states the API promises.
+
+    The column is a varchar so the set can grow (see migration 0026), which
+    means anything the database hands back has to be re-checked here rather
+    than trusted into the response model."""
+    return "closed" if value == "closed" else "open"
 
 
 def _conversation_response(c: WhatsAppConversation) -> InboxConversationResponse:
@@ -339,6 +523,18 @@ def _conversation_response(c: WhatsAppConversation) -> InboxConversationResponse
         unread_count=c.unread_count,
         has_attachment=c.has_attachment,
         auto_reply=c.auto_reply,
+        assignee_id=c.assignee_id,
+        assignee_email=c.assignee_email,
+        tags=list(c.tags),
+        pinned=c.pinned,
+        status=_thread_status(c.status),
+        company=c.company,
+        job_title=c.job_title,
+        email=c.email,
+        city=c.city,
+        country=c.country,
+        linkedin_url=c.linkedin_url,
+        source=c.source,
     )
 
 
@@ -360,6 +556,61 @@ def _author_of(msg: Message) -> str:
     return "assistant"
 
 
+# Text fields on the contact card that the details panel writes straight
+# through. Listed once so the schema, the patch loop and the response can't
+# drift apart.
+_EDITABLE_TEXT_FIELDS = (
+    "company",
+    "job_title",
+    "email",
+    "city",
+    "country",
+    "linkedin_url",
+    "source",
+    "display_name",
+)
+
+
+def _clean_tags(raw_tags: list[str]) -> list[str]:
+    """Trim, cap and de-duplicate case-insensitively, keeping the order typed.
+
+    Tags are free text off a chip input, so "Hot Lead " arriving as a second
+    tag beside "Hot Lead" is the realistic failure — two chips that look
+    identical and filter differently.
+    """
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for raw in raw_tags:
+        tag = raw.strip()[:40]
+        key = tag.casefold()
+        if tag and key not in seen:
+            seen.add(key)
+            cleaned.append(tag)
+    return cleaned
+
+
+def _note_response(note: WhatsAppConversationNote) -> InboxNoteResponse:
+    return InboxNoteResponse(
+        id=note.id,
+        body=note.body,
+        author_email=note.author_email,
+        created_at=note.created_at,
+    )
+
+
+async def _teammate(uow, tenant_id: TenantId, user_id):  # type: ignore[no-untyped-def]
+    """One member of this workspace, or None.
+
+    Scanning the team rather than reading `users` by id on purpose: the id
+    arrives from the browser, and a plain lookup would happily resolve another
+    tenant's user before the foreign key ever got a say.
+    """
+    return next(
+        (u for u in await uow.users.list_for_tenant(tenant_id) if u.id == user_id),
+        None,
+    )
+
+
 async def _owned_conversation(
     uow, tenant_id: TenantId, conversation_id: uuid.UUID
 ) -> WhatsAppConversation:
@@ -378,6 +629,11 @@ async def list_conversations(
     has_attachment: bool | None = None,
     unread_only: bool = False,
     auto_reply: bool | None = None,
+    assigned_to_me: bool = False,
+    unassigned: bool = False,
+    status: str = Query("", max_length=16),
+    pinned: bool | None = None,
+    tag: str = Query("", max_length=40),
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=1, le=100),
 ) -> InboxConversationPageResponse:
@@ -391,11 +647,22 @@ async def list_conversations(
         if ws is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        filters = {
+        # Annotated because it is splatted into two repository calls whose
+        # parameters have four different types; without it the inferred union
+        # is checked against each one and none of them match.
+        filters: dict[str, Any] = {
             "search": search.strip(),
             "has_attachment": has_attachment,
             "unread_only": unread_only,
             "auto_reply": auto_reply,
+            # Resolved from the token rather than taken as a parameter: "mine"
+            # has to mean the caller, and a client-supplied id would let one
+            # admin browse another's queue as though it were their own.
+            "assignee_id": principal.user_id if assigned_to_me else None,
+            "unassigned": unassigned,
+            "status": status.strip(),
+            "pinned": pinned,
+            "tag": tag.strip(),
         }
         total = await uow.whatsapp_conversations.count_for_owner(
             principal.tenant_id, session_id, **filters
@@ -607,7 +874,13 @@ async def update_conversation(
     principal: AdminPrincipalDep,
     container: ContainerDep,
 ) -> InboxConversationResponse:
-    """Take a conversation over from the assistant, or mark it read."""
+    """Everything an operator changes about a thread without messaging anyone:
+    takeover, read state, owner, tags, pin, open/closed, and the contact card.
+
+    One endpoint rather than six, because they are all a partial write to the
+    same row and each caller sends only the fields it touched — see
+    `InboxConversationUpdate`.
+    """
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
         conversation = await _owned_conversation(uow, principal.tenant_id, conversation_id)
@@ -615,9 +888,103 @@ async def update_conversation(
             conversation.set_auto_reply(body.auto_reply)
         if body.mark_read:
             conversation.mark_read()
+
+        if body.unassign:
+            conversation.assignee_id = None
+            conversation.assignee_email = ""
+        elif body.assignee_id is not None:
+            # Checked against this workspace's own people: an id from anywhere
+            # else would attach a thread to a stranger, and the foreign key
+            # alone would happily accept another tenant's user.
+            member = await _teammate(uow, principal.tenant_id, body.assignee_id)
+            if member is None:
+                raise HTTPException(
+                    status_code=404, detail="That teammate is not in this workspace."
+                )
+            conversation.assignee_id = member.id
+            conversation.assignee_email = member.email
+
+        if body.tags is not None:
+            conversation.tags = _clean_tags(body.tags)
+        if body.pinned is not None:
+            conversation.pinned = body.pinned
+        if body.status is not None:
+            conversation.status = body.status
+        for field_name in _EDITABLE_TEXT_FIELDS:
+            value = getattr(body, field_name)
+            if value is not None:
+                setattr(conversation, field_name, value.strip())
+        conversation.updated_at = datetime.now(UTC)
+
         await uow.whatsapp_conversations.update(conversation)
         await uow.commit()
     return _conversation_response(conversation)
+
+
+# --- Internal notes ---------------------------------------------------------
+#
+# What the team says to each other about a contact. Deliberately its own
+# endpoint pair rather than a flag on a message: a note must never be able to
+# reach WhatsApp, and the surest guarantee of that is that it never touches the
+# send path at all.
+
+
+@router.get("/conversations/{conversation_id}/notes", response_model=list[InboxNoteResponse])
+async def list_notes(
+    conversation_id: uuid.UUID, principal: AdminPrincipalDep, container: ContainerDep
+) -> list[InboxNoteResponse]:
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        await _owned_conversation(uow, principal.tenant_id, conversation_id)
+        notes = await uow.whatsapp_conversation_notes.list_for_conversation(
+            principal.tenant_id, conversation_id
+        )
+    return [_note_response(n) for n in notes]
+
+
+@router.post(
+    "/conversations/{conversation_id}/notes",
+    response_model=InboxNoteResponse,
+    status_code=201,
+)
+async def add_note(
+    conversation_id: uuid.UUID,
+    body: InboxNoteRequest,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+) -> InboxNoteResponse:
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        await _owned_conversation(uow, principal.tenant_id, conversation_id)
+        author = (
+            await _teammate(uow, principal.tenant_id, principal.user_id)
+            if principal.user_id is not None
+            else None
+        )
+        note = WhatsAppConversationNote(
+            tenant_id=principal.tenant_id,
+            conversation_id=conversation_id,
+            author_id=principal.user_id,
+            author_email=author.email if author else "",
+            body=body.body.strip(),
+        )
+        await uow.whatsapp_conversation_notes.add(note)
+        await uow.commit()
+    return _note_response(note)
+
+
+@router.delete("/conversations/{conversation_id}/notes/{note_id}", status_code=204)
+async def delete_note(
+    conversation_id: uuid.UUID,
+    note_id: uuid.UUID,
+    principal: AdminPrincipalDep,
+    container: ContainerDep,
+) -> None:
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        await _owned_conversation(uow, principal.tenant_id, conversation_id)
+        await uow.whatsapp_conversation_notes.delete(principal.tenant_id, note_id)
+        await uow.commit()
 
 
 @router.get("/conversations/{conversation_id}/media/{message_id}")
@@ -1171,6 +1538,13 @@ async def bridge_events(
         ws.offer_qr(body.qr_data_url)
     elif body.event == "linked":
         ws.mark_linked(body.phone_number, body.display_name)
+        # Written before the merge runs: `_absorb_duplicates` reads this row's
+        # phone number back out of the database to find its twins.
+        async with container.unit_of_work() as uow:
+            uow.set_tenant_scope(ws.tenant_id)
+            await uow.whatsapp_web_sessions.update(ws)
+            await uow.commit()
+        await _absorb_duplicates(container, ws)
     elif body.event == "disconnected":
         ws.mark_disconnected(body.error)
     elif body.event == "logged_out":

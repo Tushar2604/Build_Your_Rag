@@ -11,18 +11,21 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.application.ports.repositories import (
     ChatbotDailyStat,
     GoogleOAuthConnection,
+    InboxStats,
     OAuthConnection,
     ProviderStat,
     RequestLog,
     TenantInvite,
     WhatsAppChannel,
     WhatsAppConversation,
+    WhatsAppConversationNote,
 )
 from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Message
@@ -32,9 +35,6 @@ from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
 from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
-from src.domain.support.entities import IssueReport
-from src.domain.voice.entities import VoiceProfile
-from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.domain.shared.identifiers import (
     BatchCandidateId,
     ChatbotId,
@@ -46,7 +46,10 @@ from src.domain.shared.identifiers import (
     TenantId,
     UserId,
 )
+from src.domain.support.entities import IssueReport
 from src.domain.tenant.entities import ApiKey, Tenant, User
+from src.domain.voice.entities import VoiceProfile
+from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.infrastructure.persistence import mappers as map_
 from src.infrastructure.persistence import models as m
 
@@ -1323,6 +1326,17 @@ class WhatsAppConversationRepositoryImpl:
                 has_attachment=conversation.has_attachment,
                 awaiting_reply_since=conversation.awaiting_reply_since,
                 followups_sent=conversation.followups_sent,
+                assignee_id=conversation.assignee_id,
+                tags=list(conversation.tags),
+                pinned=conversation.pinned,
+                status=conversation.status,
+                company=conversation.company,
+                job_title=conversation.job_title,
+                email=conversation.email,
+                city=conversation.city,
+                country=conversation.country,
+                linkedin_url=conversation.linkedin_url,
+                source=conversation.source,
                 created_at=conversation.created_at,
                 updated_at=conversation.updated_at,
             )
@@ -1341,22 +1355,49 @@ class WhatsAppConversationRepositoryImpl:
                 has_attachment=conversation.has_attachment,
                 awaiting_reply_since=conversation.awaiting_reply_since,
                 followups_sent=conversation.followups_sent,
+                assignee_id=conversation.assignee_id,
+                tags=list(conversation.tags),
+                pinned=conversation.pinned,
+                status=conversation.status,
+                company=conversation.company,
+                job_title=conversation.job_title,
+                email=conversation.email,
+                city=conversation.city,
+                country=conversation.country,
+                linkedin_url=conversation.linkedin_url,
+                source=conversation.source,
                 updated_at=conversation.updated_at,
             )
         )
+
+    # The thread list shows who owns each conversation, and an id is not a
+    # name. Outer-joined rather than looked up per row: this is the query that
+    # renders 50 threads at once, and 50 follow-up SELECTs is how a list gets
+    # slow for no visible reason.
+    _ASSIGNEE_JOIN = (m.UserModel, m.WhatsAppConversationModel.assignee_id == m.UserModel.id)
+
+    def _rows_to_domain(self, result) -> list[WhatsAppConversation]:  # type: ignore[no-untyped-def]
+        return [
+            map_.whatsapp_conversation_to_domain(row, email or "")
+            for row, email in result.all()
+        ]
 
     async def get_by_id(
         self, tenant_id: TenantId, conversation_id: uuid.UUID
     ) -> WhatsAppConversation | None:
         row = (
             await self._s.execute(
-                select(m.WhatsAppConversationModel).where(
+                select(m.WhatsAppConversationModel, m.UserModel.email)
+                .outerjoin(*self._ASSIGNEE_JOIN)
+                .where(
                     m.WhatsAppConversationModel.id == conversation_id,
                     m.WhatsAppConversationModel.tenant_id == tenant_id,
                 )
             )
-        ).scalar_one_or_none()
-        return map_.whatsapp_conversation_to_domain(row) if row else None
+        ).one_or_none()
+        if row is None:
+            return None
+        return map_.whatsapp_conversation_to_domain(row[0], row[1] or "")
 
     def _owner_filters(
         self,
@@ -1366,6 +1407,12 @@ class WhatsAppConversationRepositoryImpl:
         has_attachment: bool | None,
         unread_only: bool,
         auto_reply: bool | None,
+        *,
+        assignee_id: uuid.UUID | None = None,
+        unassigned: bool = False,
+        status: str = "",
+        pinned: bool | None = None,
+        tag: str = "",
     ) -> list:
         """Shared WHERE clauses so the page query and its count can never drift
         apart — a mismatch there shows the wrong page total, which reads as data
@@ -1391,6 +1438,18 @@ class WhatsAppConversationRepositoryImpl:
             conditions.append(m.WhatsAppConversationModel.unread_count > 0)
         if auto_reply is not None:
             conditions.append(m.WhatsAppConversationModel.auto_reply.is_(auto_reply))
+        if assignee_id is not None:
+            conditions.append(m.WhatsAppConversationModel.assignee_id == assignee_id)
+        if unassigned:
+            conditions.append(m.WhatsAppConversationModel.assignee_id.is_(None))
+        if status:
+            conditions.append(m.WhatsAppConversationModel.status == status)
+        if pinned is not None:
+            conditions.append(m.WhatsAppConversationModel.pinned.is_(pinned))
+        if tag:
+            # Containment against a JSONB array, so a tag is matched exactly
+            # rather than as a substring of another tag ("Hot" vs "Hot Lead").
+            conditions.append(m.WhatsAppConversationModel.tags.contains([tag]))
         return conditions
 
     async def list_for_owner(
@@ -1402,32 +1461,44 @@ class WhatsAppConversationRepositoryImpl:
         has_attachment: bool | None = None,
         unread_only: bool = False,
         auto_reply: bool | None = None,
+        assignee_id: uuid.UUID | None = None,
+        unassigned: bool = False,
+        status: str = "",
+        pinned: bool | None = None,
+        tag: str = "",
         limit: int = 30,
         offset: int = 0,
     ) -> list[WhatsAppConversation]:
-        rows = (
-            (
-                await self._s.execute(
-                    select(m.WhatsAppConversationModel)
-                    .where(
-                        *self._owner_filters(
-                            tenant_id, owner_id, search, has_attachment, unread_only, auto_reply
-                        )
-                    )
-                    # Newest activity first, and threads that have never had a
-                    # message sink to the bottom rather than sorting randomly.
-                    .order_by(
-                        m.WhatsAppConversationModel.last_message_at.desc().nullslast(),
-                        m.WhatsAppConversationModel.created_at.desc(),
-                    )
-                    .limit(limit)
-                    .offset(offset)
+        result = await self._s.execute(
+            select(m.WhatsAppConversationModel, m.UserModel.email)
+            .outerjoin(*self._ASSIGNEE_JOIN)
+            .where(
+                *self._owner_filters(
+                    tenant_id,
+                    owner_id,
+                    search,
+                    has_attachment,
+                    unread_only,
+                    auto_reply,
+                    assignee_id=assignee_id,
+                    unassigned=unassigned,
+                    status=status,
+                    pinned=pinned,
+                    tag=tag,
                 )
             )
-            .scalars()
-            .all()
+            # Pinned threads first — that is the whole point of pinning one —
+            # then newest activity, with threads that have never had a message
+            # sinking to the bottom rather than sorting randomly.
+            .order_by(
+                m.WhatsAppConversationModel.pinned.desc(),
+                m.WhatsAppConversationModel.last_message_at.desc().nullslast(),
+                m.WhatsAppConversationModel.created_at.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
         )
-        return [map_.whatsapp_conversation_to_domain(r) for r in rows]
+        return self._rows_to_domain(result)
 
     async def count_for_owner(
         self,
@@ -1438,6 +1509,11 @@ class WhatsAppConversationRepositoryImpl:
         has_attachment: bool | None = None,
         unread_only: bool = False,
         auto_reply: bool | None = None,
+        assignee_id: uuid.UUID | None = None,
+        unassigned: bool = False,
+        status: str = "",
+        pinned: bool | None = None,
+        tag: str = "",
     ) -> int:
         return int(
             (
@@ -1446,7 +1522,17 @@ class WhatsAppConversationRepositoryImpl:
                     .select_from(m.WhatsAppConversationModel)
                     .where(
                         *self._owner_filters(
-                            tenant_id, owner_id, search, has_attachment, unread_only, auto_reply
+                            tenant_id,
+                            owner_id,
+                            search,
+                            has_attachment,
+                            unread_only,
+                            auto_reply,
+                            assignee_id=assignee_id,
+                            unassigned=unassigned,
+                            status=status,
+                            pinned=pinned,
+                            tag=tag,
                         )
                     )
                 )
@@ -1465,26 +1551,26 @@ class WhatsAppConversationRepositoryImpl:
         offset: int = 0,
     ) -> list[WhatsAppConversation]:
         rows = (
-            (
+            
                 await self._s.execute(
-                    select(m.WhatsAppConversationModel)
+                    select(m.WhatsAppConversationModel, m.UserModel.email)
+                    .outerjoin(*self._ASSIGNEE_JOIN)
                     .where(
                         *self._owner_filters(
                             tenant_id, None, search, has_attachment, unread_only, auto_reply
                         )
                     )
                     .order_by(
+                        m.WhatsAppConversationModel.pinned.desc(),
                         m.WhatsAppConversationModel.last_message_at.desc().nullslast(),
                         m.WhatsAppConversationModel.created_at.desc(),
                     )
                     .limit(limit)
                     .offset(offset)
                 )
-            )
-            .scalars()
-            .all()
+            
         )
-        return [map_.whatsapp_conversation_to_domain(r) for r in rows]
+        return self._rows_to_domain(rows)
 
     async def count_for_tenant(
         self,
@@ -1551,6 +1637,175 @@ class WhatsAppConversationRepositoryImpl:
             .all()
         )
         return [map_.whatsapp_conversation_to_domain(r) for r in rows]
+
+    async def reassign_owner(
+        self, tenant_id: TenantId, from_owner_id: uuid.UUID, to_owner_id: uuid.UUID
+    ) -> int:
+        """Fold one owner's threads into another's. See the port for why.
+
+        Threads whose phone number the target already has are deleted, not
+        moved: `uq_whatsapp_conv_channel_phone` would reject the UPDATE, and the
+        target's copy is the one the live socket is writing to. Their messages
+        live on `chat_sessions` and are unaffected — this only drops the empty
+        pointer row that the re-scan created.
+        """
+        if from_owner_id == to_owner_id:
+            return 0
+
+        taken = (
+            select(m.WhatsAppConversationModel.phone_number)
+            .where(
+                m.WhatsAppConversationModel.tenant_id == tenant_id,
+                m.WhatsAppConversationModel.whatsapp_channel_id == to_owner_id,
+            )
+            .scalar_subquery()
+        )
+        await self._s.execute(
+            delete(m.WhatsAppConversationModel).where(
+                m.WhatsAppConversationModel.tenant_id == tenant_id,
+                m.WhatsAppConversationModel.whatsapp_channel_id == from_owner_id,
+                m.WhatsAppConversationModel.phone_number.in_(taken),
+            )
+        )
+        moved = await self._s.execute(
+            update(m.WhatsAppConversationModel)
+            .where(
+                m.WhatsAppConversationModel.tenant_id == tenant_id,
+                m.WhatsAppConversationModel.whatsapp_channel_id == from_owner_id,
+            )
+            .values(whatsapp_channel_id=to_owner_id)
+        )
+        return int(moved.rowcount or 0)
+
+    async def stats_for_owners(
+        self, tenant_id: TenantId, owner_ids: list[uuid.UUID], *, since: datetime
+    ) -> InboxStats:
+        if not owner_ids:
+            return InboxStats()
+
+        conv = m.WhatsAppConversationModel
+        scope = [conv.tenant_id == tenant_id, conv.whatsapp_channel_id.in_(owner_ids)]
+
+        # One pass over the conversation rows for every thread-shaped counter.
+        # Separate queries would each re-scan the same rows for a header that
+        # refreshes on a poll.
+        row = (
+            await self._s.execute(
+                select(
+                    func.count(),
+                    func.count().filter(conv.status == "open"),
+                    func.coalesce(func.sum(conv.unread_count), 0),
+                ).where(*scope)
+            )
+        ).one()
+
+        # Message counters come from the chat sessions those threads point at.
+        # "This month" is the caller's `since`, so the window is stated in one
+        # place rather than assumed at both ends.
+        msg = m.ChatMessageModel
+        sessions = select(conv.session_id).where(*scope).scalar_subquery()
+        sent, received = (
+            await self._s.execute(
+                select(
+                    func.count().filter(msg.role == "assistant"),
+                    func.count().filter(msg.role == "user"),
+                ).where(
+                    msg.tenant_id == tenant_id,
+                    msg.session_id.in_(sessions),
+                    msg.created_at >= since,
+                )
+            )
+        ).one()
+
+        # Reply rate, honestly defined: of the threads we have written to at
+        # all, how many has the contact answered on. Counted over the same
+        # window so it moves with the other figures.
+        contacted, replied = (
+            await self._s.execute(
+                select(
+                    func.count(func.distinct(msg.session_id)).filter(msg.role == "assistant"),
+                    func.count(func.distinct(msg.session_id)).filter(msg.role == "user"),
+                ).where(
+                    msg.tenant_id == tenant_id,
+                    msg.session_id.in_(sessions),
+                    msg.created_at >= since,
+                )
+            )
+        ).one()
+
+        return InboxStats(
+            conversations=int(row[0] or 0),
+            active_conversations=int(row[1] or 0),
+            unread=int(row[2] or 0),
+            messages_sent=int(sent or 0),
+            messages_received=int(received or 0),
+            threads_contacted=int(contacted or 0),
+            threads_replied=int(replied or 0),
+        )
+
+
+class WhatsAppConversationNoteRepositoryImpl:
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def add(self, note: WhatsAppConversationNote) -> None:
+        self._s.add(
+            m.WhatsAppConversationNoteModel(
+                id=note.id,
+                tenant_id=note.tenant_id,
+                conversation_id=note.conversation_id,
+                author_id=note.author_id,
+                author_email=note.author_email,
+                body=note.body,
+                created_at=note.created_at,
+            )
+        )
+
+    async def list_for_conversation(
+        self, tenant_id: TenantId, conversation_id: uuid.UUID, *, limit: int = 100
+    ) -> list[WhatsAppConversationNote]:
+        rows = (
+            (
+                await self._s.execute(
+                    select(m.WhatsAppConversationNoteModel)
+                    .where(
+                        m.WhatsAppConversationNoteModel.tenant_id == tenant_id,
+                        m.WhatsAppConversationNoteModel.conversation_id == conversation_id,
+                    )
+                    # Newest first: a note panel is read from the top, and the
+                    # note someone just added is the one they are looking for.
+                    .order_by(m.WhatsAppConversationNoteModel.created_at.desc())
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [map_.whatsapp_conversation_note_to_domain(r) for r in rows]
+
+    async def count_for_conversation(
+        self, tenant_id: TenantId, conversation_id: uuid.UUID
+    ) -> int:
+        return int(
+            (
+                await self._s.execute(
+                    select(func.count())
+                    .select_from(m.WhatsAppConversationNoteModel)
+                    .where(
+                        m.WhatsAppConversationNoteModel.tenant_id == tenant_id,
+                        m.WhatsAppConversationNoteModel.conversation_id == conversation_id,
+                    )
+                )
+            ).scalar_one()
+        )
+
+    async def delete(self, tenant_id: TenantId, note_id: uuid.UUID) -> None:
+        await self._s.execute(
+            delete(m.WhatsAppConversationNoteModel).where(
+                m.WhatsAppConversationNoteModel.id == note_id,
+                m.WhatsAppConversationNoteModel.tenant_id == tenant_id,
+            )
+        )
 
 
 class PostCallConfigRepositoryImpl:
@@ -2145,6 +2400,11 @@ class VoiceProfileRepositoryImpl:
         )
 
 
+def _digits(phone_number: str) -> str:
+    """A phone number reduced to what actually identifies it."""
+    return "".join(c for c in phone_number if c.isdigit())
+
+
 class WhatsAppWebSessionRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -2194,6 +2454,26 @@ class WhatsAppWebSessionRepositoryImpl:
             )
         ).scalars()
         return [map_.whatsapp_web_session_to_domain(r) for r in rows]
+
+    async def list_linked_to_number(
+        self, tenant_id: TenantId, phone_number: str
+    ) -> list[WhatsAppWebSession]:
+        """Every session in this workspace that ended up on the same handset.
+
+        Scanning in Python rather than filtering in SQL: WhatsApp reports the
+        number in whatever shape the handset registered it, so "+971501234567",
+        "971501234567" and "971 50 123 4567" are all the same phone and none of
+        them are string-equal. A workspace is capped at five sessions, so the
+        scan is over a handful of rows.
+        """
+        wanted = _digits(phone_number)
+        if not wanted:
+            return []
+        return [
+            ws
+            for ws in await self.list_for_tenant(tenant_id)
+            if _digits(ws.phone_number) == wanted
+        ]
 
     async def update(self, ws: WhatsAppWebSession) -> None:
         row = await self._s.get(m.WhatsAppWebSessionModel, ws.id)

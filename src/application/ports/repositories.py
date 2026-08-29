@@ -33,9 +33,6 @@ from src.domain.scheduling.entities import (
     ServiceResource,
     StatusChange,
 )
-from src.domain.support.entities import IssueReport
-from src.domain.voice.entities import VoiceProfile
-from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.domain.shared.identifiers import (
     AppointmentId,
     AvailabilityRuleId,
@@ -54,7 +51,10 @@ from src.domain.shared.identifiers import (
     UserId,
     new_id,
 )
+from src.domain.support.entities import IssueReport
 from src.domain.tenant.entities import ApiKey, Tenant, User
+from src.domain.voice.entities import VoiceProfile
+from src.domain.whatsapp_web.entities import WhatsAppWebSession
 
 
 @runtime_checkable
@@ -438,6 +438,24 @@ class WhatsAppConversation:
     # Nudges sent since they last said anything. `MAX_FOLLOW_UPS + 1` counts the
     # sign-off, which is what stops the ladder for good.
     followups_sent: int = 0
+    # --- Shared-inbox working state (0026) ---
+    # Which teammate owns this thread. None = nobody has picked it up, which is
+    # a state the inbox filters on rather than an error.
+    assignee_id: uuid.UUID | None = None
+    assignee_email: str = ""
+    tags: list[str] = field(default_factory=list)
+    pinned: bool = False
+    status: str = "open"
+    # --- Contact card (0026) ---
+    # Everything WhatsApp does not tell us: learned by whoever is working the
+    # thread, and typed into the details panel.
+    company: str = ""
+    job_title: str = ""
+    email: str = ""
+    city: str = ""
+    country: str = ""
+    linkedin_url: str = ""
+    source: str = ""
     id: uuid.UUID = field(default_factory=new_id)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -568,6 +586,70 @@ class WhatsAppConversationRepository(Protocol):
     async def list_due_follow_ups(
         self, *, cutoff: datetime, max_follow_ups: int, limit: int = 50
     ) -> list[WhatsAppConversation]: ...
+    async def reassign_owner(
+        self, tenant_id: TenantId, from_owner_id: uuid.UUID, to_owner_id: uuid.UUID
+    ) -> int:
+        """Move every thread on one owner (a channel or a linked number) to
+        another, and report how many moved.
+
+        Exists for one job: folding a re-scanned WhatsApp number back into the
+        row that already holds its history. A thread whose phone number is
+        already present under the target is dropped rather than moved — the
+        target's copy is the live one, and the unique (owner, phone) constraint
+        would reject the duplicate anyway."""
+        ...
+    async def stats_for_owners(
+        self, tenant_id: TenantId, owner_ids: list[uuid.UUID], *, since: datetime
+    ) -> InboxStats:
+        """The counters across the top of the inbox, in one round trip."""
+        ...
+
+
+@dataclass(frozen=True)
+class InboxStats:
+    """Aggregate counters for the inbox header.
+
+    Computed rather than stored: every figure here is a `count(*)` over rows we
+    already keep, and a stored counter is a thing that drifts from the truth the
+    first time a write path forgets to bump it.
+    """
+
+    conversations: int = 0
+    active_conversations: int = 0
+    unread: int = 0
+    # Outbound in the current window — "messages sent this month".
+    messages_sent: int = 0
+    messages_received: int = 0
+    # Threads the contact has replied on, over threads we have written to. The
+    # nearest honest equivalent of a campaign reply rate for an inbox.
+    threads_contacted: int = 0
+    threads_replied: int = 0
+
+
+@dataclass
+class WhatsAppConversationNote:
+    """An internal note on a thread. Never sent to the contact — see the model
+    for why it does not live in `chat_messages`."""
+
+    tenant_id: TenantId
+    conversation_id: uuid.UUID
+    body: str
+    author_id: uuid.UUID | None = None
+    author_email: str = ""
+    id: uuid.UUID = field(default_factory=new_id)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@runtime_checkable
+class WhatsAppConversationNoteRepository(Protocol):
+    async def add(self, note: WhatsAppConversationNote) -> None: ...
+    async def list_for_conversation(
+        self, tenant_id: TenantId, conversation_id: uuid.UUID, *, limit: int = 100
+    ) -> list[WhatsAppConversationNote]: ...
+    async def count_for_conversation(
+        self, tenant_id: TenantId, conversation_id: uuid.UUID
+    ) -> int: ...
+    async def delete(self, tenant_id: TenantId, note_id: uuid.UUID) -> None: ...
 
 
 @runtime_checkable
@@ -672,6 +754,15 @@ class WhatsAppWebSessionRepository(Protocol):
     ) -> WhatsAppWebSession | None: ...
     async def get_unscoped(self, session_id: uuid.UUID) -> WhatsAppWebSession | None: ...
     async def list_for_tenant(self, tenant_id: TenantId) -> list[WhatsAppWebSession]: ...
+    async def list_linked_to_number(
+        self, tenant_id: TenantId, phone_number: str
+    ) -> list[WhatsAppWebSession]:
+        """Every session in this workspace linked to the same handset.
+
+        Re-scanning the QR for a number that is already connected creates a
+        second session, and without this the workspace ends up showing the
+        same number twice with its history split between them."""
+        ...
     async def update(self, ws: WhatsAppWebSession) -> None: ...
     async def delete(self, tenant_id: TenantId, session_id: uuid.UUID) -> None: ...
 
@@ -866,6 +957,7 @@ class UnitOfWork(Protocol):
     oauth_connections: OAuthConnectionRepository
     whatsapp_channels: WhatsAppChannelRepository
     whatsapp_conversations: WhatsAppConversationRepository
+    whatsapp_conversation_notes: WhatsAppConversationNoteRepository
     post_call_configs: PostCallConfigRepository
     post_call_deliveries: PostCallDeliveryRepository
     broadcasts: BroadcastRepository
