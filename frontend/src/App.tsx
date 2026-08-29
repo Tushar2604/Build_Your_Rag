@@ -4,6 +4,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./components/Layout";
 
 import LandingPage        from "./pages/LandingPage";
+import { LocaleProvider } from "./store/locale";
 import LoginPage          from "./pages/LoginPage";
 import RegisterPage       from "./pages/RegisterPage";
 import WidgetChatPage     from "./pages/WidgetChatPage";
@@ -49,7 +50,19 @@ export default function App() {
           {/* Public marketing landing — the front door. Everything behind
               /home is unchanged; this only occupies the previously-redirecting
               "/" slot. */}
-          <Route path="/"         element={<LandingPage />}  />
+          <Route
+            path="/"
+            // The provider wraps only this route. The console is a
+            // signed-in workspace in one language; the landing page is a
+            // public page a stranger arrives at in theirs, and tying them
+            // together would hand a Spanish visitor who signs up a
+            // half-translated dashboard.
+            element={
+              <LocaleProvider>
+                <LandingPage />
+              </LocaleProvider>
+            }
+          />
 
           {/* Public routes */}
           <Route path="/login"    element={<LoginPage />}    />

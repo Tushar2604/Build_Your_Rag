@@ -79,7 +79,7 @@ export interface VoiceCall {
   send: (text: string) => void;
 }
 
-export function useVoiceCall(adapter: VoiceCallAdapter): VoiceCall {
+export function useVoiceCall(adapter: VoiceCallAdapter, lang = "en-US"): VoiceCall {
   const [state, setState] = useState<CallState>("idle");
   const [ended, setEnded] = useState(false);
   const [captions, setCaptions] = useState<Caption[]>([]);
@@ -101,6 +101,10 @@ export function useVoiceCall(adapter: VoiceCallAdapter): VoiceCall {
   const { sttSupported, ttsSupported, startListening, stopListening, speak } = useVoice(
     (transcript) => handleTranscript(transcript),
     () => handleSilence(),
+    // The default storage key — passed explicitly only because `lang` sits
+    // behind it.
+    "kore:voiceMode",
+    lang,
   );
 
   useEffect(

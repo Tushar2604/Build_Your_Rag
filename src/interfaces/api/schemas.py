@@ -306,6 +306,12 @@ class PublicConfigResponse(BaseModel):
     name: str
     channel: Literal["text", "voice"]
     widget: WidgetConfigSchema
+    # What the assistant is configured to speak. Exposed publicly because the
+    # widget's microphone has to be set to a language BEFORE anyone talks — a
+    # recogniser left on en-US does not transcribe Hindi poorly, it transcribes
+    # it as nonsense English. Not sensitive: it is a list of language names,
+    # and the visitor is about to hear the answer in one of them anyway.
+    languages: list[str] = Field(default_factory=lambda: ["English (India)"])
 
 
 class PublicCitation(BaseModel):

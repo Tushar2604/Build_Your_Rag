@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-
 from src.domain.chat.entities import Message, MessageRole
 from src.domain.chatbot.entities import DEFAULT_SYSTEM_PROMPT
 from src.domain.safety.guardrails import (
@@ -230,3 +229,58 @@ def test_a_bare_acknowledgement_is_never_a_repeat() -> None:
     # "ok" against "ok" is a perfect string match and says nothing at all.
     history = [_user("ok"), _user("ok thanks")]
     assert count_repeat_asks(history, "ok") == 0
+
+
+# --- speaking the visitor's language ------------------------------------------
+#
+# Attached to every grounded prompt rather than to each assistant's own
+# instructions, so it reaches assistants that already exist. The two failure
+# modes it targets are opposites: answering Hindi in English is useless to the
+# person who wrote it, and "translating" a price or a booking code corrupts the
+# one thing the answer was grounded on.
+
+def test_both_wordings_carry_the_language_rules() -> None:
+    for context in ("Cleaning is 1500 INR.", NO_CONTEXT_MARKER):
+        prompt = build_grounded_prompt(context, "safai ka kitna charge hai?")
+        assert "LANGUAGE:" in prompt
+
+
+def test_the_reply_must_match_the_script_they_used() -> None:
+    # Romanised Hindi answered in Devanagari is the subtler half of the bug:
+    # technically the right language, unreadable to someone who chose Latin.
+    prompt = build_grounded_prompt("", "kitna charge hai?")
+    assert "same script" in prompt
+    assert "Devanagari" in prompt
+
+
+def test_mixed_language_is_mirrored_rather_than_corrected() -> None:
+    prompt = build_grounded_prompt("", "cleaning ka charge kitna hai?")
+    assert "Mixed language is a style, not a mistake" in prompt
+
+
+def test_a_mid_conversation_switch_is_followed_silently() -> None:
+    prompt = build_grounded_prompt("", "ahora en espanol por favor")
+    assert "latest message" in prompt
+    assert "never announce" in prompt
+
+
+def test_identifiers_are_never_translated() -> None:
+    # The half that corrupts data rather than merely annoying someone: a
+    # translated booking reference or price is a wrong one.
+    prompt = build_grounded_prompt("Ref AP-1042, 1500 INR.", "mera booking code kya hai?")
+    assert "Never translate these" in prompt
+    for identifier in ("names", "prices", "reference or booking code"):
+        assert identifier in prompt
+
+
+def test_a_language_mismatch_is_not_an_excuse_to_refuse() -> None:
+    # An English price list and a Hindi question is the normal case, not a
+    # missing fact — without this the assistant reports "I don't have that"
+    # for something sitting in front of it.
+    prompt = build_grounded_prompt("Cleaning is 1500 INR.", "safai ka charge?")
+    assert "never treat a language mismatch as 'not found'" in prompt
+
+
+def test_the_other_rules_are_not_suspended_in_translation() -> None:
+    prompt = build_grounded_prompt(NO_CONTEXT_MARKER, "kitna?")
+    assert "still applies in their language" in prompt

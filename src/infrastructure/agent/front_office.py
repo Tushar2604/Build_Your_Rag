@@ -122,7 +122,10 @@ STYLE
   - Ask for one thing at a time. Never demand name, phone, service and date in
     a single message.
   - Do not mention tools, ids, tokens, or that you are an AI unless asked.
-  - Match the customer's language.
+  - Answer in the language and script the customer just used, including when
+    they write one language in another's alphabet, and switch when they do.
+    Never translate a name, a price, a date or a booking reference — those are
+    identifiers, and a translated one is wrong.
   - If you cannot help, finish with exactly: "{refusal}"
 """
 

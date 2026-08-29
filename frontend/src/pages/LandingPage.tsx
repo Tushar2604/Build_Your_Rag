@@ -18,336 +18,35 @@ import { Link } from "react-router-dom";
 import {
   ArrowRight, Bot, BookOpen, CalendarCheck, Check, Clock, CreditCard,
   Home, Kanban, LineChart, Megaphone, MessageCircle, Mic, Minus, Phone,
-  Plug, Plus, ShieldCheck, Sparkles, UserSearch, Zap,
+  Plug, Plus, ShieldCheck, Sparkles, UserSearch, Zap, Globe, Check as CheckIcon,
 } from "lucide-react";
 
 import { useAuth } from "../store/auth";
+import { useLocale } from "../store/locale";
+import { LOCALES } from "../i18n";
 
-/* ── Hero ─────────────────────────────────────────────────────────────────
-   One promise, stated concretely. The reference leads with what the thing
-   does for you rather than what it is built from, so this does too. */
+/* ── Icons ───────────────────────────────────────────────────────────────
+   All the copy now lives in `src/i18n`, keyed by locale. What stays here is
+   the icon each card wears, because an icon is layout rather than language —
+   a phone means the same thing in Hindi. Each list is index-aligned with the
+   matching array in `LandingCopy`, which the tuple types there keep honest. */
 
-const HERO_HEADLINE = "AI agents that answer, book, and follow up — on every channel you run.";
-const HERO_SUB =
-  "Give your front desk a teammate that never misses a call. Evara agents pick up the phone, reply on WhatsApp and chat, check your real calendar, take the booking, and hand you the notes.";
+const WHY_ICONS = [ShieldCheck, Zap, Kanban];
+const CAPABILITY_ICONS = [Phone, CalendarCheck, MessageCircle, BookOpen, CreditCard, Megaphone];
+/** Only the payment card is unbuilt. Kept as an index rather than a flag in
+    the copy so a translator cannot accidentally promote a roadmap item to
+    shipped by dropping a field. */
+const CAPABILITY_SOON = new Set([4]);
+const PRODUCT_ICONS = [Bot, MessageCircle, UserSearch, Mic];
+const PRODUCT_LINKS = ["/assistants", "/channels", "/hiring-agent", "/clone-voice"];
+const RESOURCE_ICONS = [BookOpen, CalendarCheck, LineChart, Plug];
+const RESOURCE_LINKS = ["/knowledge", "/appointments", "/analytics", "/integrations"];
+const SCENE_OUTCOME_ICONS = [CalendarCheck, UserSearch, CalendarCheck, Home, Clock];
 
-/* Three numbers that answer "is this serious?" before anything else does.
-   Every one of them is something the product actually does today — a metric on
-   a landing page is a promise the first demo has to keep. */
-const PROOF: { value: string; label: string }[] = [
-  { value: "24/7", label: "Never a missed call or a missed message" },
-  { value: "4 channels", label: "Phone, WhatsApp, web chat and an embeddable widget" },
-  { value: "Zero", label: "Invented prices, dates or slots — every answer is grounded" },
-];
-
-/* ── Why us ──────────────────────────────────────────────────────────────
-   The three objections a buyer actually has, answered in their own words. */
-
-const WHY: { icon: typeof Zap; title: string; body: string }[] = [
-  {
-    icon: ShieldCheck,
-    title: "It never invents an answer",
-    body:
-      "Every fact comes from your own documents, and every time comes from your real calendar. When an agent does not know something, it says so and tells the caller who will — it does not guess a price or a slot.",
-  },
-  {
-    icon: Zap,
-    title: "It actually completes the job",
-    body:
-      "Not a chatbot that takes a message. The agent checks availability, holds the slot while it takes the details, writes the booking, and sends the confirmation — end to end, while the caller is still on the line.",
-  },
-  {
-    icon: Kanban,
-    title: "You stay in the driver's seat",
-    body:
-      "Read every conversation, take one over mid-thread, and change what the agent says by editing plain sentences — no prompt engineering, no redeploy, no waiting on us.",
-  },
-];
-
-/* ── Capabilities ────────────────────────────────────────────────────────
-   Six, matching the reference's grid. Written as what the agent does on a
-   given day, not as a feature list. */
-
-const CAPABILITIES: {
-  icon: typeof Bot;
-  title: string;
-  body: string;
-  /** Shown with a "Coming soon" pill and written in future tense. Roadmap
-   * items earn a place here — a buyer planning around them deserves to know
-   * which ones they cannot have on Monday. */
-  soon?: boolean;
-}[] = [
-  {
-    icon: Phone,
-    title: "Answers the phone",
-    body:
-      "A real voice on an inbound or outbound call, in your own cloned voice if you want one. It handles interruptions, waits while people think, and never talks over them.",
-  },
-  {
-    icon: CalendarCheck,
-    title: "Books the appointment",
-    body:
-      "Reads your services, staff and opening hours, offers only times that are genuinely free, holds the slot while it takes the details, and books it. Reschedules and cancellations too.",
-  },
-  {
-    icon: MessageCircle,
-    title: "Runs your WhatsApp",
-    body:
-      "Link your number by QR and the agent answers there. A shared inbox for your team on top: assign a chat, tag it, take it over, and hand it back.",
-  },
-  {
-    icon: BookOpen,
-    title: "Knows your business",
-    body:
-      "Upload your price list, policies and FAQs. The agent answers from those documents and cites nothing it has not read — the difference between helpful and confidently wrong.",
-  },
-  {
-    icon: CreditCard,
-    title: "Takes the payment",
-    body:
-      "Will send a deposit or invoice link in the same conversation and confirm the booking once it settles, so a slot is paid for rather than pencilled in.",
-    soon: true,
-  },
-  {
-    icon: Megaphone,
-    title: "Follows up on its own",
-    body:
-      "Chases a quiet lead, reminds a patient the day before, and runs a campaign to a list — then stops the moment someone replies and picks the conversation back up.",
-  },
-];
-
-/* ── Hero scenes ─────────────────────────────────────────────────────────
-   The panel beside the headline cycles through five real jobs rather than
-   showing one.
-
-   One scene made the product look like a dental booking tool. Five make the
-   point the headline is actually making — same agent, different role, every
-   channel — and they do it without the visitor scrolling or clicking, which
-   is the only interaction a hero can rely on.
-
-   Each carries its own channel, its own timer and its own outcome line,
-   because "what did it actually achieve" is the part that differs between a
-   booking, a screening and a qualified lead. */
-
-type Channel = "Live call" | "WhatsApp" | "Web chat";
-
-interface Scene {
-  key: string;
-  channel: Channel;
-  role: string;
-  /** Elapsed time in the header. Varied per scene — a fixed one across five
-   * panels reads as a static image that happens to change text. */
-  clock: string;
-  transcript: { who: "agent" | "caller"; line: string }[];
-  outcome: { icon: typeof Bot; text: string; pill: string };
-}
-
-const HERO_SCENES: Scene[] = [
-  {
-    key: "dental",
-    channel: "Live call",
-    role: "Dental clinic receptionist",
-    clock: "00:42",
-    transcript: [
-      { who: "caller", line: "Hi, do you have anything for a cleaning this week?" },
-      { who: "agent", line: "We do — Thursday at 4:15pm or Friday at 11am with Dr Rao. Which suits?" },
-      { who: "caller", line: "Thursday please." },
-      { who: "agent", line: "Booked. You'll get a confirmation on WhatsApp in a moment." },
-    ],
-    outcome: { icon: CalendarCheck, text: "Booked · Thu 4:15pm · Dr Rao", pill: "Confirmed" },
-  },
-  {
-    key: "hiring",
-    channel: "WhatsApp",
-    role: "First-round screener",
-    clock: "02:18",
-    transcript: [
-      { who: "agent", line: "Hi Priya — quick chat about the site engineer role?" },
-      { who: "caller", line: "Sure. What's the salary?" },
-      { who: "agent", line: "The band is 12–18 LPA depending on experience. Does that work?" },
-      { who: "caller", line: "Works for me. I have 6 years on metro projects." },
-    ],
-    outcome: { icon: UserSearch, text: "Screened · 6 yrs · notice 30 days", pill: "Shortlisted" },
-  },
-  {
-    key: "salon",
-    channel: "WhatsApp",
-    role: "Salon booking assistant",
-    clock: "01:05",
-    transcript: [
-      { who: "caller", line: "Can I get a cut and colour with Aisha on Saturday?" },
-      { who: "agent", line: "Aisha has 10:30am — that's two hours for both. Shall I hold it?" },
-      { who: "caller", line: "Yes please 🙌" },
-      { who: "agent", line: "Held and booked. I'll remind you Friday evening." },
-    ],
-    outcome: { icon: CalendarCheck, text: "Booked · Sat 10:30am · Aisha", pill: "Reminder set" },
-  },
-  {
-    key: "property",
-    channel: "Web chat",
-    role: "Property enquiry agent",
-    clock: "00:57",
-    transcript: [
-      { who: "caller", line: "Is the 2BHK in Wakad still available?" },
-      { who: "agent", line: "It is — ₹78L, east-facing, ready to move. Want to see it this weekend?" },
-      { who: "caller", line: "Saturday morning works." },
-      { who: "agent", line: "Viewing set for 11am. Sending you the location and the floor plan." },
-    ],
-    outcome: { icon: Home, text: "Viewing · Sat 11am · Wakad 2BHK", pill: "Lead qualified" },
-  },
-  {
-    key: "lab",
-    channel: "Live call",
-    role: "Diagnostic lab front desk",
-    clock: "01:31",
-    transcript: [
-      { who: "caller", line: "I need to move my blood test from tomorrow." },
-      { who: "agent", line: "No problem — I have Monday 8am or Tuesday 7:30am, both fasting slots." },
-      { who: "caller", line: "Monday." },
-      { who: "agent", line: "Moved to Monday 8am. Remember: no food after 10pm Sunday." },
-    ],
-    outcome: { icon: Clock, text: "Moved · Mon 8:00am · fasting", pill: "Confirmed" },
-  },
-];
-
-/** How long each scene holds. Long enough to read four short lines without
- * hurrying, short enough that a visitor who lingers sees more than two. */
+/** How long each hero scene holds. Long enough to read four short lines
+    without hurrying, short enough that a visitor who lingers sees more than
+    two. */
 const SCENE_MS = 5200;
-
-/* ── Runtime panel ───────────────────────────────────────────────────────
-   The reference's interactive configuration block. Here it shows the shape of
-   a real agent, because "what do I actually configure?" is the question this
-   part of the page exists to answer. */
-
-const RUNTIME_TABS: {
-  key: string;
-  label: string;
-  rows: { k: string; v: string }[];
-  transcript: { who: "agent" | "caller"; line: string }[];
-}[] = [
-  {
-    key: "dental",
-    label: "Dental clinic",
-    rows: [
-      { k: "Role", v: "Front-desk receptionist" },
-      { k: "Channels", v: "Phone · WhatsApp · Web chat" },
-      { k: "Knows", v: "Treatment list, prices, insurers, policies" },
-      { k: "Can do", v: "Book · Reschedule · Cancel · Send reminders" },
-      { k: "Escalates", v: "Clinical questions → the practice manager" },
-    ],
-    transcript: [
-      { who: "caller", line: "Hi, do you have anything for a cleaning this week?" },
-      { who: "agent", line: "We do — Thursday at 4:15pm or Friday at 11am with Dr Rao. Which suits?" },
-      { who: "caller", line: "Thursday please." },
-      { who: "agent", line: "Booked. You'll get a confirmation on WhatsApp in a moment." },
-    ],
-  },
-  {
-    key: "clinic",
-    label: "Recruitment",
-    rows: [
-      { k: "Role", v: "First-round screener" },
-      { k: "Channels", v: "Phone · WhatsApp" },
-      { k: "Knows", v: "Open roles, salary bands, visa terms" },
-      { k: "Can do", v: "Screen · Score · Book the hiring manager" },
-      { k: "Escalates", v: "Offer negotiation → the recruiter" },
-    ],
-    transcript: [
-      { who: "agent", line: "Hi Priya — is now still a good time for a quick chat about the site engineer role?" },
-      { who: "caller", line: "Yes. What's the salary?" },
-      { who: "agent", line: "The band is 12–18 LPA depending on experience. Does that work for you?" },
-      { who: "caller", line: "That works." },
-    ],
-  },
-  {
-    key: "salon",
-    label: "Salon & spa",
-    rows: [
-      { k: "Role", v: "Booking assistant" },
-      { k: "Channels", v: "WhatsApp · Web chat" },
-      { k: "Knows", v: "Service menu, durations, stylist skills" },
-      { k: "Can do", v: "Book by stylist · Upsell · Send reminders" },
-      { k: "Escalates", v: "Complaints → the owner" },
-    ],
-    transcript: [
-      { who: "caller", line: "Can I get a cut and colour with Aisha on Saturday?" },
-      { who: "agent", line: "Aisha has 10:30am — that's two hours for both. Shall I hold it?" },
-      { who: "caller", line: "Yes please" },
-      { who: "agent", line: "Held and booked. Reminder the day before." },
-    ],
-  },
-];
-
-/* ── Products ────────────────────────────────────────────────────────────*/
-
-const PRODUCTS: { icon: typeof Bot; title: string; body: string; to: string }[] = [
-  {
-    icon: Bot,
-    title: "Voice AI Assistants",
-    body: "Build the agent, give it your documents, test it on a call, put it on a number.",
-    to: "/assistants",
-  },
-  {
-    icon: MessageCircle,
-    title: "WhatsApp Agent",
-    body: "Link a number by QR, answer automatically, and work the inbox as a team.",
-    to: "/channels",
-  },
-  {
-    icon: UserSearch,
-    title: "Hiring Agent",
-    body: "Screens candidates end to end and writes up every interview for you.",
-    to: "/hiring-agent",
-  },
-  {
-    icon: Mic,
-    title: "Voice Cloning",
-    body: "Put your own voice on every outbound call your agents make.",
-    to: "/clone-voice",
-  },
-];
-
-const RESOURCES: { icon: typeof Bot; title: string; body: string; to: string }[] = [
-  { icon: BookOpen, title: "Knowledge base", body: "Everything your agents can read, in one library.", to: "/knowledge" },
-  { icon: CalendarCheck, title: "Scheduling", body: "Services, staff, locations and opening hours.", to: "/appointments" },
-  { icon: LineChart, title: "Analytics", body: "Every call, every answer, and what it cost.", to: "/analytics" },
-  { icon: Plug, title: "Integrations", body: "Your calendar, your CRM, your webhook.", to: "/integrations" },
-];
-
-const FAQ: { q: string; a: string }[] = [
-  {
-    q: "How long does it take to get an agent answering?",
-    a: "An afternoon. Create the assistant, upload the documents it should answer from, add your services and opening hours, and test it on a web call. Putting it on a real phone number or a WhatsApp number is the last step, not the first.",
-  },
-  {
-    q: "Will it make things up?",
-    a: "It is built not to. Answers about your business come only from the documents you upload, and appointment times come only from your live calendar — the agent cannot offer a slot it has not checked. When something is missing it says so and tells the caller who can confirm, rather than guessing.",
-  },
-  {
-    q: "What happens when it cannot help?",
-    a: "It hands over. You set what counts as out of scope, and the agent redirects to a person instead of improvising. In the shared inbox you can also take any conversation over mid-thread and hand it back when you are done.",
-  },
-  {
-    q: "Can it use my own voice?",
-    a: "Yes. Clone your voice once and every outbound call your agents make can use it. If you would rather not, there is a library of voices in a range of languages and accents.",
-  },
-  {
-    q: "Which channels does it work on?",
-    a: "Phone calls in and out, WhatsApp, web chat on your own site, and an embeddable widget. The same agent, the same knowledge, and one conversation history per person across all of them.",
-  },
-  {
-    q: "Does it connect to the calendar we already use?",
-    a: "Yes — the agent reads and writes real availability rather than keeping its own copy, so a slot someone books by phone is gone from your calendar immediately and vice versa.",
-  },
-  {
-    q: "Who can see the conversations?",
-    a: "Your workspace, and nobody else's. Every record is scoped to your tenant in the database itself, not just in the application, and your documents are never used to train a shared model.",
-  },
-  {
-    q: "What does it cost?",
-    a: "A flat monthly platform fee plus usage — you are billed for the minutes and messages your agents actually handle, with a per-workspace daily cap you set so a runaway campaign cannot surprise you.",
-  },
-];
 
 /* ────────────────────────────────────────────────────────────────────────── */
 
@@ -372,8 +71,83 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
+/**
+ * The language picker.
+ *
+ * Every option is written in its own language — someone who cannot read the
+ * page as it stands cannot read "Spanish" written in English either, and that
+ * is exactly the visitor this control exists for.
+ */
+function LanguagePicker() {
+  const { locale, setLocale, t } = useLocale();
+  const [open, setOpen] = useState(false);
+  const current = LOCALES.find((l) => l.code === locale) ?? LOCALES[0];
+
+  useEffect(() => {
+    if (!open) return;
+    // Deferred a tick so the click that opened the menu does not close it.
+    const id = window.setTimeout(() => document.addEventListener("click", () => setOpen(false), { once: true }), 0);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={t.nav.language}
+        className="flex items-center gap-1.5 rounded-[6px] px-2.5 py-2 text-[13px] font-semibold
+                   text-[rgb(var(--m-ink-2))] transition-colors hover:text-[rgb(var(--m-ink))]"
+      >
+        <Globe className="h-4 w-4" strokeWidth={2} />
+        <span className="hidden sm:inline">{current.label}</span>
+      </button>
+
+      {open && (
+        <ul
+          role="listbox"
+          aria-label={t.nav.language}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute end-0 top-full z-50 mt-1.5 min-w-[172px] overflow-hidden rounded-xl
+                     border bg-[rgb(var(--m-bg))] p-1.5 shadow-[0_16px_40px_-16px_rgba(11,11,12,0.3)] mk-rule"
+        >
+          {LOCALES.map((l) => (
+            <li key={l.code}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={l.code === locale}
+                lang={l.htmlLang}
+                onClick={() => {
+                  setLocale(l.code);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-[13.5px]
+                            transition-colors hover:bg-[rgb(var(--m-bg-alt))] ${
+                              l.code === locale ? "font-semibold" : ""
+                            }`}
+              >
+                <span className="flex-1">{l.label}</span>
+                {l.code === locale && (
+                  <CheckIcon className="h-3.5 w-3.5 text-[rgb(var(--m-accent-ink))]" strokeWidth={3} />
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Nav() {
   const { isAuthenticated } = useAuth();
+  const { t } = useLocale();
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -383,13 +157,20 @@ function Nav() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  const links: [string, string][] = [
+    [t.nav.product, "#capabilities"],
+    [t.nav.howItWorks, "#runtime"],
+    [t.nav.pricing, "#pricing"],
+    [t.nav.faq, "#faq"],
+  ];
+
   return (
     <header
       className={`sticky top-0 z-50 border-b transition-colors duration-200 ${
         scrolled ? "mk-rule bg-white/90 backdrop-blur-md" : "border-transparent bg-white"
       }`}
     >
-      <div className="mk-section flex h-[72px] items-center gap-8">
+      <div className="mx-auto flex h-[72px] w-full max-w-[1340px] items-center gap-8 px-6">
         <Link to="/" className="flex flex-shrink-0 items-center gap-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgb(var(--m-ink))]">
             <Bot className="h-[18px] w-[18px] text-white" strokeWidth={2} />
@@ -398,14 +179,9 @@ function Nav() {
         </Link>
 
         <nav className="hidden items-center gap-7 lg:flex">
-          {[
-            ["Product", "#capabilities"],
-            ["How it works", "#runtime"],
-            ["Pricing", "#pricing"],
-            ["FAQ", "#faq"],
-          ].map(([label, href]) => (
+          {links.map(([label, href]) => (
             <a
-              key={label}
+              key={href}
               href={href}
               className="text-[14px] font-medium text-[rgb(var(--m-ink-2))] transition-colors hover:text-[rgb(var(--m-ink))]"
             >
@@ -414,15 +190,16 @@ function Nav() {
           ))}
         </nav>
 
-        <div className="ml-auto flex items-center gap-2.5">
+        <div className="ms-auto flex items-center gap-1.5">
+          <LanguagePicker />
           <Link
             to={isAuthenticated ? "/dashboard" : "/login"}
-            className="hidden text-[13px] font-semibold text-[rgb(var(--m-ink))] hover:underline sm:block"
+            className="hidden px-2 text-[13px] font-semibold text-[rgb(var(--m-ink))] hover:underline sm:block"
           >
-            {isAuthenticated ? "Dashboard" : "Log in"}
+            {isAuthenticated ? t.nav.dashboard : t.nav.login}
           </Link>
           <Link to="/register" className="mk-btn mk-btn-primary !px-5 !py-2.5">
-            Start building
+            {t.nav.startBuilding}
           </Link>
         </div>
       </div>
@@ -432,33 +209,35 @@ function Nav() {
 
 /**
  * The hero's product visual: a conversation completing, in the product's own
- * chrome, cycling through five roles.
+ * chrome, cycling through five roles — and, now, five languages' worth of
+ * transcript.
  *
  * Built rather than screenshotted. Five screenshots would be five files to
- * re-cut on every UI change, they would go stale silently, and they could not
- * animate — where this is the same tokens as the console and stays true by
- * construction.
+ * re-cut on every UI change, they would go stale silently, they could not
+ * animate, and they certainly could not be translated.
  *
- * Rotation is paused on hover and on focus: someone who has stopped to read is
+ * Rotation pauses on hover and on focus: someone who has stopped to read is
  * the one visitor this must not interrupt. It also holds still entirely for
- * `prefers-reduced-motion`, where a panel that rewrites itself every five
- * seconds is the exact thing that setting is asking us not to do.
+ * `prefers-reduced-motion`.
  */
 function HeroPanel() {
+  const { t, locale } = useLocale();
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const reduceMotion = usePrefersReducedMotion();
-  const scene = HERO_SCENES[index];
-  const Outcome = scene.outcome.icon;
+  const scene = t.scenes[index];
+  const Outcome = SCENE_OUTCOME_ICONS[index];
+
+  // Switching language re-reads the transcripts underneath us. Restarting at
+  // the first scene keeps the entrance animation honest and avoids a frame
+  // where half the panel is still in the previous language.
+  useEffect(() => setIndex(0), [locale]);
 
   useEffect(() => {
     if (paused || reduceMotion) return;
-    const timer = setInterval(
-      () => setIndex((i) => (i + 1) % HERO_SCENES.length),
-      SCENE_MS,
-    );
+    const timer = setInterval(() => setIndex((i) => (i + 1) % t.scenes.length), SCENE_MS);
     return () => clearInterval(timer);
-  }, [paused, reduceMotion]);
+  }, [paused, reduceMotion, t.scenes.length]);
 
   return (
     <div
@@ -475,63 +254,64 @@ function HeroPanel() {
             )}
             <span className="relative inline-flex h-2 w-2 rounded-full bg-[rgb(var(--m-accent))]" />
           </span>
-          <span key={`${scene.key}-head`} className="animate-fade-in text-[13px] font-semibold">
+          <span key={`${locale}-${index}-head`} className="animate-fade-in text-[13px] font-semibold">
             {scene.channel} · {scene.role}
           </span>
-          <span className="ml-auto font-mono text-[12px] tabular-nums text-[rgb(var(--m-ink-3))]">
-            {scene.clock}
+          <span className="ms-auto font-mono text-[12px] tabular-nums text-[rgb(var(--m-ink-3))]">
+            {["00:42", "02:18", "01:05", "00:57", "01:31"][index]}
           </span>
         </div>
 
-        {/* A floor under the transcript, so a three-line scene followed by a
-            four-line one does not make the whole hero jump. */}
-        <div className="min-h-[300px] space-y-3.5 p-5">
-          {scene.transcript.map((t, i) => (
+        {/* A floor under the transcript, so a scene whose lines wrap differently
+            in another language does not make the whole hero jump. Generous
+            because translations run longer than English — German and Hindi
+            both add roughly a third. */}
+        <div className="min-h-[320px] space-y-3.5 p-5">
+          {scene.transcript.map((line, i) => (
             <div
-              // Keyed on the scene as well as the position: without the scene
-              // in the key React reuses the node and the entrance never
-              // replays, so every scene after the first would appear at once.
-              key={`${scene.key}-${i}`}
-              className={`flex ${t.who === "caller" ? "justify-start" : "justify-end"} ${
+              // Keyed on the locale and the scene as well as the position:
+              // without them React reuses the node and the entrance never
+              // replays, so a switch would appear all at once.
+              key={`${locale}-${index}-${i}`}
+              className={`flex ${line.who === "caller" ? "justify-start" : "justify-end"} ${
                 reduceMotion ? "" : "animate-slide-up"
               }`}
-              // Staggered so it reads as a conversation arriving rather than a
-              // block of text being swapped in.
-              style={reduceMotion ? undefined : { animationDelay: `${i * 90}ms`, animationFillMode: "backwards" }}
+              style={
+                reduceMotion
+                  ? undefined
+                  : { animationDelay: `${i * 90}ms`, animationFillMode: "backwards" }
+              }
             >
               <div
                 className={`max-w-[86%] rounded-2xl px-4 py-2.5 text-[14.5px] leading-relaxed ${
-                  t.who === "caller"
-                    ? "rounded-bl-sm bg-[rgb(var(--m-bg-alt))] text-[rgb(var(--m-ink))]"
-                    : "rounded-br-sm bg-[rgb(var(--m-ink))] text-white"
+                  line.who === "caller"
+                    ? "rounded-es-sm bg-[rgb(var(--m-bg-alt))] text-[rgb(var(--m-ink))]"
+                    : "rounded-ee-sm bg-[rgb(var(--m-ink))] text-white"
                 }`}
               >
-                {t.line}
+                {line.line}
               </div>
             </div>
           ))}
         </div>
 
         <div
-          key={`${scene.key}-foot`}
-          className="flex items-center gap-2.5 border-t mk-rule bg-[rgb(var(--m-bg-alt))] px-5 py-4 animate-fade-in"
+          key={`${locale}-${index}-foot`}
+          className="flex animate-fade-in items-center gap-2.5 border-t mk-rule bg-[rgb(var(--m-bg-alt))] px-5 py-4"
         >
           <Outcome className="h-[18px] w-[18px] flex-shrink-0 text-[rgb(var(--m-accent-ink))]" strokeWidth={2.25} />
           <span className="truncate text-[13.5px] font-semibold">{scene.outcome.text}</span>
-          <span className="mk-pill ml-auto flex-shrink-0">{scene.outcome.pill}</span>
+          <span className="mk-pill ms-auto flex-shrink-0">{scene.outcome.pill}</span>
         </div>
       </div>
 
-      {/* Jump straight to a scene. Real buttons rather than dots-as-decoration:
-          a visitor in the recruitment business should be able to go and look at
-          the recruitment one instead of waiting twenty seconds for it. */}
       <div className="mt-4 flex items-center justify-center gap-2">
-        {HERO_SCENES.map((sc, i) => (
+        {t.scenes.map((sc, i) => (
           <button
-            key={sc.key}
+            key={sc.role}
             type="button"
             onClick={() => setIndex(i)}
-            aria-label={`Show the ${sc.role} example`}
+            aria-label={sc.role}
             aria-current={i === index}
             className={`h-1.5 rounded-full transition-all duration-300 ${
               i === index
@@ -545,16 +325,21 @@ function HeroPanel() {
   );
 }
 
+/** The "how it works" panel: an agent's configuration beside a real exchange.
+ * Reuses the hero's scenes rather than carrying its own, so a translator has
+ * one set of transcripts to get right instead of two. */
 function RuntimePanel() {
+  const { t, locale } = useLocale();
   const [active, setActive] = useState(0);
-  const tab = RUNTIME_TABS[active];
+  useEffect(() => setActive(0), [locale]);
+  const scene = t.scenes[active];
 
   return (
     <div className="mk-card !p-0">
       <div className="flex flex-wrap gap-1 border-b mk-rule p-2">
-        {RUNTIME_TABS.map((t, i) => (
+        {t.scenes.map((sc, i) => (
           <button
-            key={t.key}
+            key={sc.role}
             type="button"
             onClick={() => setActive(i)}
             aria-pressed={i === active}
@@ -564,34 +349,47 @@ function RuntimePanel() {
                 : "text-[rgb(var(--m-ink-2))] hover:bg-[rgb(var(--m-bg-alt))]"
             }`}
           >
-            {t.label}
+            {sc.role}
           </button>
         ))}
       </div>
 
       <div className="grid gap-0 md:grid-cols-2">
         <dl className="divide-y divide-[rgb(var(--m-rule))] p-2">
-          {tab.rows.map((r) => (
-            <div key={r.k} className="flex items-baseline gap-4 px-3 py-3">
-              <dt className="w-[92px] flex-shrink-0 text-[12px] font-semibold uppercase tracking-wider text-[rgb(var(--m-ink-3))]">
-                {r.k}
-              </dt>
-              <dd className="text-[13.5px] font-medium text-[rgb(var(--m-ink))]">{r.v}</dd>
-            </div>
-          ))}
+          <div className="flex items-baseline gap-4 px-3 py-3">
+            <dt className="w-[92px] flex-shrink-0 text-[12px] font-semibold uppercase tracking-wider text-[rgb(var(--m-ink-3))]">
+              {t.nav.product}
+            </dt>
+            <dd className="text-[13.5px] font-medium">{scene.role}</dd>
+          </div>
+          <div className="flex items-baseline gap-4 px-3 py-3">
+            <dt className="w-[92px] flex-shrink-0 text-[12px] font-semibold uppercase tracking-wider text-[rgb(var(--m-ink-3))]">
+              {t.hero.badge.split("·")[0].trim()}
+            </dt>
+            <dd className="text-[13.5px] font-medium">{scene.channel}</dd>
+          </div>
+          <div className="flex items-baseline gap-4 px-3 py-3">
+            <dt className="w-[92px] flex-shrink-0 text-[12px] font-semibold uppercase tracking-wider text-[rgb(var(--m-ink-3))]">
+              {scene.outcome.pill}
+            </dt>
+            <dd className="text-[13.5px] font-medium">{scene.outcome.text}</dd>
+          </div>
         </dl>
 
-        <div className="space-y-2.5 border-t mk-rule bg-[rgb(var(--m-bg-alt))] p-5 md:border-l md:border-t-0">
-          {tab.transcript.map((t, i) => (
-            <div key={i} className={`flex ${t.who === "caller" ? "justify-start" : "justify-end"}`}>
+        <div className="space-y-2.5 border-t mk-rule bg-[rgb(var(--m-bg-alt))] p-5 md:border-s md:border-t-0">
+          {scene.transcript.map((line, i) => (
+            <div
+              key={`${locale}-${active}-${i}`}
+              className={`flex ${line.who === "caller" ? "justify-start" : "justify-end"}`}
+            >
               <div
                 className={`max-w-[88%] rounded-2xl px-3.5 py-2 text-[13px] leading-snug ${
-                  t.who === "caller"
-                    ? "rounded-bl-sm bg-white text-[rgb(var(--m-ink))]"
-                    : "rounded-br-sm bg-[rgb(var(--m-ink))] text-white"
+                  line.who === "caller"
+                    ? "rounded-es-sm bg-white text-[rgb(var(--m-ink))]"
+                    : "rounded-ee-sm bg-[rgb(var(--m-ink))] text-white"
                 }`}
               >
-                {t.line}
+                {line.line}
               </div>
             </div>
           ))}
@@ -609,7 +407,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-4 py-5 text-left"
+        className="flex w-full items-center gap-4 py-5 text-start"
       >
         <span className="mk-h3 flex-1 !text-[17px]">{q}</span>
         {open ? (
@@ -618,12 +416,19 @@ function FaqItem({ q, a }: { q: string; a: string }) {
           <Plus className="h-4 w-4 flex-shrink-0 text-[rgb(var(--m-ink-3))]" strokeWidth={2.5} />
         )}
       </button>
-      {open && <p className="mk-body max-w-[70ch] pb-5 pr-8">{a}</p>}
+      {open && <p className="mk-body max-w-[70ch] pb-5 pe-8">{a}</p>}
     </div>
   );
 }
 
 export default function LandingPage() {
+  const { t, dir } = useLocale();
+  // Arrows point the way the language reads. In a right-to-left locale a
+  // "continue" arrow aimed right points backwards.
+  const Forward = (props: { className?: string; strokeWidth?: number }) => (
+    <ArrowRight {...props} className={`${props.className ?? ""} ${dir === "rtl" ? "-scale-x-100" : ""}`} />
+  );
+
   return (
     // The console themes with `data-theme`; the marketing site does not.
     // Scoping the palette to this wrapper is what keeps a visitor in dark mode
@@ -631,33 +436,25 @@ export default function LandingPage() {
     <div className="marketing min-h-screen">
       <Nav />
 
-      {/* ── Hero ──
-          Wider than the rest of the page and top-aligned, both for the same
-          reason: the headline is six lines of 4.5rem type, and a panel centred
-          against a column that tall floats in the middle looking like an
-          afterthought. Aligning the tops makes the pairing deliberate, and the
-          extra width buys the headline shorter lines and the panel a bigger
-          frame at the same time. */}
+      {/* ── Hero ── */}
       <section className="mx-auto grid w-full max-w-[1340px] items-center gap-12 px-6 py-16 lg:grid-cols-[1.06fr_1fr] lg:items-start lg:gap-16 lg:py-20">
         <div>
           <span className="mk-pill">
             <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
-            Voice · WhatsApp · Chat
+            {t.hero.badge}
           </span>
-          <h1 className="mk-display mt-5">{HERO_HEADLINE}</h1>
-          <p className="mk-lead mt-6 max-w-[54ch]">{HERO_SUB}</p>
+          <h1 className="mk-display mt-5">{t.hero.headline}</h1>
+          <p className="mk-lead mt-6 max-w-[54ch]">{t.hero.sub}</p>
           <div className="mt-9 flex flex-wrap gap-3">
             <Link to="/register" className="mk-btn mk-btn-primary">
-              Start building for free
-              <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
+              {t.hero.ctaPrimary}
+              <Forward className="h-4 w-4" strokeWidth={2.5} />
             </Link>
             <a href="#runtime" className="mk-btn mk-btn-secondary">
-              See it work
+              {t.hero.ctaSecondary}
             </a>
           </div>
-          <p className="mt-4 text-[13px] text-[rgb(var(--m-ink-3))]">
-            No card required · Your first agent answering the same day
-          </p>
+          <p className="mt-4 text-[13px] text-[rgb(var(--m-ink-3))]">{t.hero.note}</p>
         </div>
         <div className="lg:pt-1">
           <HeroPanel />
@@ -667,12 +464,12 @@ export default function LandingPage() {
       {/* ── Proof metrics ── */}
       <section className="border-y mk-rule mk-band">
         <div className="mk-section grid gap-8 py-10 sm:grid-cols-3">
-          {PROOF.map((p) => (
-            <div key={p.label}>
+          {t.proof.map((p) => (
+            <div key={p.title}>
               <p className="font-display text-[2rem] font-bold leading-none tracking-tight">
-                {p.value}
+                {p.title}
               </p>
-              <p className="mk-body mt-2 !text-[13.5px]">{p.label}</p>
+              <p className="mk-body mt-2 !text-[13.5px]">{p.body}</p>
             </div>
           ))}
         </div>
@@ -681,13 +478,10 @@ export default function LandingPage() {
       {/* ── Who it is for ── */}
       <section className="mk-section py-14">
         <p className="text-center text-[12.5px] font-semibold uppercase tracking-[0.14em] text-[rgb(var(--m-ink-3))]">
-          Running the front desk for
+          {t.industries.label}
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
-          {[
-            "Dental clinics", "Salons & spas", "Diagnostic labs", "Recruitment",
-            "Real estate", "Home services",
-          ].map((s) => (
+          {t.industries.items.map((s) => (
             <span key={s} className="font-display text-[17px] font-semibold text-[rgb(var(--m-ink-3))]">
               {s}
             </span>
@@ -697,18 +491,18 @@ export default function LandingPage() {
 
       {/* ── Why us ── */}
       <section className="mk-section py-16">
-        <p className="mk-eyebrow">Why Evara</p>
-        <h2 className="mk-h2 mt-3 max-w-[20ch]">Built to finish the job, not to sound like it did.</h2>
+        <p className="mk-eyebrow">{t.why.eyebrow}</p>
+        <h2 className="mk-h2 mt-3 max-w-[20ch]">{t.why.heading}</h2>
         <div className="mt-10 grid gap-5 md:grid-cols-3">
-          {WHY.map((w) => {
-            const Icon = w.icon;
+          {t.why.cards.map((c, i) => {
+            const Icon = WHY_ICONS[i];
             return (
-              <div key={w.title} className="mk-card mk-card-hover">
+              <div key={c.title} className="mk-card mk-card-hover">
                 <span className="mk-chip">
                   <Icon className="h-5 w-5" strokeWidth={2} />
                 </span>
-                <h3 className="mk-h3 mt-4">{w.title}</h3>
-                <p className="mk-body mt-2">{w.body}</p>
+                <h3 className="mk-h3 mt-4">{c.title}</h3>
+                <p className="mk-body mt-2">{c.body}</p>
               </div>
             );
           })}
@@ -718,21 +512,20 @@ export default function LandingPage() {
       {/* ── Capabilities ── */}
       <section id="capabilities" className="border-y mk-rule mk-band">
         <div className="mk-section py-16">
-          <p className="mk-eyebrow">What the agent does</p>
-          <h2 className="mk-h2 mt-3 max-w-[22ch]">One teammate, on every channel you already run.</h2>
+          <p className="mk-eyebrow">{t.capabilities.eyebrow}</p>
+          <h2 className="mk-h2 mt-3 max-w-[22ch]">{t.capabilities.heading}</h2>
           <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {CAPABILITIES.map((c) => {
-              const Icon = c.icon;
+            {t.capabilities.cards.map((c, i) => {
+              const Icon = CAPABILITY_ICONS[i];
               return (
                 <div key={c.title} className="mk-card mk-card-hover">
                   <div className="flex items-start justify-between gap-3">
                     <span className="mk-chip">
                       <Icon className="h-5 w-5" strokeWidth={2} />
                     </span>
-                    {c.soon && (
-                      <span className="rounded-full border mk-rule px-2 py-0.5 text-[10.5px]
-                                       font-bold uppercase tracking-wider text-[rgb(var(--m-ink-3))]">
-                        Coming soon
+                    {CAPABILITY_SOON.has(i) && (
+                      <span className="rounded-full border mk-rule px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wider text-[rgb(var(--m-ink-3))]">
+                        {t.capabilities.soon}
                       </span>
                     )}
                   </div>
@@ -747,13 +540,9 @@ export default function LandingPage() {
 
       {/* ── Runtime ── */}
       <section id="runtime" className="mk-section py-16">
-        <p className="mk-eyebrow">How it works</p>
-        <h2 className="mk-h2 mt-3 max-w-[24ch]">You describe the role. It shows up for the shift.</h2>
-        <p className="mk-lead mt-4 max-w-[62ch]">
-          An agent is a role description, a set of documents, and the things it is allowed
-          to do. Pick a starting point and change it in plain sentences — there is no prompt
-          to engineer and nothing to redeploy.
-        </p>
+        <p className="mk-eyebrow">{t.runtime.eyebrow}</p>
+        <h2 className="mk-h2 mt-3 max-w-[24ch]">{t.runtime.heading}</h2>
+        <p className="mk-lead mt-4 max-w-[62ch]">{t.runtime.lead}</p>
         <div className="mt-10">
           <RuntimePanel />
         </div>
@@ -763,42 +552,26 @@ export default function LandingPage() {
       <section id="pricing" className="border-y mk-rule mk-band">
         <div className="mk-section grid gap-10 py-16 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
-            <p className="mk-eyebrow">Pricing</p>
-            <h2 className="mk-h2 mt-3">Pay for the conversations you actually handle.</h2>
-            <p className="mk-lead mt-4 max-w-[46ch]">
-              A flat platform fee, then usage. Set a daily cap per workspace so a campaign
-              that runs away cannot surprise you at the end of the month.
-            </p>
+            <p className="mk-eyebrow">{t.pricing.eyebrow}</p>
+            <h2 className="mk-h2 mt-3">{t.pricing.heading}</h2>
+            <p className="mk-lead mt-4 max-w-[46ch]">{t.pricing.lead}</p>
             <Link to="/register" className="mk-btn mk-btn-primary mt-7">
-              Start free
-              <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
+              {t.pricing.cta}
+              <Forward className="h-4 w-4" strokeWidth={2.5} />
             </Link>
           </div>
           <div className="mk-card">
             <div className="flex flex-wrap items-baseline gap-3">
               <span className="font-display text-[2.6rem] font-bold leading-none tracking-tight">
-                Usage-based
+                {t.pricing.planName}
               </span>
-              <span className="mk-pill">Free while you build</span>
+              <span className="mk-pill">{t.pricing.planBadge}</span>
             </div>
-            <p className="mk-body mt-3">
-              Build, test and tune as many agents as you like before a single one goes live.
-              Billing starts when real calls and messages do.
-            </p>
+            <p className="mk-body mt-3">{t.pricing.planBody}</p>
             <ul className="mt-6 space-y-2.5">
-              {[
-                "Unlimited agents and knowledge documents",
-                "Voice, WhatsApp, web chat and the embeddable widget",
-                "Real-calendar booking, rescheduling and reminders",
-                "Shared team inbox with takeover and assignment",
-                "Your own cloned voice on outbound calls",
-                "A daily spend cap you control",
-              ].map((f) => (
+              {t.pricing.features.map((f) => (
                 <li key={f} className="flex items-start gap-2.5 text-[14px]">
-                  <Check
-                    className="mt-0.5 h-4 w-4 flex-shrink-0 text-[rgb(var(--m-accent-ink))]"
-                    strokeWidth={2.75}
-                  />
+                  <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-[rgb(var(--m-accent-ink))]" strokeWidth={2.75} />
                   <span>{f}</span>
                 </li>
               ))}
@@ -811,38 +584,32 @@ export default function LandingPage() {
       <section className="mk-section py-16">
         <figure className="mx-auto max-w-[52rem] text-center">
           <blockquote className="mk-h2 !font-medium">
-            “We were losing bookings every evening because nobody was there to pick up.
-            The agent answers, checks the diary, and books them in. Our
-            <span className="text-[rgb(var(--m-accent-ink))]"> after-hours bookings went from zero</span>
-            {" "}to a third of the week.”
+            “{t.testimonial.before}
+            <span className="text-[rgb(var(--m-accent-ink))]">{t.testimonial.highlight}</span>
+            {t.testimonial.after}”
           </blockquote>
-          <figcaption className="mk-body mt-6 !text-[13.5px]">
-            Practice manager · multi-site dental group
-          </figcaption>
+          <figcaption className="mk-body mt-6 !text-[13.5px]">{t.testimonial.source}</figcaption>
         </figure>
       </section>
 
       {/* ── Products ── */}
       <section className="border-y mk-rule mk-band">
         <div className="mk-section py-16">
-          <p className="mk-eyebrow">The platform</p>
-          <h2 className="mk-h2 mt-3">Everything you need to run agents in production.</h2>
+          <p className="mk-eyebrow">{t.products.eyebrow}</p>
+          <h2 className="mk-h2 mt-3">{t.products.heading}</h2>
           <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {PRODUCTS.map((p) => {
-              const Icon = p.icon;
+            {t.products.cards.map((c, i) => {
+              const Icon = PRODUCT_ICONS[i];
               return (
-                <Link key={p.title} to={p.to} className="mk-card mk-card-hover group block">
+                <Link key={c.title} to={PRODUCT_LINKS[i]} className="mk-card mk-card-hover group block">
                   <span className="mk-chip">
                     <Icon className="h-5 w-5" strokeWidth={2} />
                   </span>
-                  <h3 className="mk-h3 mt-4 !text-[16px]">{p.title}</h3>
-                  <p className="mk-body mt-2 !text-[13.5px]">{p.body}</p>
+                  <h3 className="mk-h3 mt-4 !text-[16px]">{c.title}</h3>
+                  <p className="mk-body mt-2 !text-[13.5px]">{c.body}</p>
                   <span className="mt-4 inline-flex items-center gap-1.5 text-[12.5px] font-bold uppercase tracking-wider text-[rgb(var(--m-accent-ink))]">
-                    Explore
-                    <ArrowRight
-                      className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5"
-                      strokeWidth={2.75}
-                    />
+                    {t.products.explore}
+                    <Forward className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" strokeWidth={2.75} />
                   </span>
                 </Link>
               );
@@ -853,18 +620,18 @@ export default function LandingPage() {
 
       {/* ── Resources ── */}
       <section className="mk-section py-16">
-        <p className="mk-eyebrow">Also in the box</p>
-        <h2 className="mk-h2 mt-3">The unglamorous parts, already built.</h2>
+        <p className="mk-eyebrow">{t.resources.eyebrow}</p>
+        <h2 className="mk-h2 mt-3">{t.resources.heading}</h2>
         <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {RESOURCES.map((r) => {
-            const Icon = r.icon;
+          {t.resources.cards.map((c, i) => {
+            const Icon = RESOURCE_ICONS[i];
             return (
-              <Link key={r.title} to={r.to} className="mk-card mk-card-hover block">
+              <Link key={c.title} to={RESOURCE_LINKS[i]} className="mk-card mk-card-hover block">
                 <span className="mk-chip">
                   <Icon className="h-5 w-5" strokeWidth={2} />
                 </span>
-                <h3 className="mk-h3 mt-4 !text-[16px]">{r.title}</h3>
-                <p className="mk-body mt-2 !text-[13.5px]">{r.body}</p>
+                <h3 className="mk-h3 mt-4 !text-[16px]">{c.title}</h3>
+                <p className="mk-body mt-2 !text-[13.5px]">{c.body}</p>
               </Link>
             );
           })}
@@ -875,37 +642,29 @@ export default function LandingPage() {
       <section className="mk-invert">
         <div className="mk-section grid items-center gap-10 py-20 lg:grid-cols-[1.1fr_0.9fr]">
           <div>
-            <h2 className="mk-h2">Put an agent on your front desk this week.</h2>
-            <p className="mk-lead mt-4 max-w-[46ch]">
-              Build it, give it your documents and your calendar, and hear it answer — before
-              you decide whether to point a real number at it.
-            </p>
+            <h2 className="mk-h2">{t.closing.heading}</h2>
+            <p className="mk-lead mt-4 max-w-[46ch]">{t.closing.lead}</p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link to="/register" className="mk-btn mk-btn-primary">
-                Start building for free
-                <ArrowRight className="h-4 w-4" strokeWidth={2.5} />
+                {t.closing.ctaPrimary}
+                <Forward className="h-4 w-4" strokeWidth={2.5} />
               </Link>
               <Link to="/report-issue" className="mk-btn mk-btn-secondary">
-                Talk to us
+                {t.closing.ctaSecondary}
               </Link>
             </div>
           </div>
           <div className="mk-card">
-            <p className="mk-eyebrow">What day one looks like</p>
+            <p className="mk-eyebrow">{t.closing.stepsEyebrow}</p>
             <ol className="mt-4 space-y-4">
-              {[
-                ["Describe the role", "In plain sentences. “You are the receptionist for a dental clinic.”"],
-                ["Upload what it should know", "Price list, policies, treatment menu, FAQs."],
-                ["Add services and opening hours", "So the times it offers are times you can honour."],
-                ["Test it on a call", "Then point a phone or WhatsApp number at it."],
-              ].map(([title, body], i) => (
-                <li key={title} className="flex gap-3.5">
+              {t.closing.steps.map((step, i) => (
+                <li key={step.title} className="flex gap-3.5">
                   <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[rgb(var(--m-accent))] text-[12px] font-bold text-[rgb(11,11,12)]">
                     {i + 1}
                   </span>
                   <span>
-                    <span className="block text-[14px] font-semibold">{title}</span>
-                    <span className="mk-body !text-[13px]">{body}</span>
+                    <span className="block text-[14px] font-semibold">{step.title}</span>
+                    <span className="mk-body !text-[13px]">{step.body}</span>
                   </span>
                 </li>
               ))}
@@ -916,10 +675,10 @@ export default function LandingPage() {
 
       {/* ── FAQ ── */}
       <section id="faq" className="mk-section py-16">
-        <p className="mk-eyebrow">FAQ</p>
-        <h2 className="mk-h2 mt-3">Questions people ask before they start.</h2>
+        <p className="mk-eyebrow">{t.faq.eyebrow}</p>
+        <h2 className="mk-h2 mt-3">{t.faq.heading}</h2>
         <div className="mt-8 border-t mk-rule">
-          {FAQ.map((f) => (
+          {t.faq.items.map((f) => (
             <FaqItem key={f.q} q={f.q} a={f.a} />
           ))}
         </div>
@@ -935,13 +694,13 @@ export default function LandingPage() {
             <span className="font-display text-[15px] font-bold tracking-tight">Evara AI</span>
           </Link>
           <p className="mk-body !text-[13px]">
-            © {new Date().getFullYear()} Evara AI. Agents that answer, book and follow up.
+            © {new Date().getFullYear()} {t.footer.rights}
           </p>
-          <div className="ml-auto flex items-center gap-5 text-[13px] font-medium text-[rgb(var(--m-ink-2))]">
-            <a href="#capabilities" className="hover:text-[rgb(var(--m-ink))]">Product</a>
-            <a href="#pricing" className="hover:text-[rgb(var(--m-ink))]">Pricing</a>
-            <Link to="/report-issue" className="hover:text-[rgb(var(--m-ink))]">Support</Link>
-            <Link to="/login" className="hover:text-[rgb(var(--m-ink))]">Log in</Link>
+          <div className="ms-auto flex items-center gap-5 text-[13px] font-medium text-[rgb(var(--m-ink-2))]">
+            <a href="#capabilities" className="hover:text-[rgb(var(--m-ink))]">{t.footer.product}</a>
+            <a href="#pricing" className="hover:text-[rgb(var(--m-ink))]">{t.footer.pricing}</a>
+            <Link to="/report-issue" className="hover:text-[rgb(var(--m-ink))]">{t.footer.support}</Link>
+            <Link to="/login" className="hover:text-[rgb(var(--m-ink))]">{t.footer.login}</Link>
           </div>
         </div>
       </footer>

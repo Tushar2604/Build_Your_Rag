@@ -15,12 +15,15 @@ export default function VoiceCallPanel({
   adapter,
   botName,
   theme = "#7c3aed",
+  lang = "en-US",
 }: {
   adapter: VoiceCallAdapter;
   botName: string;
   theme?: string;
+  /** BCP-47. Sets what the microphone listens for — see `useVoice`. */
+  lang?: string;
 }) {
-  const call = useVoiceCall(adapter);
+  const call = useVoiceCall(adapter, lang);
   const { state, ended, captions, active, sttSupported } = call;
   const [typedInput, setTypedInput] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);

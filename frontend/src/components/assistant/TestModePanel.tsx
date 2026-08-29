@@ -11,6 +11,7 @@ import { Loader2, Send, Sparkles, X } from "lucide-react";
 import { Chatbot } from "../../api/chatbots";
 import { askStream, createSession, greetStream } from "../../api/chat";
 import VoiceCallModal from "../VoiceCallModal";
+import { voiceTagFor } from "../../hooks/useVoice";
 
 export type TestMode = "chat" | "web-call";
 
@@ -189,6 +190,10 @@ export default function TestModePanel({ bot, mode, onClose }: Props) {
       <VoiceCallModal
         botName={bot.name}
         onClose={onClose}
+        // Without this the microphone listens for en-US whatever the assistant
+        // is configured to speak, and a Hindi caller is transcribed as
+        // nonsense English before the model ever sees a word.
+        lang={voiceTagFor(bot.assistant?.languages)}
         adapter={{
           createSession: async () => (await createSession(bot.id)).session_id,
           greet: (sid, h) =>

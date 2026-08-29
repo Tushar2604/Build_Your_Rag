@@ -10,6 +10,9 @@ export interface PublicConfig {
   name: string;
   channel: Channel;
   widget: WidgetConfig;
+  /** What the assistant speaks. The widget's microphone has to be set to a
+   * language before anyone talks — see `voiceTagFor`. */
+  languages: string[];
 }
 
 export interface PublicCitation {

@@ -10,6 +10,7 @@ import {
   PublicCitation,
 } from "../api/public";
 import VoiceCallPanel from "../components/VoiceCallPanel";
+import { voiceTagFor } from "../hooks/useVoice";
 import { useIdleNudge } from "../hooks/useIdleNudge";
 
 interface ChatMessage {
@@ -65,6 +66,7 @@ export default function WidgetChatPage() {
           <VoiceCallPanel
             botName={name}
             theme={theme}
+            lang={voiceTagFor(config.languages)}
             adapter={{
               createSession: () => createPublicSession(publicKey),
               greet: (sid, h) =>

@@ -116,7 +116,11 @@ async def widget_config(
 ) -> PublicConfigResponse:
     bot = await _resolve_public(public_key, request, container)
     return PublicConfigResponse(
-        chatbot_id=bot.id, name=bot.name, channel=bot.channel, widget=_to_widget_schema(bot)
+        chatbot_id=bot.id,
+        name=bot.name,
+        channel=bot.channel,
+        widget=_to_widget_schema(bot),
+        languages=list(bot.assistant.languages),
     )
 
 

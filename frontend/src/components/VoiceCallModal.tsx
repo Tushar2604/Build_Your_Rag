@@ -30,12 +30,15 @@ export default function VoiceCallModal({
   adapter,
   botName,
   onClose,
+  lang = "en-US",
 }: {
   adapter: VoiceCallAdapter;
   botName: string;
   onClose: () => void;
+  /** BCP-47. Sets what the microphone listens for — see `useVoice`. */
+  lang?: string;
 }) {
-  const call = useVoiceCall(adapter);
+  const call = useVoiceCall(adapter, lang);
   const { state, ended, captions, active, sttSupported } = call;
   const [typedInput, setTypedInput] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
