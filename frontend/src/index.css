@@ -914,3 +914,176 @@
     background-image: linear-gradient(110deg, rgb(251 146 90), rgb(232 96 176), rgb(167 139 250));
   }
 }
+
+
+/* ── Marketing surface ─────────────────────────────────────────────────────
+   The public site, and only the public site.
+
+   Everything below is scoped under `.marketing` and consumes its OWN custom
+   properties rather than the app tokens above. That is deliberate: the console
+   is a dark violet workspace that themes with `data-theme`, and the marketing
+   site is a fixed light page with a different palette entirely. Sharing tokens
+   between them would mean every future console change had to be checked
+   against the landing page, and every marketing tweak against thirty product
+   screens.
+
+   The palette is one place. Swap `--m-accent` and the whole site follows.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.marketing {
+  /* Grounds. Two: pure white for the panels that carry content, and a warm
+     off-white for the bands between them. The alternation is what gives the
+     page its rhythm without a single divider line. */
+  --m-bg: 255 255 255;
+  --m-bg-alt: 244 244 240;
+  /* Ink. Near-black rather than black — pure #000 on white vibrates at large
+     display sizes. */
+  --m-ink: 11 11 12;
+  --m-ink-2: 91 91 96;
+  --m-ink-3: 138 138 143;
+  --m-rule: 226 226 220;
+  /* The one saturated colour on the page. Used for emphasis, never for large
+     areas of text: at body size on white it fails contrast, which is why the
+     accent-coloured type below is always >= 18px and semibold. */
+  --m-accent: 0 196 106;
+  --m-accent-ink: 0 122 66;
+  --m-accent-tint: 214 251 231;
+  /* Inverted band — the dark section that breaks the page up before the CTA. */
+  --m-invert-bg: 11 11 12;
+  --m-invert-ink: 250 250 248;
+
+  background-color: rgb(var(--m-bg));
+  color: rgb(var(--m-ink));
+  font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Inverted regions re-point the same variables rather than overriding every
+   rule, so a card dropped into a dark band styles itself correctly. */
+.marketing .mk-invert {
+  --m-bg: 11 11 12;
+  --m-bg-alt: 24 24 26;
+  --m-ink: 250 250 248;
+  --m-ink-2: 168 168 172;
+  --m-ink-3: 120 120 126;
+  --m-rule: 44 44 48;
+  background-color: rgb(var(--m-bg));
+  color: rgb(var(--m-ink));
+}
+
+@layer components {
+  /* ── Type ─────────────────────────────────────────────────────────────
+     Display sizes are fluid rather than stepped at breakpoints: the hero
+     headline is the one element that has to look deliberate at every width,
+     and three hand-tuned breakpoints always leave a gap where it does not. */
+  /* Capped at 4.5rem rather than 5rem. At 5rem a six-word line wrapped to six
+     lines, which made the hero's left column tall enough that nothing could be
+     balanced against it — the panel beside it looked small no matter how big
+     it actually was. */
+  .mk-display {
+    font-family: "Sora", "Plus Jakarta Sans", sans-serif;
+    font-size: clamp(2.5rem, 5.4vw, 4.5rem);
+    line-height: 1.04;
+    letter-spacing: -0.035em;
+    font-weight: 600;
+    color: rgb(var(--m-ink));
+  }
+  .mk-h2 {
+    font-family: "Sora", "Plus Jakarta Sans", sans-serif;
+    font-size: clamp(1.9rem, 3.6vw, 3rem);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+    color: rgb(var(--m-ink));
+  }
+  .mk-h3 {
+    font-family: "Sora", "Plus Jakarta Sans", sans-serif;
+    font-size: 1.25rem;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    color: rgb(var(--m-ink));
+  }
+  .mk-lead {
+    font-size: clamp(1.05rem, 1.5vw, 1.3rem);
+    line-height: 1.55;
+    color: rgb(var(--m-ink-2));
+  }
+  .mk-body { font-size: 0.975rem; line-height: 1.6; color: rgb(var(--m-ink-2)); }
+  /* The small uppercase label above a section heading. Letterspaced hard —
+     at this size it is a texture, not a word to be read quickly. */
+  .mk-eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgb(var(--m-accent-ink));
+  }
+
+  /* ── Buttons ──────────────────────────────────────────────────────────
+     Uppercase and letterspaced, with a small radius. Solid ink rather than
+     the accent colour: green on white cannot carry white text accessibly,
+     and green-on-black loses the accent's job of pointing at one thing. */
+  .mk-btn {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap
+           rounded-[6px] px-6 py-3.5 transition-all duration-150;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+  .mk-btn-primary {
+    background-color: rgb(var(--m-ink));
+    color: rgb(var(--m-bg));
+  }
+  .mk-btn-primary:hover { background-color: rgb(var(--m-accent-ink)); }
+  .mk-btn-secondary {
+    border: 1px solid rgb(var(--m-ink) / 0.25);
+    color: rgb(var(--m-ink));
+  }
+  .mk-btn-secondary:hover {
+    border-color: rgb(var(--m-ink));
+    background-color: rgb(var(--m-ink) / 0.04);
+  }
+  .mk-btn-accent {
+    background-color: rgb(var(--m-accent));
+    color: rgb(11 11 12);
+  }
+  .mk-btn-accent:hover { filter: brightness(0.94); }
+
+  /* ── Surfaces ─────────────────────────────────────────────────────────
+     A hairline and a small radius, no drop shadow. Elevation on a light
+     editorial page reads as a mistake; the border is doing the work. */
+  .mk-card {
+    @apply rounded-xl p-6 transition-colors duration-200;
+    background-color: rgb(var(--m-bg));
+    border: 1px solid rgb(var(--m-rule));
+  }
+  .mk-card-hover:hover { border-color: rgb(var(--m-accent)); }
+  .mk-rule { border-color: rgb(var(--m-rule)); }
+  .mk-band { background-color: rgb(var(--m-bg-alt)); }
+  .mk-section { @apply mx-auto w-full max-w-[1200px] px-6; }
+  .mk-pill {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background-color: rgb(var(--m-accent-tint));
+    color: rgb(var(--m-accent-ink));
+  }
+  /* Icon chip on a feature card — a tinted square, not a coloured circle:
+     square corners echo the card's own radius at a smaller scale. */
+  .mk-chip {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-lg;
+    background-color: rgb(var(--m-accent-tint));
+    color: rgb(var(--m-accent-ink));
+  }
+  .mk-invert .mk-chip {
+    background-color: rgb(var(--m-accent) / 0.15);
+    color: rgb(var(--m-accent));
+  }
+  .mk-invert .mk-card { border-color: rgb(var(--m-rule)); background-color: rgb(24 24 26); }
+  .mk-invert .mk-eyebrow { color: rgb(var(--m-accent)); }
+  .mk-invert .mk-btn-primary { background-color: rgb(var(--m-accent)); color: rgb(11 11 12); }
+  .mk-invert .mk-btn-primary:hover { filter: brightness(0.94); }
+  .mk-invert .mk-btn-secondary { border-color: rgb(var(--m-ink) / 0.3); }
+}

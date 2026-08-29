@@ -13,7 +13,7 @@ constraint added by migration 0025 is turned into a domain-level conflict.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, Result, delete, func, or_, select, update
@@ -846,6 +846,26 @@ class AppointmentRepositoryImpl:
             )
         ).all()
         return dict(rows)  # type: ignore[arg-type]
+
+    async def count_booked_since(
+        self, tenant_id: TenantId, since: datetime, *, upcoming_only: bool = True
+    ) -> int:
+        conditions = [
+            m.AppointmentModel.tenant_id == tenant_id,
+            m.AppointmentModel.created_at > since,
+            # A booking the customer or the front desk already cancelled is not
+            # something to go and look at.
+            m.AppointmentModel.status.not_in(("cancelled", "no_show")),
+        ]
+        if upcoming_only:
+            conditions.append(m.AppointmentModel.ends_at >= datetime.now(UTC))
+        return int(
+            (
+                await self._s.execute(
+                    select(func.count()).select_from(m.AppointmentModel).where(*conditions)
+                )
+            ).scalar_one()
+        )
 
 
 class ReservationRepositoryImpl:

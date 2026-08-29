@@ -9,9 +9,10 @@
 // already owns polling, takeover and the composer; this page links there
 // instead of growing a second copy of it.
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, Download, ExternalLink, Link2, MessageCircle, MessageSquare, Paperclip,
+  Phone,
 } from "lucide-react";
 
 import { Candidate, getCandidate } from "../api/candidates";
@@ -144,6 +145,7 @@ function Section({
 
 export default function CandidateProfilePage() {
   const { candidateId = "" } = useParams();
+  const navigate = useNavigate();
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [messages, setMessages] = useState<InboxMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,7 +216,45 @@ export default function CandidateProfilePage() {
           <p className="mt-0.5 truncate text-[13px] tabular-nums text-gray-600">
             {candidate.phone_number}
           </p>
-          <p className="mt-0.5 truncate text-[11.5px] text-gray-400">{candidate.channel_label}</p>
+          {/* Which WhatsApp number this conversation is on — and, when the
+              same person has also written to another of them, the switch
+              between the two. They are one candidate with two conversations;
+              merging them would splice together threads the contact kept
+              separate, and hiding one would lose it. */}
+          {candidate.threads.length > 1 ? (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Phone className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" strokeWidth={2} />
+              {candidate.threads.map((t) => {
+                const active = t.conversation_id === candidate.id;
+                return (
+                  <button
+                    key={t.conversation_id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => navigate(`/candidates/${t.conversation_id}`)}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1
+                                text-[11px] font-semibold transition-colors ${
+                                  active
+                                    ? "bg-gray-900 text-white"
+                                    : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900"
+                                }`}
+                  >
+                    {t.channel_label}
+                    <span className="tabular-nums opacity-60">{t.message_count}</span>
+                    {t.unread_count > 0 && (
+                      <span className="rounded-full bg-emerald-500 px-1.5 text-[10px] font-bold text-white">
+                        {t.unread_count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mt-0.5 truncate text-[11.5px] text-gray-400">
+              {candidate.channel_label}
+            </p>
+          )}
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <span
               className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${

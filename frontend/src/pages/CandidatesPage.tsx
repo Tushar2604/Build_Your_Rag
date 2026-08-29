@@ -9,9 +9,12 @@
 // shared rather than living inside this page's transient selection.
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { FileText, MessageSquare, Paperclip, Search, Users } from "lucide-react";
+import { FileText, MessageSquare, Paperclip, Phone, Search, Users } from "lucide-react";
 
-import { Candidate, CrmDestination, listCandidates } from "../api/candidates";
+import {
+  Candidate, ConnectedNumber, CrmDestination, listCandidates, listConnectedNumbers,
+} from "../api/candidates";
+import { mergeDuplicateNumbers } from "../api/whatsappWeb";
 import { ApiError } from "../api/client";
 import { Avatar, timeLabel } from "../components/ConversationThread";
 import SendToCrmButton, { useCrmDestination } from "../components/SendToCrmButton";
@@ -95,7 +98,18 @@ function CandidateCard({
               {candidate.phone_number}
             </p>
           )}
-          <p className="mt-0.5 truncate text-[10.5px] text-gray-400">{candidate.channel_label}</p>
+          <p className="mt-0.5 truncate text-[10.5px] text-gray-400">
+            {candidate.channel_label}
+            {candidate.threads.length > 1 && (
+              // Said plainly rather than shown as two cards: they are one
+              // person, and the profile is where the two conversations are
+              // actually switched between.
+              <span className="ml-1 font-semibold text-brand-600">
+                +{candidate.threads.length - 1} more number
+                {candidate.threads.length > 2 ? "s" : ""}
+              </span>
+            )}
+          </p>
         </div>
         <span className="flex-shrink-0 text-[10.5px] tabular-nums text-gray-400">
           {timeLabel(candidate.last_message_at)}
@@ -148,6 +162,10 @@ function CandidateCard({
 
 export default function CandidatesPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [numbers, setNumbers] = useState<ConnectedNumber[]>([]);
+  // "" is every number. Held as a separate axis from the status chips because
+  // the two are asked together — "who has unread replies, on this number".
+  const [numberId, setNumberId] = useState("");
   const [total, setTotal] = useState(0);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
@@ -157,11 +175,24 @@ export default function CandidatesPage() {
   // workspace setting and cannot differ between the cards on screen.
   const crm = useCrmDestination();
 
+  // Threads that were split by four writers spelling one number four ways are
+  // folded together before the first read. Idempotent and cheap when there is
+  // nothing to merge, and this is the page where the split was visible — a
+  // contact appearing three times with the same name.
+  useEffect(() => {
+    mergeDuplicateNumbers()
+      .catch(() => undefined)
+      .then(() => listConnectedNumbers())
+      .then(setNumbers)
+      .catch(() => setNumbers([]));
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const page = await listCandidates({
         search: search.trim(),
         ...filterParams(filter),
+        numberId: numberId || undefined,
         pageSize: 60,
       });
       setCandidates(page.candidates);
@@ -172,11 +203,13 @@ export default function CandidatesPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, filter]);
+  }, [search, filter, numberId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const activeNumber = numbers.find((n) => n.id === numberId) || null;
 
   return (
     <div className="page">
@@ -188,12 +221,59 @@ export default function CandidatesPage() {
           <div className="min-w-0">
             <h1 className="page-title">Candidates</h1>
             <p className="page-subtitle">
-              {total} conversation{total === 1 ? "" : "s"} across every WhatsApp number
+              {total} {total === 1 ? "person" : "people"}
+              {activeNumber
+                ? ` on ${activeNumber.label}`
+                : " across every WhatsApp number"}
             </p>
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        {/* Which WhatsApp number. Above the status chips because it is the
+            wider cut: everything below it is "…and of those, which ones".
+            Hidden entirely with a single number connected, where a picker
+            with one option is just a control that does nothing. */}
+        {numbers.length > 1 && (
+          <div className="mt-4 flex flex-wrap items-center gap-1.5">
+            <Phone className="mr-0.5 h-3.5 w-3.5 text-gray-400" strokeWidth={2} />
+            <button
+              type="button"
+              aria-pressed={numberId === ""}
+              onClick={() => setNumberId("")}
+              className={`rounded-full px-3 py-1.5 text-[11.5px] font-semibold transition-colors ${
+                numberId === ""
+                  ? "bg-gray-900 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900"
+              }`}
+            >
+              All numbers
+            </button>
+            {numbers.map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                aria-pressed={numberId === n.id}
+                onClick={() => setNumberId(n.id)}
+                title={n.connected ? "Connected" : "Not currently connected"}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5
+                            text-[11.5px] font-semibold transition-colors ${
+                              numberId === n.id
+                                ? "bg-gray-900 text-white"
+                                : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900"
+                            }`}
+              >
+                <span
+                  className={n.connected ? "dot bg-emerald-500" : "dot bg-gray-400"}
+                  aria-hidden="true"
+                />
+                {n.label}
+                <span className="tabular-nums opacity-60">{n.contact_count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <div className="relative min-w-[240px] flex-1 sm:max-w-sm">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"

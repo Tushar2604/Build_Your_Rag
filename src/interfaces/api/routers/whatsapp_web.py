@@ -43,6 +43,7 @@ from src.config.container import get_container
 from src.config.settings import get_settings
 from src.domain.chat.entities import ChatSession, Message, MessageRole
 from src.domain.shared.identifiers import ChatbotId, SessionId, TenantId
+from src.domain.shared.phone import canonical_phone
 from src.domain.whatsapp_web.entities import WhatsAppWebSession
 from src.infrastructure.llm.resilience import Bulkhead
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
@@ -471,11 +472,17 @@ async def inbox_stats(
 async def merge_duplicate_numbers(
     principal: AdminPrincipalDep, container: ContainerDep
 ) -> MergeDuplicateNumbersResponse:
-    """Fold numbers that got connected twice back into one.
+    """Fold duplicates back together, at both levels they occur.
 
-    Heals workspaces that already have duplicates — new ones are absorbed at
-    link time (see `_absorb_duplicates`). Idempotent: with nothing to merge it
-    reports zeroes, which is why the Channels page can call it on load.
+    A number connected twice becomes two sessions; a contact whose number was
+    written two ways becomes two threads. Both show up as "the same number in
+    three places", and both are healed here — sessions first, so the thread
+    pass runs against the owners that survive.
+
+    Heals workspaces that already have duplicates; new ones are prevented at
+    the source (canonical phone numbers on write) and absorbed at link time
+    (`_absorb_duplicates`). Idempotent: with nothing to merge it reports
+    zeroes, which is why the Channels and Candidates pages can call it on load.
     """
     merged = 0
     moved = 0
@@ -495,10 +502,42 @@ async def merge_duplicate_numbers(
         if len(group) < 2:
             continue
         keeper, *stale = group
-        for old in stale:
-            moved += await _absorb_session(container, keeper, old)
+        for stale_session in stale:
+            moved += await _absorb_session(container, keeper, stale_session)
             merged += 1
-    return MergeDuplicateNumbersResponse(merged_sessions=merged, moved_conversations=moved)
+
+    # Second pass, and the one that actually clears the reported symptom: a
+    # contact appearing several times under a single number. Those are not
+    # duplicate *sessions* — they are duplicate threads, created because four
+    # writers each spelled the same phone number differently before it was
+    # canonicalised. Run per owner, never across owners: two connected numbers
+    # that both talked to this contact are two real conversations, and the
+    # Candidates view groups those rather than destroying one of them.
+    threads = 0
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        owners = [
+            ws.id for ws in await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
+        ]
+        owners += [
+            c.id for c in await uow.whatsapp_channels.list_for_tenant(principal.tenant_id)
+        ]
+        for owner_id in owners:
+            threads += await uow.whatsapp_conversations.merge_duplicate_threads(
+                principal.tenant_id, owner_ids=[owner_id]
+            )
+        await uow.commit()
+
+    if merged or threads:
+        log.info(
+            "whatsapp.duplicates_merged",
+            tenant_id=str(principal.tenant_id),
+            sessions=merged,
+            threads=threads,
+        )
+    return MergeDuplicateNumbersResponse(
+        merged_sessions=merged, moved_conversations=moved, merged_threads=threads
+    )
 
 
 # --- Inbox (browser-facing) ---
@@ -1045,6 +1084,12 @@ async def _ensure_conversation(
     still needs somewhere to put its messages, or the inbox is empty for exactly
     the case where someone is trying to read what came in.
     """
+    # One shape for the number, whichever writer we are. The live socket, the
+    # history import and a pasted campaign list each spell it differently, and
+    # `whatsapp_conversations` is unique on the literal string — so without
+    # this the same contact gets a fresh thread, and a fresh Candidates entry,
+    # for every shape they arrive in.
+    phone = canonical_phone(phone)
     conversation = await uow.whatsapp_conversations.get(session_id, phone)
     if conversation is not None:
         if display_name and not conversation.display_name:

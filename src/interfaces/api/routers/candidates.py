@@ -21,15 +21,18 @@ import re
 import uuid
 from urllib.parse import urlsplit
 
+from fastapi import APIRouter, HTTPException, Query
+
 from src.domain.chat.entities import MessageRole
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.schemas import (
     CandidatePageResponse,
     CandidateResponse,
+    CandidateThreadResponse,
+    ConnectedNumberResponse,
     CrmDestinationResponse,
     CrmExportResponse,
 )
-from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 
@@ -56,26 +59,42 @@ async def list_candidates(
     search: str = Query("", max_length=120),
     has_attachment: bool | None = None,
     unread_only: bool = False,
+    number_id: uuid.UUID | None = Query(
+        None,
+        description="Show only people on this connected WhatsApp number "
+        "(a linked session id or a Cloud API channel id). Omit for all numbers.",
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=1, le=_MAX_PAGE_SIZE),
 ) -> CandidatePageResponse:
+    """People, one row each.
+
+    Grouped by contact rather than by thread. A contact who reached two
+    connected numbers has a real conversation on each, and listing threads
+    showed them twice — which read as a duplicate even though neither copy was
+    wrong. The card represents whichever thread is most recently active and
+    carries the rest in `threads`, so the profile can switch between numbers
+    instead of one of them being thrown away.
+    """
     offset = (page - 1) * page_size
 
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(principal.tenant_id)
-        rows = await uow.whatsapp_conversations.list_for_tenant(
+        rows = await uow.whatsapp_conversations.list_contacts_for_tenant(
             principal.tenant_id,
             search=search,
             has_attachment=has_attachment,
             unread_only=unread_only,
+            owner_id=number_id,
             limit=page_size,
             offset=offset,
         )
-        total = await uow.whatsapp_conversations.count_for_tenant(
+        total = await uow.whatsapp_conversations.count_contacts_for_tenant(
             principal.tenant_id,
             search=search,
             has_attachment=has_attachment,
             unread_only=unread_only,
+            owner_id=number_id,
         )
         # Every number this tenant has, so each conversation can be labelled
         # with where it came in — the same lookup broadcasts.py:list_senders
@@ -87,12 +106,65 @@ async def list_candidates(
             s.id: s
             for s in await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
         }
+        siblings = {
+            row.id: await uow.whatsapp_conversations.threads_for_contact(
+                principal.tenant_id, row.phone_number
+            )
+            for row in rows
+        }
         counts = await uow.chats.message_counts(
-            principal.tenant_id, [r.session_id for r in rows]
+            principal.tenant_id,
+            [t.session_id for threads in siblings.values() for t in threads],
         )
 
-    candidates = [_to_response(row, channels, sessions, counts) for row in rows]
+    candidates = [
+        _to_response(row, channels, sessions, counts, siblings.get(row.id, [])) for row in rows
+    ]
     return CandidatePageResponse(candidates=candidates, total=total, page=page, page_size=page_size)
+
+
+@router.get("/numbers", response_model=list[ConnectedNumberResponse])
+async def connected_numbers(
+    principal: AdminPrincipalDep, container: ContainerDep
+) -> list[ConnectedNumberResponse]:
+    """The numbers the list can be filtered by, with how many people are on each.
+
+    Its own endpoint rather than a field on the page response: the picker has
+    to stay put while you page and search through the list under it, and a
+    filter whose own options change as you use it is unusable.
+    """
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        channels = await uow.whatsapp_channels.list_for_tenant(principal.tenant_id)
+        sessions = await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
+        out: list[ConnectedNumberResponse] = []
+        for ws in sessions:
+            out.append(
+                ConnectedNumberResponse(
+                    id=ws.id,
+                    kind="personal",
+                    phone_number=ws.phone_number,
+                    label=ws.display_name or ws.phone_number or "Pairing…",
+                    connected=ws.status == "linked",
+                    contact_count=await uow.whatsapp_conversations.count_contacts_for_tenant(
+                        principal.tenant_id, owner_id=ws.id
+                    ),
+                )
+            )
+        for channel in channels:
+            out.append(
+                ConnectedNumberResponse(
+                    id=channel.id,
+                    kind="cloud_api",
+                    phone_number=channel.phone_number,
+                    label=channel.phone_number,
+                    connected=channel.status == "active",
+                    contact_count=await uow.whatsapp_conversations.count_contacts_for_tenant(
+                        principal.tenant_id, owner_id=channel.id
+                    ),
+                )
+            )
+    return out
 
 
 @router.get("/{conversation_id}", response_model=CandidateResponse)
@@ -118,27 +190,57 @@ async def get_candidate(
             s.id: s
             for s in await uow.whatsapp_web_sessions.list_for_tenant(principal.tenant_id)
         }
-        counts = await uow.chats.message_counts(principal.tenant_id, [row.session_id])
-
-    return _to_response(row, channels, sessions, counts)
-
-
-def _to_response(row, channels: dict, sessions: dict, counts: dict) -> CandidateResponse:
-    channel = channels.get(row.whatsapp_channel_id)
-    session = sessions.get(row.whatsapp_channel_id)
-    if channel is not None:
-        channel_kind, channel_label, session_id = "cloud_api", f"{channel.phone_number} · Cloud API", None
-    elif session is not None:
-        channel_kind = "personal"
-        channel_label = (
-            f"{session.phone_number or session.display_name or 'Personal WhatsApp'} · Phone WhatsApp"
+        siblings = await uow.whatsapp_conversations.threads_for_contact(
+            principal.tenant_id, row.phone_number
         )
-        session_id = session.id
-    else:
-        # The number this conversation started on was since disconnected or
-        # deleted. Still worth showing — losing a candidate's history because
-        # their inbound number was later removed would be a bad trade.
-        channel_kind, channel_label, session_id = "personal", "Number no longer connected", None
+        counts = await uow.chats.message_counts(
+            principal.tenant_id, [t.session_id for t in siblings] or [row.session_id]
+        )
+
+    return _to_response(row, channels, sessions, counts, siblings)
+
+
+def _label_for(owner_id, channels: dict, sessions: dict):
+    """Which connected number a thread came in on, as (kind, label, session_id).
+
+    Shared by the card and by each of its sibling threads, so the number is
+    named the same way in the list and in the profile's number switcher.
+    """
+    channel = channels.get(owner_id)
+    session = sessions.get(owner_id)
+    if channel is not None:
+        return "cloud_api", f"{channel.phone_number} · Cloud API", None
+    if session is not None:
+        label = session.phone_number or session.display_name or "Personal WhatsApp"
+        return "personal", f"{label} · Phone WhatsApp", session.id
+    # The number this conversation started on was since disconnected or
+    # deleted. Still worth showing — losing a candidate's history because
+    # their inbound number was later removed would be a bad trade.
+    return "personal", "Number no longer connected", None
+
+
+def _to_response(
+    row, channels: dict, sessions: dict, counts: dict, siblings: list | None = None
+) -> CandidateResponse:
+    channel_kind, channel_label, session_id = _label_for(
+        row.whatsapp_channel_id, channels, sessions
+    )
+    threads = [
+        CandidateThreadResponse(
+            conversation_id=t.id,
+            **dict(
+                zip(
+                    ("channel_kind", "channel_label", "session_id"),
+                    _label_for(t.whatsapp_channel_id, channels, sessions),
+                    strict=True,
+                )
+            ),
+            last_message_at=t.last_message_at,
+            message_count=counts.get(t.session_id, (0, 0))[0],
+            unread_count=t.unread_count,
+        )
+        for t in (siblings or [])
+    ]
 
     return CandidateResponse(
         id=row.id,
@@ -156,6 +258,7 @@ def _to_response(row, channels: dict, sessions: dict, counts: dict) -> Candidate
         document_count=counts.get(row.session_id, (0, 0))[1],
         followups_sent=row.followups_sent,
         awaiting_reply=row.awaiting_reply_since is not None,
+        threads=threads,
     )
 
 

@@ -22,6 +22,7 @@ from src.application.use_cases.ask_chatbot import AskChatbot
 from src.config.settings import get_settings
 from src.domain.chat.entities import ChatSession
 from src.domain.shared.identifiers import ChatbotId
+from src.domain.shared.phone import canonical_phone
 from src.infrastructure.messaging.twilio_signature import verify_twilio_signature
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.routers.broadcasts import mark_replied
@@ -138,6 +139,11 @@ async def whatsapp_webhook(request: Request, container: ContainerDep) -> Respons
 
     if not body_text or not from_number:
         return _twiml("")
+
+    # Twilio hands us "whatsapp:+91...". Canonicalised so this writer keys a
+    # contact the same way the personal-WhatsApp and campaign paths do —
+    # otherwise the same person is a different row on each.
+    from_number = canonical_phone(from_number)
 
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(channel.tenant_id)

@@ -4,8 +4,9 @@
 // "what does this day look like"; this answers "find me that booking" and
 // "how are we doing" — which are different questions and want different shapes.
 import { useEffect, useState } from "react";
-import { CalendarCheck, Plus, Search } from "lucide-react";
+import { Bell, CalendarCheck, Plus, Search } from "lucide-react";
 import { ApiError } from "../api/client";
+import { useNotifications } from "../store/notifications";
 import AppointmentDrawer from "../components/AppointmentDrawer";
 import BookAppointmentModal from "../components/BookAppointmentModal";
 import {
@@ -49,6 +50,11 @@ export default function AppointmentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Appointment | null>(null);
   const [booking, setBooking] = useState(false);
+  const { newAppointments, markAppointmentsSeen, refresh } = useNotifications();
+  // Captured on mount, before the badge is cleared. Without this the banner
+  // would vanish in the same frame it appeared, and the whole point of the
+  // count is to tell you what arrived while you were on another page.
+  const [arrived] = useState(newAppointments);
 
   async function load() {
     setError(null);
@@ -87,6 +93,10 @@ export default function AppointmentsPage() {
 
   useEffect(() => {
     loadSummary();
+    // Opening this page IS looking at them, so the badge clears here rather
+    // than on a dismiss button nobody would press.
+    markAppointmentsSeen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function replace(updated: Appointment) {
@@ -119,6 +129,16 @@ export default function AppointmentsPage() {
         <div>
           <h1 className="page-title">Appointments</h1>
           <p className="page-subtitle">Every booking, however it was made.</p>
+          {/* What the sidebar badge was counting, spelled out now that you are
+              here. Rendered from the count captured on mount, because opening
+              this page is what cleared it. */}
+          {arrived > 0 && (
+            <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-cta-500/15
+                          px-2.5 py-1 text-[12px] font-semibold text-cta-500">
+              <Bell className="h-3.5 w-3.5" strokeWidth={2.5} />
+              {arrived} new booking{arrived === 1 ? "" : "s"} since you last looked
+            </p>
+          )}
         </div>
         <div className="page-header-actions">
           <button className="btn-primary" onClick={() => setBooking(true)}>
@@ -307,6 +327,11 @@ export default function AppointmentsPage() {
           onBooked={() => {
             load();
             loadSummary();
+            // A booking you just made yourself is not news to you — refreshing
+            // the counter here stops it appearing on the badge you are looking
+            // at.
+            markAppointmentsSeen();
+            refresh();
           }}
           onClose={() => setBooking(false)}
         />

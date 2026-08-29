@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 
@@ -117,6 +118,80 @@ async def ask(
     )
 
 
+# Roughly one bubble's worth of typing per event. The agent has already
+# finished thinking by the time we stream, so this is only about the reply
+# arriving the way every other reply on this endpoint does — a wall of text
+# appearing at once reads as a different, broken feature.
+_AGENT_CHUNK_WORDS = 4
+
+
+def _as_chunks(text: str) -> list[str]:
+    """Break a finished answer into stream-sized pieces, whitespace intact."""
+    parts = re.split(r"(\s+)", text)
+    chunks: list[str] = []
+    buffer = ""
+    words = 0
+    for part in parts:
+        buffer += part
+        if part.strip():
+            words += 1
+        if words >= _AGENT_CHUNK_WORDS:
+            chunks.append(buffer)
+            buffer, words = "", 0
+    if buffer:
+        chunks.append(buffer)
+    return chunks
+
+
+def _agent_stream(container, principal, session_id: uuid.UUID, body: AskRequest, source: str):  # type: ignore[no-untyped-def]
+    """Stream a front-office (booking) answer over the same SSE contract.
+
+    The agent is a multi-step tool loop — list services, find real slots, hold
+    one, book it — so there is nothing to stream *while* it runs; it has an
+    answer or it does not. It is chunked afterwards so the client sees the same
+    `citations` / `token` / `done` sequence it gets from the retrieval path and
+    needs no branch of its own.
+
+    `AskFrontOffice` persists both the question and the answer itself, which is
+    why this generator does none of the persistence the retrieval path below
+    does — doing both would store every turn twice.
+    """
+
+    async def generator():  # type: ignore[no-untyped-def]
+        # Sent even though it is always empty: the client waits for this event
+        # before it starts rendering, and an agent answer is grounded in tool
+        # results rather than in retrieved documents.
+        yield {"event": "citations", "data": "[]"}
+        try:
+            reply = await AskFrontOffice(
+                container.unit_of_work(), container.front_office_agent
+            ).execute(
+                principal.tenant_id,
+                SessionId(session_id),
+                message=body.message,
+                source=source,
+                channel="web",
+            )
+        except Exception as exc:  # noqa: BLE001 - the stream has to end cleanly
+            log.exception("front_office.stream_failed")
+            yield {
+                "event": "error",
+                "data": json.dumps({"detail": f"{type(exc).__name__}: could not answer."}),
+            }
+            return
+
+        for chunk in _as_chunks(reply.answer):
+            yield {"event": "token", "data": chunk}
+        yield {
+            "event": "done",
+            "data": json.dumps(
+                {"message_id": str(reply.message_id), "tokens_used": reply.tokens_used}
+            ),
+        }
+
+    return EventSourceResponse(generator())
+
+
 @router.post("/sessions/{session_id}/stream")
 async def ask_stream(
     session_id: uuid.UUID,
@@ -138,6 +213,16 @@ async def ask_stream(
         bot = await uow.chatbots.get(principal.tenant_id, session.chatbot_id)
         if bot is None:
             raise HTTPException(status_code=404, detail="Chatbot not found")
+
+    # An assistant with appointments enabled answers through the booking agent
+    # here too. Without this branch the streaming endpoint — which is what the
+    # builder's Test panel, the share page and the widget all use — ran plain
+    # retrieval with no tools at all: the model could not book anything, was
+    # never told so, and cheerfully replied "you're booked for 3pm". The
+    # non-streaming sibling above has always routed correctly, which is why the
+    # same assistant worked over WhatsApp and not in its own test panel.
+    if bot.assistant.appointments_enabled:
+        return _agent_stream(container, principal, session_id, body, "web_widget")
         tenant = await uow.tenants.get(principal.tenant_id)
         used = await uow.usage.tokens_used_today(principal.tenant_id)
         if tenant and used >= tenant.daily_token_quota:

@@ -1146,11 +1146,59 @@ class InboxStatsResponse(BaseModel):
     period_label: str = ""
 
 
+class BookingReadinessResponse(BaseModel):
+    """Whether a booking assistant can actually book anything yet.
+
+    Four things have to exist before `find_available_slots` can return a single
+    time: a location, a service, a staff member or room assigned to that
+    service, and opening hours for them. Miss any one and the search returns
+    nothing — which the assistant correctly reports as "no times available",
+    and which looks exactly like a broken assistant from the outside.
+
+    So the check is served rather than described. `blockers` is ordered in the
+    sequence they have to be fixed, because a service cannot be assigned staff
+    that do not exist yet.
+    """
+
+    ready: bool = False
+    locations: int = 0
+    services: int = 0
+    resources: int = 0
+    # Services with at least one staff member or room attached. A service with
+    # none is bookable in theory and never in practice.
+    services_with_staff: int = 0
+    # Resources with at least one opening-hours rule.
+    resources_with_hours: int = 0
+    blockers: list[str] = Field(default_factory=list)
+
+
+class NewAppointmentsResponse(BaseModel):
+    """How many bookings have landed since the caller last looked.
+
+    `since` is echoed back so the client can tell a real zero from a request it
+    sent with the wrong watermark — the badge is only trustworthy if both ends
+    agree on what "new" is being measured from.
+    """
+
+    count: int = 0
+    since: datetime
+    # The newest booking's timestamp, or None when nothing is new. The client
+    # advances its watermark to this rather than to "now", so a booking that
+    # lands between the query and the click is not silently marked as seen.
+    latest_at: datetime | None = None
+
+
 class MergeDuplicateNumbersResponse(BaseModel):
-    """Result of folding re-scanned numbers back together."""
+    """Result of folding duplicates back together.
+
+    Two counters because there are two kinds: a number connected twice
+    (`merged_sessions`), and one contact written two ways under a single number
+    (`merged_threads`). Both present as "the same number in three places".
+    """
 
     merged_sessions: int = 0
     moved_conversations: int = 0
+    merged_threads: int = 0
 
 
 # --- Candidates (tenant-wide, read-oriented view over every WhatsApp number) ---
@@ -1184,6 +1232,42 @@ class CandidateResponse(BaseModel):
     # "chased twice, gone quiet" rather than looking identical to a live one.
     followups_sent: int = 0
     awaiting_reply: bool = False
+    # Every thread this person has, across every connected number — this card
+    # represents the most recently active one. Usually a single entry; more
+    # than one means they have talked to the workspace on two numbers, which is
+    # two real conversations to switch between, not a duplicate to delete.
+    threads: list[CandidateThreadResponse] = Field(default_factory=list)
+
+
+class CandidateThreadResponse(BaseModel):
+    """One of a contact's conversations, labelled with the number it is on."""
+
+    conversation_id: uuid.UUID
+    # The connected number that owns it: a linked personal session, or a Cloud
+    # API channel. Null when that number has since been disconnected.
+    session_id: uuid.UUID | None = None
+    channel_kind: SenderKindLiteral = "personal"
+    channel_label: str = ""
+    last_message_at: datetime | None = None
+    message_count: int = 0
+    unread_count: int = 0
+
+
+class ConnectedNumberResponse(BaseModel):
+    """A number the Candidates page can filter by.
+
+    Both kinds in one list — an operator picking "which WhatsApp number" does
+    not care whether it is a linked handset or a Cloud API sender, and making
+    them choose a tab first would be asking about our implementation.
+    """
+
+    id: uuid.UUID
+    kind: SenderKindLiteral
+    phone_number: str
+    label: str
+    # Personal numbers only: whether the socket is currently up.
+    connected: bool = True
+    contact_count: int = 0
 
 
 class CandidatePageResponse(BaseModel):

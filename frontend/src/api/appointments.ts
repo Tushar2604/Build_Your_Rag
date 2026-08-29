@@ -273,6 +273,27 @@ export const availabilityApi = {
 };
 
 // --- Appointments ---
+export interface BookingReadiness {
+  ready: boolean;
+  locations: number;
+  services: number;
+  resources: number;
+  services_with_staff: number;
+  resources_with_hours: number;
+  /** In the order they have to be fixed. */
+  blockers: string[];
+}
+
+export interface NewAppointments {
+  count: number;
+  /** Echoed back, so a real zero is distinguishable from a request sent with
+   * the wrong watermark. */
+  since: string;
+  /** The newest booking's timestamp, or null when nothing is new. Clients
+   * advance their watermark to this rather than to "now". */
+  latest_at: string | null;
+}
+
 export const appointmentsApi = {
   list: (params: {
     range_start?: string;
@@ -290,6 +311,18 @@ export const appointmentsApi = {
     api.get<AppointmentSummary>(
       `/appointments/summary${qs({ range_start: rangeStart, range_end: rangeEnd })}`,
     ),
+
+  /** Whether this workspace can actually book anything yet, and what is
+   * missing if not. Four things have to exist before availability search
+   * returns a single time; missing any one looks exactly like a broken
+   * assistant from the outside. */
+  readiness: () => api.get<BookingReadiness>("/appointments/readiness"),
+
+  /** Bookings taken since `since` — the sidebar badge's number. Omitting
+   * `since` asks for the last day, so a browser that has never looked does not
+   * open with a badge in the hundreds. */
+  newSince: (since?: string) =>
+    api.get<NewAppointments>(`/appointments/new${qs({ since })}`),
 
   get: (id: string) => api.get<Appointment>(`/appointments/${id}`),
 

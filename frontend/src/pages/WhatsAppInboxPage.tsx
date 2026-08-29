@@ -41,7 +41,7 @@ import { useAuth } from "../store/auth";
 import InboxStatsBar from "../components/inbox/InboxStatsBar";
 import ContactPanel from "../components/inbox/ContactPanel";
 import {
-  Avatar, ConversationThread, MediaIcon, sizeLabel, timeLabel,
+  Avatar, ConversationThread, MediaIcon, presenceOf, sizeLabel, timeLabel,
 } from "../components/ConversationThread";
 
 const POLL_MS = 4000;
@@ -547,7 +547,12 @@ export default function WhatsAppInboxPage() {
                                     : "border-transparent hover:bg-gray-100"
                                 }`}
                   >
-                    <Avatar name={c.display_name} phone={c.phone_number} size={40} />
+                    <Avatar
+                      name={c.display_name}
+                      phone={c.phone_number}
+                      size={40}
+                      presence={presenceOf(c.last_message_at)}
+                    />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
                         <span className="flex min-w-0 items-center gap-1">
@@ -685,13 +690,28 @@ export default function WhatsAppInboxPage() {
           ) : (
             <>
               <header className="flex flex-shrink-0 items-center gap-3 border-b border-gray-200 bg-surface px-5 py-2.5">
-                <Avatar name={selected.display_name} phone={selected.phone_number} size={38} />
+                <Avatar
+                  name={selected.display_name}
+                  phone={selected.phone_number}
+                  size={38}
+                  presence={presenceOf(selected.last_message_at)}
+                />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14.5px] font-semibold text-gray-900">
                     {selected.display_name || selected.phone_number}
                   </p>
                   <p className="truncate text-[11.5px] text-gray-500">
-                    {[selected.company, selected.phone_number].filter(Boolean).join(" · ")}
+                    {[
+                      selected.company,
+                      selected.phone_number,
+                      // "Online" would be a claim WhatsApp never makes to us.
+                      // "Active today" is the same reassurance and is true.
+                      presenceOf(selected.last_message_at) === "active"
+                        ? "Active today"
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                     {selected.auto_reply && session?.chatbot_name && (
                       <> · answered by {session.chatbot_name}</>
                     )}
@@ -818,34 +838,30 @@ export default function WhatsAppInboxPage() {
               {/* Who owns this and what state it is in, stated once under the
                   header — the two facts a second person opening the thread
                   needs before they type anything. */}
-              <div className="flex flex-shrink-0 items-center gap-2 border-b border-gray-200 bg-surface-2 px-5 py-1.5">
+              <div className="flex flex-shrink-0 items-center gap-2 border-b border-gray-200 bg-canvas px-5 py-2">
                 {selected.assignee_email ? (
-                  <span className="flex items-center gap-1.5 text-[12px] font-semibold text-brand-700">
-                    <AssigneeChip email={selected.assignee_email} size={18} />
+                  <span
+                    className="inline-flex items-center gap-2 rounded-full bg-brand-500/10 py-1 pl-1 pr-3
+                               text-[12.5px] font-semibold text-brand-700"
+                  >
+                    <AssigneeChip email={selected.assignee_email} size={22} />
                     Assigned: {memberName(selected.assignee_email)}
                   </span>
                 ) : (
-                  <span className="text-[12px] text-gray-500">Unassigned</span>
-                )}
-                <span className="ml-auto flex items-center gap-2 text-[11.5px] text-gray-500">
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5
-                                text-[11px] font-semibold ${
-                                  selected.status === "open"
-                                    ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200"
-                                    : "bg-gray-100 text-gray-600 ring-1 ring-inset ring-gray-200"
-                                }`}
-                  >
-                    {selected.status === "open" ? "Open" : "Closed"}
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5
+                                   text-[12.5px] font-semibold text-gray-500">
+                    <UserPlus className="h-3.5 w-3.5" strokeWidth={2} />
+                    Unassigned
                   </span>
-                  {selected.tags.slice(0, 3).map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full bg-brand-500/10 px-2 py-0.5 text-[11px] font-semibold text-brand-700"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+                )}
+                {/* State and tags as one quiet line — the same shape as the
+                    reference, where the thread's status and its lane read as
+                    a single caption rather than competing badges. */}
+                <span className="ml-auto truncate text-[12.5px] text-gray-500">
+                  {[
+                    selected.status === "open" ? "Open" : "Closed",
+                    ...selected.tags.slice(0, 3),
+                  ].join(" · ")}
                 </span>
               </div>
 

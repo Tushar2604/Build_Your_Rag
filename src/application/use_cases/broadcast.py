@@ -29,6 +29,7 @@ from src.domain.broadcast.entities import (
 )
 from src.domain.chat.entities import ChatSession, Message, MessageRole
 from src.domain.shared.identifiers import TenantId
+from src.domain.shared.phone import canonical_phone
 
 log = structlog.get_logger(__name__)
 
@@ -297,7 +298,11 @@ class SendBroadcast:
         # The owning id is the channel for Cloud API and the linked session for
         # a personal account; the column holds either (see migration 0021).
         owner_id = broadcast.sender_id
-        existing = await uow.whatsapp_conversations.get(owner_id, recipient.phone_number)
+        # Canonicalised so a recipient who later replies is recognised as the
+        # contact this thread already belongs to, rather than opening a second
+        # one under whatever shape the socket reports them in.
+        phone = canonical_phone(recipient.phone_number)
+        existing = await uow.whatsapp_conversations.get(owner_id, phone)
         if existing is not None:
             # The opening message has just gone out on an existing thread, so
             # the follow-up clock starts here too — a returning contact who
@@ -315,7 +320,7 @@ class SendBroadcast:
         await uow.chats.add_session(session)
         conversation = WhatsAppConversation(
             whatsapp_channel_id=owner_id,
-            phone_number=recipient.phone_number,
+            phone_number=phone,
             session_id=session.id,
             tenant_id=broadcast.tenant_id,
             auto_reply=broadcast.replies_are_answered(),

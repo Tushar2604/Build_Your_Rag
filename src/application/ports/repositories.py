@@ -603,6 +603,22 @@ class WhatsAppConversationRepository(Protocol):
     ) -> InboxStats:
         """The counters across the top of the inbox, in one round trip."""
         ...
+    async def merge_duplicate_threads(
+        self,
+        tenant_id: TenantId,
+        *,
+        owner_ids: list[uuid.UUID],
+        keep_owner_id: uuid.UUID | None = None,
+    ) -> int:
+        """Collapse threads that are the same contact into one, and say how many
+        were absorbed.
+
+        Two threads are the same contact when their numbers have the same
+        digits — which is how one person ended up with three entries in
+        Candidates, each holding a different slice of the conversation. The
+        loser's messages are re-pointed at the winner's chat session, so this
+        merges the history rather than discarding half of it."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -891,6 +907,17 @@ class AppointmentRepository(Protocol):
     async def counts_by_status(
         self, tenant_id: TenantId, window_start: datetime, window_end: datetime
     ) -> dict[str, int]: ...
+    async def count_booked_since(
+        self, tenant_id: TenantId, since: datetime, *, upcoming_only: bool = True
+    ) -> int:
+        """Appointments created after `since` — the badge's number.
+
+        Counted on `created_at`, not on when the appointment is *for*: a booking
+        taken this morning for next month is news now, and one taken last week
+        for tomorrow is not. `upcoming_only` drops bookings that were made for a
+        time that has already passed, which are history the moment they land and
+        would otherwise sit on the badge unread forever."""
+        ...
 
 
 @runtime_checkable

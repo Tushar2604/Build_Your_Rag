@@ -112,10 +112,15 @@ export function Avatar({
   phone,
   size = 44,
   emoji = false,
+  presence,
 }: {
   name: string;
   phone: string;
   size?: number;
+  /** Recent activity, shown as the dot on the avatar's corner. "active" is
+   * someone who has written within the last day — the honest version of a
+   * presence indicator for a channel that never tells us who is online. */
+  presence?: "active" | "away";
   /** Show the contact's emoji rather than their initials. Used where the list
    * is mostly unsaved numbers (Candidates) — initials off a phone number tell
    * you nothing, a distinct face is at least memorable. */
@@ -124,7 +129,7 @@ export function Avatar({
   // A saved name still wins: real initials identify someone better than any
   // generated icon, so the emoji is the fallback rather than the default.
   const showEmoji = emoji && !name.trim();
-  return (
+  const face = (
     <span
       aria-hidden="true"
       style={{ width: size, height: size, fontSize: size * (showEmoji ? 0.5 : 0.34) }}
@@ -135,6 +140,31 @@ export function Avatar({
       {showEmoji ? emojiFor(phone) : initialsFor(name, phone)}
     </span>
   );
+  if (!presence) return face;
+  return (
+    // The wrapper only exists to hang the dot off the corner, so it takes the
+    // avatar's exact size rather than letting the dot grow the row.
+    <span className="relative inline-flex flex-shrink-0" style={{ width: size, height: size }}>
+      {face}
+      <span
+        title={presence === "active" ? "Active recently" : "Quiet for a while"}
+        style={{ width: size * 0.28, height: size * 0.28 }}
+        className={`absolute bottom-0 right-0 rounded-full ring-2 ring-surface ${
+          presence === "active" ? "bg-emerald-500" : "bg-gray-300"
+        }`}
+      />
+    </span>
+  );
+}
+
+/** Whether to show a contact as active, from the only signal WhatsApp actually
+ * gives us: when they last wrote. Real presence is not reported to the bridge,
+ * so a green dot means "wrote today", never "is looking at their phone". */
+export function presenceOf(lastMessageAt: string | null): "active" | "away" {
+  if (!lastMessageAt) return "away";
+  return Date.now() - new Date(lastMessageAt).getTime() < 24 * 60 * 60 * 1000
+    ? "active"
+    : "away";
 }
 
 /** Renders an attachment. Images are fetched as object URLs because the media

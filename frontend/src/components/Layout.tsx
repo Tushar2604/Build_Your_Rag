@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { useTheme } from "../store/theme";
+import { NotificationsProvider, useNotifications } from "../store/notifications";
 
 interface NavItem {
   to: string;
@@ -24,7 +25,12 @@ interface NavItem {
   exact?: boolean;
   /** Only shown to Owner/Admin roles — the "admin panel" surfaces. */
   adminOnly?: boolean;
+  /** A fixed word, like "New" on a feature that just shipped. */
   badge?: string;
+  /** A live count, resolved at render from `useNotifications`. Separate from
+   * `badge` because the two behave differently: a word is decoration, a number
+   * is something the user is expected to go and clear. */
+  counter?: "newAppointments";
 }
 
 interface NavGroup {
@@ -48,7 +54,13 @@ const NAV_GROUPS: NavGroup[] = [
     title: "Appointments",
     items: [
       { to: "/appointments/calendar", label: "Calendar", icon: CalendarDays },
-      { to: "/appointments", label: "Appointments", icon: CalendarCheck, exact: true },
+      {
+        to: "/appointments",
+        label: "Appointments",
+        icon: CalendarCheck,
+        exact: true,
+        counter: "newAppointments",
+      },
       { to: "/appointments/services", label: "Services", icon: Briefcase, adminOnly: true },
       { to: "/appointments/resources", label: "Staff & Resources", icon: Users2, adminOnly: true },
       { to: "/appointments/locations", label: "Locations", icon: MapPin, adminOnly: true },
@@ -235,8 +247,20 @@ function readRailMode(): RailMode {
   return localStorage.getItem("sidebarCollapsed") === "1" ? "closed" : "auto";
 }
 
+/** The shell, wrapped so every page under it shares one notification poll
+ * rather than each growing its own. */
 export default function Layout() {
+  return (
+    <NotificationsProvider>
+      <AppShell />
+    </NotificationsProvider>
+  );
+}
+
+function AppShell() {
   const { logout, tenantId, isAdmin, email } = useAuth();
+  const { newAppointments } = useNotifications();
+  const counters = { newAppointments };
   const navigate = useNavigate();
   const [mode, setMode] = useState<RailMode>(readRailMode);
   // Only meaningful in "auto". Held separately from `mode` so leaving the rail
@@ -353,6 +377,7 @@ export default function Layout() {
                 <ul className="space-y-0.5" role="list">
                   {items.map((item) => {
                     const Icon = item.icon;
+                    const count = item.counter ? counters[item.counter] : 0;
                     return (
                       <li key={item.to}>
                         <NavLink
@@ -369,10 +394,35 @@ export default function Layout() {
                                 }`}
                                 strokeWidth={1.75}
                               />
+                              {/* Collapsed, the rail is icons only — but a
+                                  count is exactly the thing you must not have
+                                  to expand the rail to notice, so it becomes a
+                                  dot on the icon's corner instead. */}
+                              {collapsed && count > 0 && (
+                                <span
+                                  aria-hidden="true"
+                                  className="absolute right-2 top-1.5 h-2 w-2 rounded-full
+                                             bg-cta-400 ring-2 ring-chrome"
+                                />
+                              )}
                               {!collapsed && (
                                 <>
                                   <span className="truncate">{item.label}</span>
-                                  {item.badge && (
+                                  {count > 0 && (
+                                    <span
+                                      title={`${count} new since you last looked`}
+                                      className={`ml-auto flex h-[18px] min-w-[18px] items-center
+                                                  justify-center rounded-full px-1 text-[10px]
+                                                  font-bold tabular-nums ${
+                                                    isActive
+                                                      ? "bg-white/25 text-white"
+                                                      : "bg-cta-500 text-white"
+                                                  }`}
+                                    >
+                                      {count > 99 ? "99+" : count}
+                                    </span>
+                                  )}
+                                  {item.badge && count === 0 && (
                                     <span className={`ml-auto rounded-full px-1.5 py-0.5 text-[9.5px] font-bold
                                                      uppercase tracking-wide ${
                                                        isActive

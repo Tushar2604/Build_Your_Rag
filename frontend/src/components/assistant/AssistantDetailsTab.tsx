@@ -5,7 +5,7 @@
 // (Welcome Message), whether it can actually book (Appointments), and
 // everything it does after that (Conversational Flow).
 import { useEffect, useState } from "react";
-import { AudioLines, Brain, CalendarCheck, Globe, Info, Mic } from "lucide-react";
+import { AudioLines, Brain, CalendarCheck, Check, Globe, Info, Mic } from "lucide-react";
 import {
   AssistantConfig,
   AssistantOptions,
@@ -15,6 +15,7 @@ import {
   resetChatbotFlow,
 } from "../../api/chatbots";
 import { ApiError } from "../../api/client";
+import { BookingReadiness, appointmentsApi } from "../../api/appointments";
 import FlowSectionsEditor from "../FlowSectionsEditor";
 
 const MAX_WELCOME = 600;
@@ -194,6 +195,63 @@ function PillToggle({
   );
 }
 
+/**
+ * Whether this assistant can actually book anything, checked live.
+ *
+ * This used to be a sentence listing what booking needs. It was accurate and
+ * it did not help: with opening hours missing, availability search returns an
+ * empty list, the assistant says "no times available" — true, and
+ * indistinguishable from a broken assistant — and there was nowhere to find
+ * out which of the four requirements was the missing one. So it asks.
+ */
+function BookingReadinessNote() {
+  const [state, setState] = useState<BookingReadiness | null>(null);
+
+  useEffect(() => {
+    appointmentsApi
+      .readiness()
+      .then(setState)
+      // A failed check must not imply a broken setup — say nothing rather than
+      // something wrong.
+      .catch(() => setState(null));
+  }, []);
+
+  if (!state) return null;
+
+  if (state.ready) {
+    return (
+      <p className="mt-4 ml-9 flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2
+                    text-xs text-emerald-800">
+        <Check className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.5} />
+        Ready to book — {state.services} service{state.services === 1 ? "" : "s"} across{" "}
+        {state.locations} location{state.locations === 1 ? "" : "s"}, with{" "}
+        {state.resources_with_hours} staff member
+        {state.resources_with_hours === 1 ? "" : "s"} on the calendar.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-4 ml-9 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+      <p className="flex items-center gap-2 text-xs font-semibold text-amber-900">
+        <Info className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.5} />
+        This assistant cannot book anything yet
+      </p>
+      {/* Ordered as they have to be fixed — a service cannot be given staff who
+          do not exist yet. */}
+      <ol className="mt-1.5 ml-5 list-decimal space-y-0.5 text-xs text-amber-800">
+        {state.blockers.map((b) => (
+          <li key={b}>{b}</li>
+        ))}
+      </ol>
+      <p className="mt-2 text-[11px] text-amber-700">
+        Until then it will correctly say no times are available — set these up
+        under <strong>Appointments</strong> in the sidebar.
+      </p>
+    </div>
+  );
+}
+
 export default function AssistantDetailsTab({ bot, draft, onDraftChange, onReplaceBot }: Props) {
   const [options, setOptions] = useState<AssistantOptions | null>(null);
   const [flowBusy, setFlowBusy] = useState(false);
@@ -352,15 +410,7 @@ export default function AssistantDetailsTab({ bot, draft, onDraftChange, onRepla
           </div>
         </div>
 
-        {a.appointments_enabled && (
-          // Named plainly, because a booking assistant with no services silently
-          // has nothing to offer and the reason is not obvious from here.
-          <p className="text-xs text-gray-500 mt-4 ml-9 rounded-lg bg-surface-2 px-3 py-2">
-            Needs at least one location, one service with staff assigned, and
-            opening hours — set those up under <strong>Appointments</strong> in
-            the sidebar.
-          </p>
-        )}
+        {a.appointments_enabled && <BookingReadinessNote />}
       </section>
 
       {/* ── Conversational Flow ── */}

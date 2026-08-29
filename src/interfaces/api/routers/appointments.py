@@ -50,7 +50,9 @@ from src.interfaces.api.schemas import (
     AppointmentPageResponse,
     AppointmentResponse,
     AppointmentSummaryResponse,
+    BookingReadinessResponse,
     CreateAppointmentRequest,
+    NewAppointmentsResponse,
     RescheduleAppointmentRequest,
     SlotHoldRequest,
     SlotHoldResponse,
@@ -211,6 +213,96 @@ async def list_appointments(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/appointments/readiness", response_model=BookingReadinessResponse)
+async def booking_readiness(
+    principal: PrincipalDep, container: ContainerDep
+) -> BookingReadinessResponse:
+    """Can this workspace's assistant book anything yet, and if not, what next.
+
+    Exists because the failure is silent from the outside. With no opening
+    hours, availability search returns an empty list, the assistant says "no
+    times available" — which is true and useless — and the operator concludes
+    booking is broken. This turns that into a list of what is missing.
+    """
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        locations = await uow.locations.list_for_tenant(principal.tenant_id)
+        services = await uow.services.list_for_tenant(principal.tenant_id)
+        resources = await uow.resources.list_for_tenant(principal.tenant_id)
+        with_staff = 0
+        for service in services:
+            linked = await uow.services.eligibility_for(principal.tenant_id, service.id)
+            if linked:
+                with_staff += 1
+        with_hours = 0
+        for resource in resources:
+            rules = await uow.availability.list_rules(principal.tenant_id, resource.id)
+            if rules:
+                with_hours += 1
+
+    blockers: list[str] = []
+    # Ordered as they have to be fixed: a service cannot be given staff who do
+    # not exist, and staff cannot be given hours before they exist.
+    if not locations:
+        blockers.append("Add a location — the branch appointments are booked at.")
+    if not services:
+        blockers.append("Add a service — what people can book.")
+    if not resources:
+        blockers.append("Add a staff member or room under Staff & Resources.")
+    if services and resources and not with_staff:
+        blockers.append("Assign staff to a service — a service with nobody on it has no slots.")
+    if resources and not with_hours:
+        blockers.append("Set opening hours under Availability — without them nothing is bookable.")
+
+    return BookingReadinessResponse(
+        ready=not blockers,
+        locations=len(locations),
+        services=len(services),
+        resources=len(resources),
+        services_with_staff=with_staff,
+        resources_with_hours=with_hours,
+        blockers=blockers,
+    )
+
+
+@router.get("/appointments/new", response_model=NewAppointmentsResponse)
+async def new_appointments(
+    principal: PrincipalDep,
+    container: ContainerDep,
+    since: datetime | None = None,
+) -> NewAppointmentsResponse:
+    """The badge count: bookings taken since `since`.
+
+    Its own endpoint rather than a field on `/appointments/summary` because the
+    two are asked on completely different schedules — the summary is read when
+    someone opens the page, this is polled by the sidebar on every screen, and
+    it has to stay cheap enough to do that.
+
+    `since` is supplied by the client, which is what makes the badge per-person:
+    "new to me" is a fact about who is looking, and the alternative — a
+    server-side seen marker — would mean one colleague clearing the badge for
+    everybody.
+    """
+    # A missing watermark means a browser that has never looked. Counting from
+    # the last day rather than from all time: a workspace with a year of
+    # bookings would otherwise open with a badge in the hundreds, which teaches
+    # people to ignore it on their first day.
+    watermark = since or (datetime.now(UTC) - timedelta(days=1))
+    if watermark.tzinfo is None:
+        watermark = watermark.replace(tzinfo=UTC)
+
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        count = await uow.appointments.count_booked_since(principal.tenant_id, watermark)
+        latest = None
+        if count:
+            recent = await uow.appointments.list_for_tenant(
+                principal.tenant_id, limit=1, offset=0
+            )
+            latest = max((a.created_at for a in recent), default=None)
+    return NewAppointmentsResponse(count=count, since=watermark, latest_at=latest)
 
 
 @router.get("/appointments/summary", response_model=AppointmentSummaryResponse)

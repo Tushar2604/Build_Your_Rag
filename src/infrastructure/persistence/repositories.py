@@ -11,7 +11,6 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, or_, select, text, update
-from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +45,7 @@ from src.domain.shared.identifiers import (
     TenantId,
     UserId,
 )
+from src.domain.shared.phone import canonical_phone, phone_digits
 from src.domain.support.entities import IssueReport
 from src.domain.tenant.entities import ApiKey, Tenant, User
 from src.domain.voice.entities import VoiceProfile
@@ -1293,6 +1293,16 @@ class WhatsAppChannelRepositoryImpl:
             await self._s.delete(row)
 
 
+def _DIGITS_ONLY(column):  # type: ignore[no-untyped-def]
+    """`+971 50 123 4567` -> `971501234567`, in SQL.
+
+    Not indexable, and deliberately not indexed: it is only used to look up one
+    contact within one number's threads, which is a handful of rows, and an
+    expression index here would have to be maintained on every inbound message.
+    """
+    return func.regexp_replace(column, r"[^0-9]", "", "g")
+
+
 class WhatsAppConversationRepositoryImpl:
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
@@ -1300,12 +1310,35 @@ class WhatsAppConversationRepositoryImpl:
     async def get(
         self, whatsapp_channel_id: uuid.UUID, phone_number: str
     ) -> WhatsAppConversation | None:
+        """The thread for one contact on one number.
+
+        Matched on digits rather than on the stored string. Writers now
+        canonicalise (see `domain.shared.phone`), but rows written before that
+        are still in whatever shape their writer used, and an exact-match
+        lookup against those is what created a second thread — and a second
+        Candidates entry — for a contact who already had one.
+
+        Ordered oldest-first so that where duplicates do still exist, every
+        lookup resolves to the same one: the thread that holds the history.
+        """
+        digits = phone_digits(phone_number)
+        match = (
+            _DIGITS_ONLY(m.WhatsAppConversationModel.phone_number) == digits
+            if digits
+            # Nothing usable to compare on — fall back to the literal key so an
+            # oddly-addressed thread still finds itself instead of being
+            # re-created on every message.
+            else m.WhatsAppConversationModel.phone_number == phone_number
+        )
         row = (
             await self._s.execute(
-                select(m.WhatsAppConversationModel).where(
+                select(m.WhatsAppConversationModel)
+                .where(
                     m.WhatsAppConversationModel.whatsapp_channel_id == whatsapp_channel_id,
-                    m.WhatsAppConversationModel.phone_number == phone_number,
+                    match,
                 )
+                .order_by(m.WhatsAppConversationModel.created_at.asc())
+                .limit(1)
             )
         ).scalar_one_or_none()
         return map_.whatsapp_conversation_to_domain(row) if row else None
@@ -1652,20 +1685,13 @@ class WhatsAppConversationRepositoryImpl:
         if from_owner_id == to_owner_id:
             return 0
 
-        taken = (
-            select(m.WhatsAppConversationModel.phone_number)
-            .where(
-                m.WhatsAppConversationModel.tenant_id == tenant_id,
-                m.WhatsAppConversationModel.whatsapp_channel_id == to_owner_id,
-            )
-            .scalar_subquery()
-        )
-        await self._s.execute(
-            delete(m.WhatsAppConversationModel).where(
-                m.WhatsAppConversationModel.tenant_id == tenant_id,
-                m.WhatsAppConversationModel.whatsapp_channel_id == from_owner_id,
-                m.WhatsAppConversationModel.phone_number.in_(taken),
-            )
+        # A contact who messaged both sessions has a thread on each. Their
+        # history is folded together rather than one copy being dropped: the
+        # whole point of merging a re-scanned number is that the conversation
+        # comes back whole, and deleting the older half would lose exactly the
+        # messages the user is looking for.
+        merged = await self.merge_duplicate_threads(
+            tenant_id, owner_ids=[from_owner_id, to_owner_id], keep_owner_id=to_owner_id
         )
         moved = await self._s.execute(
             update(m.WhatsAppConversationModel)
@@ -1675,7 +1701,246 @@ class WhatsAppConversationRepositoryImpl:
             )
             .values(whatsapp_channel_id=to_owner_id)
         )
-        return int(moved.rowcount or 0)
+        return int(moved.rowcount or 0) + merged
+
+    # --- Candidates: one row per person, not per thread ---------------------
+    #
+    # Candidates is a tenant-wide view, and a contact who reached two connected
+    # numbers legitimately has a thread on each. Listing threads therefore
+    # listed the same person twice — which is the other half of "the same
+    # number in three places", and the half that must NOT be fixed by deleting
+    # anything: both conversations are real, and the user wants to pick which
+    # number they are looking at.
+    #
+    # So the grouping happens at read time, in SQL rather than over a page of
+    # results: grouping a page would still show a duplicate whenever the two
+    # copies fell either side of a page boundary, and would make `total` a lie.
+
+    def _contact_key(self):  # type: ignore[no-untyped-def]
+        """What makes two threads the same person: the digits of their number,
+        falling back to the raw key for anything that was never a number."""
+        digits = _DIGITS_ONLY(m.WhatsAppConversationModel.phone_number)
+        return func.coalesce(func.nullif(digits, ""), m.WhatsAppConversationModel.phone_number)
+
+    async def list_contacts_for_tenant(
+        self,
+        tenant_id: TenantId,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        owner_id: uuid.UUID | None = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[WhatsAppConversation]:
+        """One conversation per contact — the newest-active thread they have.
+
+        `owner_id` narrows to a single connected number, which is how the
+        Candidates page offers "show me the people on THIS WhatsApp number".
+        """
+        key = self._contact_key()
+        conditions = self._owner_filters(
+            tenant_id, owner_id, search, has_attachment, unread_only, None
+        )
+        # DISTINCT ON needs its ORDER BY to lead with the same expression, so
+        # the choice of representative is made in an inner query and re-sorted
+        # outside it.
+        inner = (
+            select(m.WhatsAppConversationModel.id)
+            .distinct(key)
+            .where(*conditions)
+            .order_by(
+                key,
+                # The thread they are most recently active on represents them;
+                # a contact who moved to a second number should not be shown
+                # under the one they abandoned.
+                m.WhatsAppConversationModel.last_message_at.desc().nullslast(),
+                m.WhatsAppConversationModel.created_at.asc(),
+            )
+            .scalar_subquery()
+        )
+        result = await self._s.execute(
+            select(m.WhatsAppConversationModel, m.UserModel.email)
+            .outerjoin(*self._ASSIGNEE_JOIN)
+            .where(m.WhatsAppConversationModel.id.in_(inner))
+            .order_by(
+                m.WhatsAppConversationModel.last_message_at.desc().nullslast(),
+                m.WhatsAppConversationModel.created_at.desc(),
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        return self._rows_to_domain(result)
+
+    async def count_contacts_for_tenant(
+        self,
+        tenant_id: TenantId,
+        *,
+        search: str = "",
+        has_attachment: bool | None = None,
+        unread_only: bool = False,
+        owner_id: uuid.UUID | None = None,
+    ) -> int:
+        """People, not threads — so the total agrees with what the list shows."""
+        return int(
+            (
+                await self._s.execute(
+                    select(func.count(func.distinct(self._contact_key()))).where(
+                        *self._owner_filters(
+                            tenant_id, owner_id, search, has_attachment, unread_only, None
+                        )
+                    )
+                )
+            ).scalar_one()
+        )
+
+    async def threads_for_contact(
+        self, tenant_id: TenantId, phone_number: str
+    ) -> list[WhatsAppConversation]:
+        """Every thread this person has, across every connected number.
+
+        What the profile needs to offer "you have also spoken to them on this
+        other number" — the switch the user asked for, rather than a merge that
+        would throw one of the two conversations away.
+        """
+        digits = phone_digits(phone_number)
+        match = (
+            _DIGITS_ONLY(m.WhatsAppConversationModel.phone_number) == digits
+            if digits
+            else m.WhatsAppConversationModel.phone_number == phone_number
+        )
+        result = await self._s.execute(
+            select(m.WhatsAppConversationModel, m.UserModel.email)
+            .outerjoin(*self._ASSIGNEE_JOIN)
+            .where(m.WhatsAppConversationModel.tenant_id == tenant_id, match)
+            .order_by(m.WhatsAppConversationModel.last_message_at.desc().nullslast())
+        )
+        return self._rows_to_domain(result)
+
+    async def merge_duplicate_threads(
+        self,
+        tenant_id: TenantId,
+        *,
+        owner_ids: list[uuid.UUID],
+        keep_owner_id: uuid.UUID | None = None,
+    ) -> int:
+        """Collapse threads that are the same contact into one, and say how many
+        were absorbed.
+
+        Two rows are the same contact when their numbers have the same digits.
+        Which one survives is decided in this order: the one on `keep_owner_id`
+        if given (the session holding the live socket), then the oldest — the
+        thread that has been accumulating history the longest, and the one whose
+        id is already in somebody's browser history.
+
+        The loser's messages are re-pointed at the winner's chat session, so
+        this genuinely merges the conversation instead of discarding half of it.
+        The emptied chat session is then deleted, which is what removes the
+        duplicate from Candidates.
+        """
+        if not owner_ids:
+            return 0
+        rows = (
+            (
+                await self._s.execute(
+                    select(m.WhatsAppConversationModel)
+                    .where(
+                        m.WhatsAppConversationModel.tenant_id == tenant_id,
+                        m.WhatsAppConversationModel.whatsapp_channel_id.in_(owner_ids),
+                    )
+                    .order_by(m.WhatsAppConversationModel.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        groups: dict[str, list] = {}
+        for row in rows:
+            key = phone_digits(row.phone_number) or row.phone_number.strip()
+            if key:
+                groups.setdefault(key, []).append(row)
+
+        absorbed = 0
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            keeper = next(
+                (r for r in group if keep_owner_id and r.whatsapp_channel_id == keep_owner_id),
+                group[0],
+            )
+            for loser in group:
+                if loser.id == keeper.id:
+                    continue
+                await self._absorb_thread(tenant_id, keeper, loser)
+                absorbed += 1
+        return absorbed
+
+    async def _absorb_thread(self, tenant_id: TenantId, keeper, loser) -> None:  # type: ignore[no-untyped-def]
+        """Move one duplicate thread's messages onto the thread that survives."""
+        await self._s.execute(
+            update(m.ChatMessageModel)
+            .where(
+                m.ChatMessageModel.tenant_id == tenant_id,
+                m.ChatMessageModel.session_id == loser.session_id,
+            )
+            .values(session_id=keeper.session_id)
+        )
+
+        # Fold the denormalised list metadata rather than recomputing it: the
+        # counters exist so the thread list renders in one query, and a merge
+        # that left them stale would show the wrong preview and a wrong unread
+        # badge until the next message happened to arrive.
+        keeper.unread_count = (keeper.unread_count or 0) + (loser.unread_count or 0)
+        keeper.has_attachment = bool(keeper.has_attachment or loser.has_attachment)
+        if loser.last_message_at and (
+            keeper.last_message_at is None or loser.last_message_at > keeper.last_message_at
+        ):
+            keeper.last_message_at = loser.last_message_at
+            keeper.last_message_preview = loser.last_message_preview
+        # A name, a company, an owner or a tag recorded on either copy is
+        # something a person entered. Keeping whichever copy has it means the
+        # merge never costs the user work they already did.
+        for field in (
+            "display_name", "company", "job_title", "email", "city", "country",
+            "linkedin_url", "source",
+        ):
+            if not getattr(keeper, field) and getattr(loser, field):
+                setattr(keeper, field, getattr(loser, field))
+        if keeper.assignee_id is None and loser.assignee_id is not None:
+            keeper.assignee_id = loser.assignee_id
+        merged_tags = list(keeper.tags or [])
+        seen = {t.casefold() for t in merged_tags}
+        for tag in loser.tags or []:
+            if tag.casefold() not in seen:
+                seen.add(tag.casefold())
+                merged_tags.append(tag)
+        keeper.tags = merged_tags
+        keeper.pinned = bool(keeper.pinned or loser.pinned)
+        keeper.phone_number = canonical_phone(keeper.phone_number)
+        keeper.updated_at = datetime.now(UTC)
+
+        # Notes follow their thread; they are the team's own record and must not
+        # be lost with the row they happened to be written on.
+        await self._s.execute(
+            update(m.WhatsAppConversationNoteModel)
+            .where(
+                m.WhatsAppConversationNoteModel.tenant_id == tenant_id,
+                m.WhatsAppConversationNoteModel.conversation_id == loser.id,
+            )
+            .values(conversation_id=keeper.id)
+        )
+        await self._s.execute(
+            delete(m.WhatsAppConversationModel).where(
+                m.WhatsAppConversationModel.id == loser.id
+            )
+        )
+        # The emptied session goes too — its messages now belong to the keeper,
+        # and leaving it behind is what would keep a ghost in any view that
+        # counts chat sessions.
+        await self._s.execute(
+            delete(m.ChatSessionModel).where(m.ChatSessionModel.id == loser.session_id)
+        )
 
     async def stats_for_owners(
         self, tenant_id: TenantId, owner_ids: list[uuid.UUID], *, since: datetime

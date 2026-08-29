@@ -7,8 +7,8 @@
 // Activity when working out why it looks the way it does.
 import { useEffect, useRef, useState } from "react";
 import {
-  Bot, Building2, Check, Globe, Link2, Mail, MapPin, Pencil, Phone, Send,
-  Trash2, User, X,
+  BadgeCheck, Bot, Building2, Check, ExternalLink, Globe, Link2, Mail, MapPin,
+  Pencil, Phone, RefreshCw, Send, Trash2, TriangleAlert, User, X,
 } from "lucide-react";
 
 import { ApiError } from "../../api/client";
@@ -21,7 +21,9 @@ import {
   deleteNote,
   listNotes,
 } from "../../api/whatsappInbox";
-import { Avatar, clockLabel, dayLabel } from "../ConversationThread";
+import { Link } from "react-router-dom";
+
+import { Avatar, clockLabel, dayLabel, presenceOf } from "../ConversationThread";
 
 type Tab = "details" | "notes" | "activity";
 
@@ -127,6 +129,9 @@ function DetailsTab({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState("");
+  // Only there to timestamp the last manual check — the verdict itself is
+  // recomputed on every render from the address on the row.
+  const [recheckedAt, setRecheckedAt] = useState<number | null>(null);
 
   // Dropping the draft when the selection changes is what stops half-typed
   // details from one contact being saved onto the next one.
@@ -176,7 +181,12 @@ function DetailsTab({
     <div className="space-y-5 px-4 py-4">
       {/* Identity */}
       <div className="flex items-start gap-3">
-        <Avatar name={conversation.display_name} phone={conversation.phone_number} size={44} />
+        <Avatar
+          name={conversation.display_name}
+          phone={conversation.phone_number}
+          size={44}
+          presence={presenceOf(conversation.last_message_at)}
+        />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-semibold text-gray-900">
             {conversation.display_name || conversation.phone_number}
@@ -184,6 +194,17 @@ function DetailsTab({
           <p className="truncate text-[12.5px] text-gray-500">
             {conversation.job_title || "No role recorded"}
           </p>
+          {/* The whole record — every number they have written to, the
+              documents they sent, the full transcript. This pane is the
+              working summary; that page is the file. */}
+          <Link
+            to={`/candidates/${conversation.id}`}
+            className="mt-1 inline-flex items-center gap-1 text-[12px] font-semibold
+                       text-brand-600 hover:underline"
+          >
+            View full profile
+            <ExternalLink className="h-3 w-3" strokeWidth={2.5} />
+          </Link>
         </div>
         <button
           type="button"
@@ -246,7 +267,42 @@ function DetailsTab({
             {conversation.company && <Row icon={Building2} value={conversation.company} />}
             {conversation.job_title && <Row icon={User} value={conversation.job_title} />}
             {conversation.email ? (
-              <Row icon={Mail} value={conversation.email} href={`mailto:${conversation.email}`} />
+              <>
+                <Row icon={Mail} value={conversation.email} href={`mailto:${conversation.email}`} />
+                <div className="flex items-center gap-2 pl-[25px]">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5
+                                text-[11px] font-semibold ${
+                                  quality && quality.score >= 50
+                                    ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                                    : "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200"
+                                }`}
+                  >
+                    {quality && quality.score >= 50 ? (
+                      <><BadgeCheck className="h-3 w-3" strokeWidth={2.5} /> Valid</>
+                    ) : (
+                      <><TriangleAlert className="h-3 w-3" strokeWidth={2.5} /> Check this</>
+                    )}
+                  </span>
+                  {/* Re-runs the same local check. Named honestly: it does not
+                      contact a mail server, so it can only tell you whether the
+                      address you have now still looks right. */}
+                  <button
+                    type="button"
+                    onClick={() => setRecheckedAt(Date.now())}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold
+                               text-brand-600 hover:underline"
+                  >
+                    <RefreshCw className="h-3 w-3" strokeWidth={2.5} />
+                    Recheck
+                  </button>
+                  {recheckedAt && (
+                    <span className="text-[11px] text-gray-400">
+                      {clockLabel(new Date(recheckedAt).toISOString())}
+                    </span>
+                  )}
+                </div>
+              </>
             ) : (
               <Row icon={Mail} value="No email recorded" muted />
             )}
@@ -277,9 +333,13 @@ function DetailsTab({
         <section>
           <p className="eyebrow mb-1.5">Email Quality</p>
           <div className="rounded-xl border border-gray-200 bg-surface-2 px-3.5 py-3">
-            <div className="flex items-baseline justify-between">
-              <span className="text-[12.5px] text-gray-600">Score</span>
-              <span className="text-[20px] font-bold tabular-nums text-gray-900">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold
+                               uppercase tracking-wide text-gray-500">
+                <BadgeCheck className="h-3.5 w-3.5" strokeWidth={2} />
+                Email quality score
+              </span>
+              <span className="flex-shrink-0 text-[22px] font-bold leading-none tabular-nums text-gray-900">
                 {quality.score}
                 <span className="text-[12px] font-medium text-gray-400"> / 100</span>
               </span>

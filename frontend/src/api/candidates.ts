@@ -28,6 +28,37 @@ export interface Candidate {
    * currently waiting on them — see the backend's SendFollowUps. */
   followups_sent: number;
   awaiting_reply: boolean;
+  /** Every conversation this person has, across every connected number. This
+   * card represents the most recently active one. More than one entry means
+   * they have talked to the workspace on two numbers — two real conversations
+   * to switch between, not a duplicate. */
+  threads: CandidateThread[];
+}
+
+export interface CandidateThread {
+  conversation_id: string;
+  /** The connected number that owns it. Null once that number is disconnected. */
+  session_id: string | null;
+  channel_kind: ChannelKind;
+  channel_label: string;
+  last_message_at: string | null;
+  message_count: number;
+  unread_count: number;
+}
+
+/** A number the Candidates list can be filtered by. Both kinds in one list —
+ * picking "which WhatsApp number" is not a question about our implementation. */
+export interface ConnectedNumber {
+  id: string;
+  kind: ChannelKind;
+  phone_number: string;
+  label: string;
+  connected: boolean;
+  contact_count: number;
+}
+
+export function listConnectedNumbers(): Promise<ConnectedNumber[]> {
+  return api.get<ConnectedNumber[]>("/candidates/numbers");
 }
 
 export interface CandidatePage {
@@ -41,6 +72,9 @@ export interface CandidateFilters {
   search?: string;
   hasAttachment?: boolean;
   unreadOnly?: boolean;
+  /** Narrow to one connected WhatsApp number — a linked session id or a Cloud
+   * API channel id. Omit for every number. */
+  numberId?: string;
   page?: number;
   pageSize?: number;
 }
@@ -52,6 +86,7 @@ export function listCandidates(filters: CandidateFilters = {}): Promise<Candidat
     params.set("has_attachment", String(filters.hasAttachment));
   }
   if (filters.unreadOnly) params.set("unread_only", "true");
+  if (filters.numberId) params.set("number_id", filters.numberId);
   params.set("page", String(filters.page ?? 1));
   params.set("page_size", String(filters.pageSize ?? 30));
   return api.get<CandidatePage>(`/candidates?${params}`);

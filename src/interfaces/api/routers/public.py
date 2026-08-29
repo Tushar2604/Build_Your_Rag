@@ -19,12 +19,14 @@ import json
 import time
 import uuid
 
+import structlog
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from src.application.dtos import AskInput
 from src.application.ports.repositories import RequestLog
 from src.application.use_cases.ask_chatbot import AskChatbot
+from src.application.use_cases.front_office import AskFrontOffice
 from src.domain.chat.entities import ChatSession, Message, MessageRole
 from src.domain.chatbot.entities import (
     Chatbot,
@@ -36,6 +38,7 @@ from src.domain.safety.guardrails import build_grounded_prompt
 from src.domain.shared.identifiers import SessionId
 from src.infrastructure.rag.graph import RagGraph, build_context
 from src.interfaces.api.deps import ContainerDep
+from src.interfaces.api.routers.chat import _as_chunks
 from src.interfaces.api.schemas import (
     CreateSessionResponse,
     PublicAnswerResponse,
@@ -43,6 +46,8 @@ from src.interfaces.api.schemas import (
     PublicConfigResponse,
     WidgetConfigSchema,
 )
+
+_log_public = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/public", tags=["public"])
 
@@ -173,6 +178,47 @@ async def ask_public(
     )
 
 
+def _public_agent_stream(container, bot, session_id, message: str):  # type: ignore[no-untyped-def]
+    """The booking agent over the public SSE contract.
+
+    Same shape as the authenticated path's `_agent_stream`, with one
+    difference: the visitor's message is already stored by the caller (it is
+    written alongside the quota check), so the use case is told not to store it
+    again.
+    """
+
+    async def generator():  # type: ignore[no-untyped-def]
+        # Always empty, and always sent: the widget waits for this event before
+        # it renders anything, and an agent answer is grounded in tool results
+        # rather than in retrieved documents.
+        yield {"event": "citations", "data": "[]"}
+        try:
+            reply = await AskFrontOffice(
+                container.unit_of_work(), container.front_office_agent
+            ).execute(
+                bot.tenant_id,
+                session_id,
+                message=message,
+                chatbot_id=bot.id,
+                source="public_widget",
+                channel="web",
+                persist_user_message=False,
+            )
+        except Exception:  # noqa: BLE001 - the stream still has to end cleanly
+            _log_public.exception("front_office.public_stream_failed")
+            yield {"event": "error", "data": json.dumps({"detail": "Generation failed."})}
+            return
+
+        for chunk in _as_chunks(reply.answer):
+            yield {"event": "token", "data": chunk}
+        yield {
+            "event": "done",
+            "data": json.dumps({"tokens_used": reply.tokens_used}),
+        }
+
+    return EventSourceResponse(generator())
+
+
 @router.post("/chatbots/{public_key}/sessions/{session_id}/stream")
 async def ask_public_stream(
     public_key: str,
@@ -210,6 +256,13 @@ async def ask_public_stream(
             )
         )
         await uow.commit()
+
+    # An assistant with appointments enabled answers through the booking agent
+    # on the public surfaces too. Without this, a share link or an embedded
+    # widget ran plain retrieval with no tools: it could not check availability
+    # or write a booking, was never told so, and answered as though it had.
+    if bot.assistant.appointments_enabled:
+        return _public_agent_stream(container, bot, sid, message)
 
     graph = RagGraph(_ChunkRepoProxy(container), container.embedder, container.llm)
     citations = await graph.retrieve_only(bot, message)
