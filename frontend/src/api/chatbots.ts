@@ -77,6 +77,10 @@ export interface Chatbot {
   /** False when generation fell back to a draft — only set on a generate call. */
   ai_generated: boolean;
   counts: ChatbotCardCounts;
+  /** ISO-8601 UTC. When this assistant was created — rendered in the reader's
+   * own timezone, never in UTC, because "when did I build this" is a question
+   * about their day. */
+  created_at: string;
 }
 
 export interface CreateChatbotInput {

@@ -296,6 +296,10 @@ export interface NewAppointments {
 
 export const appointmentsApi = {
   list: (params: {
+    /** "upcoming" (the default server-side) hides anything already finished;
+     * "past" shows only those; "all" shows everything. Past appointments are
+     * never deleted — they are the record of what the business did. */
+    when?: "upcoming" | "past" | "all";
     range_start?: string;
     range_end?: string;
     location_id?: string;

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Bot, BookOpen, ChevronDown, ClipboardCheck,
+  ArrowDown, ArrowLeft, ArrowUp, Bot, BookOpen, ChevronDown, ClipboardCheck, Clock,
   Headphones, History, Loader2, MessageSquare, Phone, Rocket, Sparkles,
   SlidersHorizontal, X, Zap,
 } from "lucide-react";
@@ -16,6 +16,7 @@ import AssistantDetailsTab, { Draft } from "../components/assistant/AssistantDet
 import KnowledgeBaseTab from "../components/assistant/KnowledgeBaseTab";
 import AssistantIntegrationsTab from "../components/assistant/AssistantIntegrationsTab";
 import TestModePanel, { TestMode } from "../components/assistant/TestModePanel";
+import { createdLabel } from "./AssistantsPage";
 import { VoiceProfile, listVoices } from "../api/voices";
 
 /* ── shared types ── */
@@ -1136,6 +1137,16 @@ export default function AssistantDetailPage() {
             className="chrome-btn w-[260px] rounded-lg px-3 py-1.5 text-[14px] font-semibold
                        focus:border-brand-500/60 focus:outline-none"
           />
+
+          {/* When this assistant was built. The long form here — this page is
+              read rather than scanned — with the exact instant on hover. */}
+          <span
+            title={`Created ${new Date(bot.created_at).toLocaleString()}`}
+            className="hidden items-center gap-1.5 text-[12px] text-gray-500 lg:inline-flex"
+          >
+            <Clock className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={2} />
+            Created {createdLabel(bot.created_at, "long")}
+          </span>
 
           {/* Direction */}
           <button

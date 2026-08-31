@@ -13,19 +13,21 @@ from datetime import timedelta
 from pathlib import Path
 
 import structlog
-from sqlalchemy import text
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
+from src.application.use_cases.appointment_reminders import SendAppointmentReminders
 from src.application.use_cases.appointments import ExpireSlotHolds
 from src.application.use_cases.follow_up import SendFollowUps
 from src.application.use_cases.ingest_document import IngestDocument, ResumePendingIngestions
 from src.config.container import get_container
 from src.config.settings import get_settings
-from src.infrastructure.observability.logging import configure_logging
+from src.hiring_agent.routes import router as hiring_router
 from src.infrastructure.http_client import close_clients
+from src.infrastructure.observability.logging import configure_logging
 from src.infrastructure.persistence.database import dispose_engine, get_engine
 from src.interfaces.api.errors import register_error_handlers
 from src.interfaces.api.middleware import ObservabilityMiddleware, PublicCorsMiddleware
@@ -59,7 +61,6 @@ from src.interfaces.api.routers import (
     whatsapp,
     whatsapp_web,
 )
-from src.hiring_agent.routes import router as hiring_router
 
 _WIDGET_JS = Path(__file__).parent / "static" / "widget.js"
 # Built single-page app (admin UI + the public /c/<key> share page). Present in
@@ -152,10 +153,18 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     if settings.appointments_enabled:
         hold_expiry = asyncio.create_task(_hold_expiry_loop(settings))
 
+    # Tells people about the appointment they are about to have. Same shape as
+    # the follow-up sweep and for the same reasons — including its advisory
+    # lock, because a duplicate reminder to a real customer is exactly the
+    # failure that lock exists to prevent.
+    reminders = None
+    if settings.appointments_enabled and settings.appointment_reminders_enabled:
+        reminders = asyncio.create_task(_reminder_loop(settings))
+
     log.info("app.started", env=settings.app_env)
     yield
 
-    for task in (follow_ups, hold_expiry):
+    for task in (follow_ups, hold_expiry, reminders):
         if task is None:
             continue
         task.cancel()
@@ -181,10 +190,13 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
 # else in the database picks the same one; this is a fixed arbitrary value so
 # every process agrees on it without coordination.
 _FOLLOW_UP_LOCK_KEY = 0x5241475F_46555030  # "RAG_FUP0"
+# A different key, so a reminder tick and a follow-up tick can run at the same
+# time. They touch different tables and neither blocks the other.
+_REMINDER_LOCK_KEY = 0x5241475F_52454D30  # "RAG_REM0"
 
 
 @asynccontextmanager
-async def _sweep_lease():  # type: ignore[no-untyped-def]
+async def _sweep_lease(key: int = _FOLLOW_UP_LOCK_KEY):  # type: ignore[no-untyped-def]
     """Yield True to exactly one process at a time, across the whole cluster.
 
     The follow-up sweep reads the due conversations, then sends to each one in
@@ -209,7 +221,7 @@ async def _sweep_lease():  # type: ignore[no-untyped-def]
     conn = await engine.connect()
     try:
         result = await conn.execute(
-            text("SELECT pg_try_advisory_lock(:k)"), {"k": _FOLLOW_UP_LOCK_KEY}
+            text("SELECT pg_try_advisory_lock(:k)"), {"k": key}
         )
         got = bool(result.scalar())
         try:
@@ -217,7 +229,7 @@ async def _sweep_lease():  # type: ignore[no-untyped-def]
         finally:
             if got:
                 await conn.execute(
-                    text("SELECT pg_advisory_unlock(:k)"), {"k": _FOLLOW_UP_LOCK_KEY}
+                    text("SELECT pg_advisory_unlock(:k)"), {"k": key}
                 )
     finally:
         await conn.close()
@@ -252,6 +264,37 @@ async def _follow_up_loop(settings) -> None:
             raise
         except Exception:  # noqa: BLE001 - one bad sweep must not end the loop
             log.exception("followup.sweep_failed")
+
+
+async def _reminder_loop(settings) -> None:  # type: ignore[no-untyped-def]
+    """Run the appointment reminder sweep forever, on a fixed interval.
+
+    Every failure is swallowed and retried on the next tick, for the same
+    reason the follow-up loop swallows its own: a sweep that raises must not
+    kill the loop and silently end reminders for the life of the process.
+    """
+    container = get_container()
+    lead = timedelta(minutes=settings.appointment_reminder_minutes)
+    while True:
+        await asyncio.sleep(settings.appointment_reminder_sweep_seconds)
+        try:
+            async with _sweep_lease(_REMINDER_LOCK_KEY) as leader:
+                if not leader:
+                    # Another worker is sweeping this tick. Not an error — it is
+                    # how the loop stays correct with several processes.
+                    continue
+                sent = await SendAppointmentReminders(
+                    container.unit_of_work(),
+                    bridge=container.whatsapp_bridge,
+                    whatsapp_sender=container.whatsapp_sender,
+                    lead=lead,
+                ).execute()
+            if sent:
+                log.info("appointment.reminder.sweep", sent=sent)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - one bad sweep must not end the loop
+            log.exception("appointment.reminder.sweep_failed")
 
 
 async def _hold_expiry_loop(settings) -> None:  # type: ignore[no-untyped-def]

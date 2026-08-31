@@ -428,6 +428,10 @@ class Appointment:
     cancellation_reason: str = ""
     # Supplied by the caller so a retried POST cannot create a second booking.
     idempotency_key: str = ""
+    # When the pre-appointment reminder actually went out. NULL means it has
+    # not — see migration 0028 for why this is a timestamp on the row rather
+    # than a flag in the sweep's memory.
+    reminder_sent_at: datetime | None = None
     created_by: UserId | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -435,6 +439,39 @@ class Appointment:
     @property
     def duration_minutes(self) -> int:
         return int((self.ends_at - self.starts_at).total_seconds() // 60)
+
+    def needs_reminder(self, *, now: datetime, lead: timedelta) -> bool:
+        """Should this appointment be reminded about, right now?
+
+        Four conditions, and the last one is the one that matters most:
+
+        * Nothing has been sent yet.
+        * It is a live appointment — a cancelled or completed one must never
+          produce a reminder, and `TERMINAL_STATUSES` is the list of those.
+        * It starts within the lead time.
+        * **It has not started yet.** This host sleeps and redeploys, so a
+          sweep can wake up long after it should have. Without this check, a
+          tick that runs an hour late tells someone about an appointment they
+          are already sitting in — or already missed. A reminder that arrives
+          too late is worse than one that never arrives, because it reads as a
+          system that does not know what time it is.
+
+        A booking made inside the lead time is eligible immediately and that is
+        intended: someone who books for 20 minutes' time should still get the
+        confirmation-shaped nudge. It is also why the message states the actual
+        appointment time rather than "in 30 minutes", which would be a lie for
+        exactly that booking.
+        """
+        if self.reminder_sent_at is not None:
+            return False
+        if self.status in TERMINAL_STATUSES:
+            return False
+        return now < self.starts_at <= now + lead
+
+    def mark_reminded(self, *, now: datetime | None = None) -> None:
+        moment = now or datetime.now(UTC)
+        self.reminder_sent_at = moment
+        self.updated_at = moment
 
     @property
     def is_terminal(self) -> bool:

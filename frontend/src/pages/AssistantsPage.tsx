@@ -9,8 +9,8 @@ import { useState, useEffect, useRef, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
-  ArrowDownUp, ArrowUpRight, Bot, Brain, FileText, Mic, MoreVertical, Settings2, Sparkles,
-  Trash2, Zap,
+  ArrowDownUp, ArrowUpRight, Bot, Brain, Clock, FileText, Mic, MoreVertical, Settings2,
+  Sparkles, Trash2, Zap,
 } from "lucide-react";
 import {
   listChatbots,
@@ -373,22 +373,55 @@ function AssistantCard({
       </div>
 
       <div className="border-t border-gray-100 px-4 py-3 flex items-center gap-3 mt-auto">
-        <span
-          title="This assistant's short id — stable, unique, and safe to quote in a ticket."
-          className="rounded-lg border border-gray-200 bg-surface-2 px-3 py-2 text-[12.5px]
-                     font-mono text-gray-500 flex-shrink-0"
-        >
-          {bot.display_id ? `ID: #${bot.display_id}` : "ID: —"}
+        <span className="min-w-0 flex-1">
+          <span
+            title="This assistant's short id — stable, unique, and safe to quote in a ticket."
+            className="block truncate font-mono text-[12.5px] text-gray-500"
+          >
+            {bot.display_id ? `#${bot.display_id}` : "—"}
+          </span>
+          {/* The full timestamp lives in the tooltip: the card shows enough to
+              sort by eye, and the exact second is there when it matters. */}
+          <span
+            title={`Created ${new Date(bot.created_at).toLocaleString()}`}
+            className="mt-0.5 flex items-center gap-1 text-[11.5px] text-gray-400"
+          >
+            <Clock className="h-3 w-3 flex-shrink-0" strokeWidth={2} />
+            <span className="truncate">Created {createdLabel(bot.created_at)}</span>
+          </span>
         </span>
         <Link
           to={`/assistants/${bot.id}`}
-          className="btn-primary flex-1 justify-center py-2 text-[13.5px]"
+          className="btn-primary flex-shrink-0 justify-center px-5 py-2 text-[13.5px]"
         >
           Edit Agent
         </Link>
       </div>
     </motion.div>
   );
+}
+
+/**
+ * When an assistant was created, in the reader's own timezone.
+ *
+ * Two forms, because the card and the detail header want different things: a
+ * card is scanned, so it gets the short one ("14 Aug, 09:32"); the detail page
+ * is read, so it gets the full one with the year.
+ *
+ * Rendered from the browser's locale and zone rather than the server's — the
+ * timestamp is stored in UTC, and "created at 04:02" is wrong for everyone who
+ * is not in London.
+ */
+export function createdLabel(iso: string, style: "short" | "long" = "short"): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  return at.toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    ...(style === "long" ? { year: "numeric" } : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /* ── Page ── */

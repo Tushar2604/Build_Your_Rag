@@ -266,6 +266,16 @@ class Settings(BaseSettings):
     # with migration 0025 and a tenant that configures nothing simply has no
     # locations or services, so the module is invisible until it is used.
     appointments_enabled: bool = True
+    # Pre-appointment reminders. The lead time is what the customer is told
+    # about; the sweep interval only bounds how *late* a reminder can be, since
+    # the schedule itself lives on the appointment row and survives a restart.
+    #
+    # A minute of jitter on a 30-minute reminder is invisible; a minute of extra
+    # database load every tick is not, which is why the sweep is not faster.
+    appointment_reminders_enabled: bool = True
+    appointment_reminder_minutes: int = 30
+    appointment_reminder_sweep_seconds: int = 60
+
     # Whether the shared agent loop is given the appointment tools.
     #
     # OFF by default, and deliberately so. The loop that exists today answers

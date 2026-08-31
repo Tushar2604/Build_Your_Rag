@@ -295,6 +295,10 @@ class ChatbotResponse(BaseModel):
     ai_generated: bool = True
     # Populated on list/get so a card needs no follow-up requests.
     counts: ChatbotCardCounts = Field(default_factory=ChatbotCardCounts)
+    # When this assistant was created. Always existed on the row and in the
+    # domain entity — it simply never made it onto the wire, so the UI had no
+    # way to answer "which of these did I build last week?".
+    created_at: datetime
 
 
 # --- Public widget (no auth; called from third-party pages) ---

@@ -21,6 +21,21 @@ import {
 
 const PAGE_SIZE = 50;
 
+// Which side of now the list shows.
+//
+// Upcoming by default, because a list whose top is last month's bookings is not
+// a working list — the front desk opens this page to find what is coming, not
+// to browse history. Past appointments are NOT deleted: they are the record of
+// what the business actually did, and the revenue it took. They move behind a
+// tab, which is a different thing from being thrown away.
+type When = "upcoming" | "past" | "all";
+
+const WHEN_TABS: { key: When; label: string }[] = [
+  { key: "upcoming", label: "Upcoming" },
+  { key: "past", label: "Past" },
+  { key: "all", label: "All" },
+];
+
 // The filters a front desk actually reaches for, in the order they reach for
 // them. Not every status — thirteen chips would be a wall.
 const FILTERS: { label: string; statuses: string }[] = [
@@ -45,6 +60,7 @@ export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[] | null>(null);
   const [summary, setSummary] = useState<AppointmentSummary | null>(null);
   const [filter, setFilter] = useState(0);
+  const [when, setWhen] = useState<When>("upcoming");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +79,7 @@ export default function AppointmentsPage() {
       const result = await appointmentsApi.list({
         status: FILTERS[filter].statuses,
         search,
+        when,
         page,
         page_size: PAGE_SIZE,
       });
@@ -89,7 +106,7 @@ export default function AppointmentsPage() {
     const timer = setTimeout(load, search ? 300 : 0);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, search, page]);
+  }, [filter, search, page, when]);
 
   useEffect(() => {
     loadSummary();
@@ -190,6 +207,32 @@ export default function AppointmentsPage() {
             }}
           />
         </div>
+      </div>
+
+      {/* Which side of now — above the status chips, because everything below
+          is "…and of those, which ones". */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="segmented">
+          {WHEN_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              aria-pressed={when === tab.key}
+              onClick={() => {
+                setWhen(tab.key);
+                setPage(1);
+              }}
+              className={when === tab.key ? "segmented-item-active" : "segmented-item"}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {when === "past" && (
+          <span className="text-[12px] text-gray-500">
+            Kept for your records — nothing is deleted.
+          </span>
+        )}
       </div>
 
       {error && (

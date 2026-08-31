@@ -896,9 +896,23 @@ class AppointmentRepository(Protocol):
         resource_id: ResourceId | None = None,
         statuses: list[str] | None = None,
         search: str = "",
+        # "upcoming" hides anything already finished, "past" shows only those,
+        # "" (the default) is everything.
+        when: str = "",
         limit: int = 200,
         offset: int = 0,
     ) -> list[Appointment]: ...
+    async def list_due_reminders(
+        self, *, now: datetime, lead: timedelta, limit: int = 100
+    ) -> list[Appointment]:
+        """Appointments starting within `lead` that have not been reminded yet.
+
+        Not tenant-scoped — this backs a timer-driven sweep with no principal
+        behind it, the same shape as `list_due_follow_ups`."""
+        ...
+    async def mark_reminder_sent(self, appointment: Appointment) -> None:
+        """Record that the reminder went out, so no later sweep repeats it."""
+        ...
     async def update(self, appointment: Appointment) -> None: ...
     async def add_status_change(self, change: StatusChange) -> None: ...
     async def history(

@@ -905,6 +905,11 @@ class AppointmentModel(Base):
     # later cannot retroactively move appointments that already happened.
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    # NULL until the pre-appointment reminder has gone out (0028). The
+    # sweep's partial index covers exactly the NULL rows.
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Channel attribution (spec section 44). Never changes after creation.
     source: Mapped[str] = mapped_column(String(20), default="staff", index=True)
     # Denormalized copy of the reserved resources, so rendering a calendar does

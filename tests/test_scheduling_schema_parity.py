@@ -40,13 +40,19 @@ SCHEDULING_TABLES = {
 
 @pytest.fixture(scope="module")
 def migration_sql() -> str:
-    """Offline DDL for revision 0025 alone — no database, no network."""
+    """Offline DDL for 0025 and everything that has since extended it.
+
+    The range has to keep moving forward. `appointments` gained
+    `reminder_sent_at` in 0028, and a render that stopped at 0025 would report
+    a perfectly-migrated column as missing from the migrations — which is the
+    opposite of what this file is for.
+    """
     buffer = io.StringIO()
     config = Config("alembic.ini")
     config.attributes["configure_logger"] = False
     config.output_buffer = buffer
     command.upgrade(
-        config, "0024_conversation_follow_ups:0025_scheduling_foundation", sql=True
+        config, "0024_conversation_follow_ups:0028_appointment_reminders", sql=True
     )
     sql = buffer.getvalue()
     assert sql.strip(), "offline migration render produced no SQL"

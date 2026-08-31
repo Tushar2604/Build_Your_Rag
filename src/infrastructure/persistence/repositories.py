@@ -471,7 +471,13 @@ class ChatbotRepositoryImpl:
     async def list_for_tenant(self, tenant_id: TenantId) -> list[Chatbot]:
         rows = (
             await self._s.execute(
-                select(m.ChatbotModel).where(m.ChatbotModel.tenant_id == tenant_id)
+                select(m.ChatbotModel)
+                .where(m.ChatbotModel.tenant_id == tenant_id)
+                # Newest first, and ordered at all — this had no ORDER BY, so
+                # Postgres was free to return the list differently between two
+                # refreshes. Invisible while the cards showed no dates; the
+                # moment they do, an unordered list reads as broken.
+                .order_by(m.ChatbotModel.created_at.desc())
             )
         ).scalars()
         return [map_.chatbot_to_domain(r) for r in rows]

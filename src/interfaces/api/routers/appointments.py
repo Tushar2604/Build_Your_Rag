@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response
 
@@ -164,6 +165,15 @@ async def list_appointments(
     resource_id: uuid.UUID | None = None,
     status: str = "",
     search: str = Query("", max_length=120),
+    when: Literal["upcoming", "past", "all"] = Query(
+        "upcoming",
+        description=(
+            "Which side of now to show. Defaults to 'upcoming': a list whose "
+            "top is last month's bookings is not a working list. Past ones are "
+            "never deleted — they are the record of what the business did — "
+            "so 'past' and 'all' still return them."
+        ),
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=_MAX_PAGE_SIZE),
 ) -> AppointmentPageResponse:
@@ -186,6 +196,7 @@ async def list_appointments(
             resource_id=ResourceId(resource_id) if resource_id else None,
             statuses=statuses or None,
             search=search,
+            when="" if when == "all" else when,
             limit=page_size,
             offset=offset,
         )

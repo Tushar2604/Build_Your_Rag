@@ -103,6 +103,7 @@ def _to_response(
         allowed_origins=bot.allowed_origins,
         allowed_document_ids=[uuid.UUID(str(d)) for d in bot.allowed_document_ids],
         ai_generated=ai_generated,
+        created_at=bot.created_at,
         widget=WidgetConfigSchema(
             theme_color=bot.widget.theme_color,
             display_name=bot.widget.display_name,

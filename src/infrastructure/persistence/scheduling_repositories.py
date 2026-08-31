@@ -13,7 +13,7 @@ constraint added by migration 0025 is turned into a domain-level conflict.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, Result, delete, func, or_, select, update
@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.application.ports.repositories import HeldReservation
 from src.domain.scheduling.availability import Interval
 from src.domain.scheduling.entities import (
+    TERMINAL_STATUSES,
     Appointment,
     AvailabilityRule,
     BlockedPeriod,
@@ -207,6 +208,7 @@ def appointment_to_domain(row: m.AppointmentModel) -> Appointment:
         ),
         cancellation_reason=row.cancellation_reason,
         idempotency_key=row.idempotency_key,
+        reminder_sent_at=row.reminder_sent_at,
         created_by=UserId(row.created_by) if row.created_by else None,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -737,6 +739,7 @@ class AppointmentRepositoryImpl:
         resource_id: ResourceId | None = None,
         statuses: list[str] | None = None,
         search: str = "",
+        when: str = "",
         limit: int = 200,
         offset: int = 0,
     ) -> list[Appointment]:
@@ -757,6 +760,13 @@ class AppointmentRepositoryImpl:
             )
         if statuses:
             stmt = stmt.where(m.AppointmentModel.status.in_(statuses))
+        # Cut on `ends_at`, not `starts_at`. An appointment that is happening
+        # right now is not "past" — dropping it out of the list the moment it
+        # begins takes it off the screen of the person currently running it.
+        if when == "upcoming":
+            stmt = stmt.where(m.AppointmentModel.ends_at >= datetime.now(UTC))
+        elif when == "past":
+            stmt = stmt.where(m.AppointmentModel.ends_at < datetime.now(UTC))
         if search:
             like = f"%{search.lower()}%"
             stmt = stmt.where(
@@ -794,6 +804,66 @@ class AppointmentRepositoryImpl:
                 internal_notes=appointment.internal_notes,
                 rescheduled_from_id=appointment.rescheduled_from_id,
                 cancellation_reason=appointment.cancellation_reason,
+                reminder_sent_at=appointment.reminder_sent_at,
+                updated_at=appointment.updated_at,
+            )
+        )
+
+    async def list_due_reminders(
+        self, *, now: datetime, lead: timedelta, limit: int = 100
+    ) -> list[Appointment]:
+        """Appointments starting within `lead` that have not been reminded.
+
+        Deliberately NOT tenant-scoped: this backs a sweep that runs on a timer
+        with no request and no principal behind it, the same shape as the
+        follow-up sweep. Every row carries its own `tenant_id`, and the caller
+        scopes each send to that tenant.
+
+        The upper bound is the lead time and the lower bound is *now* — an
+        appointment that has already started is skipped here as well as in
+        `needs_reminder`, so a sweep that wakes up late after a redeploy does
+        not tell someone about a slot they are already sitting in.
+
+        Ordered soonest-first so that when a backlog builds up, the person whose
+        appointment is closest is told first.
+
+        `FOR UPDATE SKIP LOCKED` keeps two simultaneous readers off the same
+        rows. It is only half the guard — the locks die with this transaction,
+        which commits before anything is sent — and the real cross-process
+        guard is the advisory lock the sweep loop takes around the whole tick.
+        """
+        rows = (
+            (
+                await self._s.execute(
+                    select(m.AppointmentModel)
+                    .where(
+                        m.AppointmentModel.reminder_sent_at.is_(None),
+                        m.AppointmentModel.starts_at > now,
+                        m.AppointmentModel.starts_at <= now + lead,
+                        m.AppointmentModel.status.not_in(tuple(TERMINAL_STATUSES)),
+                    )
+                    .order_by(m.AppointmentModel.starts_at.asc())
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [appointment_to_domain(r) for r in rows]
+
+    async def mark_reminder_sent(self, appointment: Appointment) -> None:
+        """Record that the reminder went out.
+
+        Its own narrow UPDATE rather than a full `update()`: this runs after the
+        send, and rewriting every column would let a stale in-memory copy
+        clobber a status somebody changed while the message was in flight.
+        """
+        await self._s.execute(
+            update(m.AppointmentModel)
+            .where(m.AppointmentModel.id == appointment.id)
+            .values(
+                reminder_sent_at=appointment.reminder_sent_at,
                 updated_at=appointment.updated_at,
             )
         )
