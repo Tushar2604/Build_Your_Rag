@@ -158,9 +158,16 @@ class SendBroadcast:
         whatsapp_sender,
         status_callback_url: str = "",
         bridge=None,
+        cloud_sender=None,
+        cloud_api_version: str = "v21.0",
     ) -> None:
         self._uow = uow
         self._sender = whatsapp_sender
+        # Meta's Cloud API, used when the campaign's channel is a `cloud` one.
+        # None means those campaigns report that it is unavailable rather than
+        # sending through Twilio with credentials the channel does not have.
+        self._cloud_sender = cloud_sender
+        self._cloud_api_version = cloud_api_version
         self._status_callback_url = status_callback_url
         # The Node sidecar that owns QR-linked personal accounts. Only needed
         # for `sender_kind == "personal"`; None simply makes those campaigns
@@ -242,6 +249,21 @@ class SendBroadcast:
         delivery receipts — so its campaigns simply never advance past `sent`.
         """
         if broadcast.sender_kind == "cloud_api":
+            # `cloud_api` here means "a business number" — the campaign's own
+            # vocabulary, older than there being two vendors behind it. Which
+            # vendor is a fact about the channel, not about the campaign.
+            if getattr(channel, "provider", "twilio") == "cloud":
+                if self._cloud_sender is None:
+                    return False, "", "The WhatsApp Cloud API sender is not configured."
+                # No status_callback: Meta reports delivery on the same webhook
+                # as inbound messages, so there is no second URL to hand it.
+                return await self._cloud_sender.send(
+                    phone_number_id=channel.phone_number_id,
+                    access_token=channel.access_token,
+                    to_number=recipient.phone_number,
+                    body=body,
+                    api_version=self._cloud_api_version,
+                )
             return await self._sender.send(
                 account_sid=channel.twilio_account_sid,
                 auth_token=channel.twilio_auth_token,

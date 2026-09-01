@@ -21,6 +21,7 @@ from src.infrastructure.llm.providers import FailoverLLM, build_llm
 from src.infrastructure.messaging.event_bus import InProcessEventBus
 from src.infrastructure.messaging.slack import SlackSender
 from src.infrastructure.messaging.twilio_whatsapp import TwilioWhatsAppSender
+from src.infrastructure.messaging.whatsapp_cloud import CloudWhatsAppSender
 from src.infrastructure.messaging.webhook import WebhookSender
 from src.infrastructure.messaging.whatsapp_bridge import WhatsAppBridgeClient
 from src.infrastructure.oauth.providers import OAuthBroker
@@ -68,6 +69,10 @@ class Container:
         # Outbound WhatsApp for broadcasts. Stateless — per-send Twilio
         # credentials come from the channel row, not from .env.
         self.whatsapp_sender = TwilioWhatsAppSender()
+        # Meta's Cloud API. Stateless like the Twilio sender beside it — the
+        # per-number token arrives from the channel row on every call, so one
+        # process serves many tenants' numbers.
+        self.whatsapp_cloud_sender = CloudWhatsAppSender()
         # Slack incoming-webhook delivery. Stateless for the same reason: the
         # webhook URL comes from the tenant's integration row.
         self.slack = SlackSender()

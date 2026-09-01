@@ -105,6 +105,8 @@ async def _run_send(tenant_id: TenantId, broadcast_id: uuid.UUID) -> None:
         container.whatsapp_sender,
         _status_callback_url(),
         bridge=container.whatsapp_bridge,
+        cloud_sender=container.whatsapp_cloud_sender,
+        cloud_api_version=container.settings.whatsapp_cloud_api_version,
     )
     await use_case.execute(tenant_id, broadcast_id)
 
@@ -617,28 +619,66 @@ async def status_callback(request: Request, container: ContainerDep) -> Response
     if mapped is None:
         return Response(status_code=204)
 
+    await advance_delivery_status(
+        container,
+        provider_message_id=message_sid,
+        status=mapped,
+        error=params.get("ErrorMessage") or f"Twilio reported '{raw_status}'.",
+    )
+    return Response(status_code=204)
+
+
+async def advance_delivery_status(
+    container, *, provider_message_id: str, status: str, error: str = ""
+) -> bool:
+    """Move one recipient along the delivery funnel. Returns whether it moved.
+
+    Shared by both business-number providers. Twilio posts delivery receipts to
+    a dedicated status-callback URL; Meta's Cloud API puts them on the *same*
+    webhook as inbound messages — so without this, the funnel would either only
+    work for Twilio or be implemented twice, and the second copy is the one that
+    forgets to recompute the campaign's counts.
+
+    Trust is established by the caller, which is the only part that genuinely
+    differs: Twilio's signature is keyed to the channel's own auth token, Meta's
+    to the app secret.
+    """
+    if not provider_message_id:
+        return False
+
+    async with container.unit_of_work() as uow:
+        recipient = await uow.broadcast_recipients.get_by_provider_message_id(
+            provider_message_id
+        )
+        if recipient is None:
+            # Not one of ours — a manual takeover send, or another app's message.
+            return False
+        broadcast = await uow.broadcasts.get_unscoped(recipient.broadcast_id)
+        if broadcast is None:
+            return False
+
     async with container.unit_of_work() as uow:
         uow.set_tenant_scope(broadcast.tenant_id)
         current = await uow.broadcast_recipients.get(broadcast.tenant_id, recipient.id)
         if current is None:
-            return Response(status_code=204)
-        if mapped == "failed":
-            current.mark_undeliverable(
-                params.get("ErrorMessage") or f"Twilio reported '{raw_status}'."
-            )
+            return False
+        if status == "failed":
+            current.mark_undeliverable(error or "The provider reported a delivery failure.")
             changed = True
         else:
-            changed = current.advance_to(mapped)  # type: ignore[arg-type]
-        if changed:
-            await uow.broadcast_recipients.update(current)
-            fresh = await uow.broadcasts.get(broadcast.tenant_id, broadcast.id)
-            if fresh is not None:
-                recipients = await uow.broadcast_recipients.list_for_broadcast(broadcast.id)
-                fresh.recompute_counts(recipients)
-                await uow.broadcasts.update(fresh)
-            await uow.commit()
-
-    return Response(status_code=204)
+            changed = current.advance_to(status)  # type: ignore[arg-type]
+        if not changed:
+            return False
+        await uow.broadcast_recipients.update(current)
+        # Counts are recomputed from the recipients rather than incremented, so
+        # a receipt that arrives twice cannot inflate the campaign's totals.
+        fresh = await uow.broadcasts.get(broadcast.tenant_id, broadcast.id)
+        if fresh is not None:
+            recipients = await uow.broadcast_recipients.list_for_broadcast(broadcast.id)
+            fresh.recompute_counts(recipients)
+            await uow.broadcasts.update(fresh)
+        await uow.commit()
+    return True
 
 
 async def mark_replied(container, session_id: SessionId) -> None:

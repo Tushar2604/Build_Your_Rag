@@ -525,11 +525,30 @@ class GoogleConnectResponse(BaseModel):
 
 
 # --- WhatsApp channel (via Twilio) ---
+WhatsAppProviderLiteral = Literal["twilio", "cloud"]
+
+
 class ConnectWhatsAppRequest(BaseModel):
+    """Connect a business number. Which fields are required depends on `provider`.
+
+    The credentials are optional at the schema level and checked in the route
+    instead, because "required" is per provider: a Cloud number has no Twilio
+    auth token and a Twilio number has no `phone_number_id`. Two request models
+    would push that fork into the frontend for no gain.
+    """
+
     chatbot_id: uuid.UUID
     phone_number: str = Field(min_length=5, max_length=32)
-    twilio_account_sid: str = Field(min_length=1, max_length=64)
-    twilio_auth_token: str = Field(min_length=1, max_length=255)
+    # Defaults to twilio so every existing client keeps working unchanged.
+    provider: WhatsAppProviderLiteral = "twilio"
+    twilio_account_sid: str = Field(default="", max_length=64)
+    twilio_auth_token: str = Field(default="", max_length=255)
+    # --- Cloud API ---
+    phone_number_id: str = Field(default="", max_length=64)
+    waba_id: str = Field(default="", max_length=64)
+    # A permanent System User token. Meta's tokens have already grown past 200
+    # characters once, so the ceiling is generous.
+    access_token: str = Field(default="", max_length=1024)
 
 
 class WhatsAppChannelResponse(BaseModel):
@@ -537,8 +556,16 @@ class WhatsAppChannelResponse(BaseModel):
     chatbot_id: uuid.UUID
     chatbot_name: str
     phone_number: str
+    provider: WhatsAppProviderLiteral = "twilio"
     status: str
     webhook_url: str
+    # Only set for Cloud channels, and only ever the id — the access token is
+    # never returned, the same way a password hash never is. Once saved it can
+    # be replaced, not read back.
+    phone_number_id: str = ""
+    # What the operator still has to do in the Meta dashboard, if anything.
+    # Empty when the deployment is fully configured.
+    setup_warning: str = ""
     created_at: datetime
 
 

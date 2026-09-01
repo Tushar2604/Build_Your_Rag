@@ -3,6 +3,7 @@ import { AlertTriangle, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   listWhatsAppChannels, connectWhatsAppChannel, disconnectWhatsAppChannel, WhatsAppChannel,
+  WhatsAppProvider,
 } from "../api/whatsapp";
 import { listChatbots, Chatbot } from "../api/chatbots";
 import { ApiError } from "../api/client";
@@ -15,32 +16,52 @@ import {
 
 function ConnectModal({
   chatbots,
+  provider,
   onCreate,
   onClose,
 }: {
   chatbots: Chatbot[];
+  /** Which vendor's credentials to ask for. The two have nothing in common
+   * beyond the assistant and the number, so the form branches rather than
+   * showing six fields of which half are always blank. */
+  provider: WhatsAppProvider;
   onCreate: (c: WhatsAppChannel) => void;
   onClose: () => void;
 }) {
+  const isCloud = provider === "cloud";
   const [chatbotId, setChatbotId] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [accountSid, setAccountSid] = useState("");
   const [authToken, setAuthToken] = useState("");
+  const [phoneNumberId, setPhoneNumberId] = useState("");
+  const [wabaId, setWabaId] = useState("");
+  const [accessToken, setAccessToken] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<WhatsAppChannel | null>(null);
 
+  const credentialsReady = isCloud
+    ? Boolean(phoneNumberId && accessToken)
+    : Boolean(accountSid && authToken);
+  const ready = Boolean(chatbotId && phoneNumber && credentialsReady);
+
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
-    if (!chatbotId || !phoneNumber || !accountSid || !authToken) return;
+    if (!ready) return;
     setLoading(true);
     setError(null);
     try {
       const channel = await connectWhatsAppChannel({
         chatbot_id: chatbotId,
         phone_number: phoneNumber,
-        twilio_account_sid: accountSid,
-        twilio_auth_token: authToken,
+        provider,
+        ...(isCloud
+          ? {
+              phone_number_id: phoneNumberId.trim(),
+              waba_id: wabaId.trim(),
+              access_token: accessToken.trim(),
+            }
+          : { twilio_account_sid: accountSid, twilio_auth_token: authToken }),
       });
       setResult(channel);
       onCreate(channel);
@@ -65,7 +86,11 @@ function ConnectModal({
       <div className="card shadow-modal w-full max-w-lg max-h-[90vh] overflow-y-auto animate-scale-in">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-900">
-            {result ? "WhatsApp connected" : "Connect WhatsApp"}
+            {result
+              ? "WhatsApp connected"
+              : isCloud
+                ? "Connect WhatsApp Cloud API"
+                : "Connect WhatsApp"}
           </h2>
           <button onClick={onClose} aria-label="Close" className="btn-ghost p-1.5 h-auto">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -76,9 +101,29 @@ function ConnectModal({
 
         {result ? (
           <div className="px-6 py-5 space-y-4">
+            {result.setup_warning && (
+              // The number is connected and still cannot receive anything,
+              // because the app secret or verify token is missing from the
+              // deployment. Said here because this is the screen the operator
+              // is looking at when they wonder why nothing arrives.
+              <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+                {result.setup_warning}
+              </div>
+            )}
             <p className="text-sm text-gray-600">
-              Last step — paste this webhook URL into Twilio, under your WhatsApp Sandbox (or Sender)
-              settings, in the <strong>"WHEN A MESSAGE COMES IN"</strong> field:
+              {isCloud ? (
+                <>
+                  Last step — in the Meta App Dashboard under{" "}
+                  <strong>WhatsApp → Configuration</strong>, set this as the Callback URL,
+                  enter your verify token, then <strong>subscribe to the "messages" field</strong>{" "}
+                  (without that subscription nothing is ever delivered):
+                </>
+              ) : (
+                <>
+                  Last step — paste this webhook URL into Twilio, under your WhatsApp Sandbox
+                  (or Sender) settings, in the <strong>"WHEN A MESSAGE COMES IN"</strong> field:
+                </>
+              )}
             </p>
             <div>
               <div className="flex items-center gap-2">
@@ -89,9 +134,16 @@ function ConnectModal({
               </div>
             </div>
             <p className="text-xs text-gray-500">
-              Once saved in Twilio, message <strong>{result.phone_number}</strong> on WhatsApp — it'll be
-              answered by <strong>{result.chatbot_name}</strong>.
+              Once saved{isCloud ? " in Meta" : " in Twilio"}, message{" "}
+              <strong>{result.phone_number}</strong> on WhatsApp — it'll be answered by{" "}
+              <strong>{result.chatbot_name}</strong>.
             </p>
+            {isCloud && (
+              <p className="text-xs text-gray-400">
+                While the number is in development, Meta only delivers messages from the
+                phone numbers you added as test recipients under WhatsApp → API Setup.
+              </p>
+            )}
             <div className="flex justify-end pt-2">
               <button type="button" onClick={onClose} className="btn-primary">Done</button>
             </div>
@@ -111,32 +163,68 @@ function ConnectModal({
                 <input required className="input font-mono" value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)} placeholder="+14155238886" />
                 <p className="text-xs text-gray-400 mt-1">
-                  E.164 format. Use your Twilio Sandbox number to start, or your approved WhatsApp Sender later.
+                  {isCloud
+                    ? "E.164 format — the display number shown under WhatsApp → API Setup."
+                    : "E.164 format. Use your Twilio Sandbox number to start, or your approved WhatsApp Sender later."}
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Twilio Account SID *</label>
-                  <input required className="input font-mono text-xs" value={accountSid}
-                    onChange={(e) => setAccountSid(e.target.value)} placeholder="ACxxxxxxxxxxxxxxxx" />
-                </div>
-                <div>
-                  <label className="label">Twilio Auth Token *</label>
-                  <input required type="password" className="input font-mono text-xs" value={authToken}
-                    onChange={(e) => setAuthToken(e.target.value)} />
-                </div>
-              </div>
-              <p className="text-xs text-gray-400">
-                Both are on your Twilio Console dashboard. Stored only to sign/verify this channel's own
-                webhook traffic — never shared with other tenants.
-              </p>
+
+              {isCloud ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Phone number ID *</label>
+                      <input required className="input font-mono text-xs" value={phoneNumberId}
+                        onChange={(e) => setPhoneNumberId(e.target.value)} placeholder="100000000000001" />
+                    </div>
+                    <div>
+                      <label className="label">WhatsApp Business Account ID</label>
+                      <input className="input font-mono text-xs" value={wabaId}
+                        onChange={(e) => setWabaId(e.target.value)} placeholder="200000000000002" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Access token *</label>
+                    <input required type="password" className="input font-mono text-xs" value={accessToken}
+                      onChange={(e) => setAccessToken(e.target.value)} />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Use a <strong>permanent System User token</strong> for anything real — the
+                      one shown on the API Setup page expires after 24 hours and the number
+                      silently stops replying when it does.
+                    </p>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    All three are on the Meta App Dashboard under WhatsApp → API Setup. Stored
+                    against this channel only, and never returned once saved.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Twilio Account SID *</label>
+                      <input required className="input font-mono text-xs" value={accountSid}
+                        onChange={(e) => setAccountSid(e.target.value)} placeholder="ACxxxxxxxxxxxxxxxx" />
+                    </div>
+                    <div>
+                      <label className="label">Twilio Auth Token *</label>
+                      <input required type="password" className="input font-mono text-xs" value={authToken}
+                        onChange={(e) => setAuthToken(e.target.value)} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Both are on your Twilio Console dashboard. Stored only to sign/verify this channel's own
+                    webhook traffic — never shared with other tenants.
+                  </p>
+                </>
+              )}
               {error && (
                 <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>
               )}
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50/60">
               <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
-              <button type="submit" disabled={loading || !chatbotId || !phoneNumber || !accountSid || !authToken} className="btn-primary">
+              <button type="submit" disabled={loading || !ready} className="btn-primary">
                 {loading ? "Connecting…" : "Connect →"}
               </button>
             </div>
@@ -179,9 +267,9 @@ const METHODS: Method[] = [
     id: "cloud",
     icon: "🔵",
     title: "WhatsApp Cloud Business",
-    description: "Import via Meta Cloud API. WABA ID + token required.",
-    available: false,
-    note: "Needs a Meta app and an adapter for the Cloud API.",
+    description: "Meta's official Business API. Phone number ID + access token.",
+    available: true,
+    badge: "Recommended",
   },
   {
     id: "interakt",
@@ -402,6 +490,9 @@ export default function ChannelsPage() {
   const [qrSession, setQrSession] = useState<WhatsAppWebSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [showConnect, setShowConnect] = useState(false);
+  // Which vendor the open connect dialog is asking about. Set by the tile that
+  // opened it, so one modal serves both without a second copy of the form.
+  const [connectProvider, setConnectProvider] = useState<WhatsAppProvider>("twilio");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -468,14 +559,22 @@ export default function ChannelsPage() {
   }
 
   function pickMethod(id: string) {
-    if (id === "twilio") setShowConnect(true);
+    if (id === "twilio" || id === "cloud") {
+      setConnectProvider(id === "cloud" ? "cloud" : "twilio");
+      setShowConnect(true);
+    }
     if (id === "phone") void startPhoneLink();
   }
 
   return (
     <div className="page">
       {showConnect && (
-        <ConnectModal chatbots={chatbots} onCreate={handleCreated} onClose={() => setShowConnect(false)} />
+        <ConnectModal
+          chatbots={chatbots}
+          provider={connectProvider}
+          onCreate={handleCreated}
+          onClose={() => setShowConnect(false)}
+        />
       )}
       {qrSession && (
         <WhatsAppQrModal
@@ -550,7 +649,7 @@ export default function ChannelsPage() {
 
       <div className="card p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="section-title">Twilio Business numbers</h2>
+          <h2 className="section-title">Business numbers</h2>
           <span className="text-xs text-gray-400">
             {loading ? "Loading…" : `${channels.length} connected`}
           </span>
@@ -558,21 +657,33 @@ export default function ChannelsPage() {
 
         {channels.length === 0 ? (
           <p className="text-sm text-gray-400 py-4">
-            No Twilio numbers connected. Twilio's WhatsApp Sandbox is free for
-            development — activate it under Messaging → Try it out, then use that
-            number with your Account SID and Auth Token.
+            No business numbers connected. Meta's Cloud API is the official route —
+            a test number is free under WhatsApp → API Setup. Twilio's WhatsApp
+            Sandbox works too, under Messaging → Try it out.
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="data-table">
               <thead>
-                <tr><th>Assistant</th><th>Number</th><th>Status</th><th /></tr>
+                <tr><th>Assistant</th><th>Number</th><th>Provider</th><th>Status</th><th /></tr>
               </thead>
               <tbody>
                 {channels.map((c) => (
                   <tr key={c.id}>
                     <td className="font-medium text-gray-900">{c.chatbot_name}</td>
                     <td className="font-mono text-xs text-gray-600">{c.phone_number}</td>
+                    <td className="text-xs text-gray-600">
+                      {c.provider === "cloud" ? "Meta Cloud API" : "Twilio"}
+                      {/* A connected number that still cannot receive anything,
+                          because the deployment is missing its app secret or
+                          verify token. Shown on the row, since this list is
+                          where someone looks when nothing arrives. */}
+                      {c.setup_warning && (
+                        <span title={c.setup_warning} className="ml-1.5 text-amber-600">
+                          &#9888;
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <span className={`badge ${c.status === "active" ? "badge-live" : "badge-draft"}`}>
                         {c.status === "active" ? "Active" : c.status}

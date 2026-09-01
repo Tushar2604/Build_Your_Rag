@@ -1236,8 +1236,12 @@ class WhatsAppChannelRepositoryImpl:
                 tenant_id=channel.tenant_id,
                 chatbot_id=channel.chatbot_id,
                 phone_number=channel.phone_number,
+                provider=channel.provider,
                 twilio_account_sid=channel.twilio_account_sid,
                 twilio_auth_token=channel.twilio_auth_token,
+                phone_number_id=channel.phone_number_id,
+                waba_id=channel.waba_id,
+                access_token=channel.access_token,
                 status=channel.status,
                 created_at=channel.created_at,
                 updated_at=channel.updated_at,
@@ -1273,6 +1277,20 @@ class WhatsAppChannelRepositoryImpl:
             await self._s.execute(
                 select(m.WhatsAppChannelModel).where(
                     m.WhatsAppChannelModel.phone_number == phone_number
+                )
+            )
+        ).scalar_one_or_none()
+        return map_.whatsapp_channel_to_domain(row) if row else None
+
+    async def get_by_phone_number_id(self, phone_number_id: str) -> WhatsAppChannel | None:
+        # Guarded against the empty string: every Twilio row carries one, and a
+        # blank lookup would otherwise return an arbitrary tenant's channel.
+        if not phone_number_id:
+            return None
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppChannelModel).where(
+                    m.WhatsAppChannelModel.phone_number_id == phone_number_id
                 )
             )
         ).scalar_one_or_none()

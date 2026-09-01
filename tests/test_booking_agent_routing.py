@@ -31,7 +31,7 @@ ROUTERS = pathlib.Path(__file__).resolve().parents[1] / "src" / "interfaces" / "
 
 # Every module that turns a visitor's message into an answer. Adding another
 # one means adding it here — which is the point.
-ANSWERING_ROUTERS = ["chat.py", "public.py", "whatsapp_web.py"]
+ANSWERING_ROUTERS = ["chat.py", "public.py", "whatsapp_web.py", "whatsapp_cloud.py"]
 
 
 @pytest.mark.parametrize("module", ANSWERING_ROUTERS)

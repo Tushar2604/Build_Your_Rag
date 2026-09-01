@@ -26,6 +26,7 @@ from src.domain.shared.phone import canonical_phone
 from src.infrastructure.messaging.twilio_signature import verify_twilio_signature
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.routers.broadcasts import mark_replied
+from src.interfaces.api.routers.whatsapp_cloud import webhook_url as cloud_webhook_url
 from src.interfaces.api.schemas import ConnectWhatsAppRequest, WhatsAppChannelResponse
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
@@ -43,9 +44,37 @@ def _to_response(channel: WhatsAppChannel, chatbot_name: str) -> WhatsAppChannel
         chatbot_id=channel.chatbot_id,
         chatbot_name=chatbot_name,
         phone_number=channel.phone_number,
+        provider=channel.provider,  # type: ignore[arg-type]
         status=channel.status,
-        webhook_url=_webhook_url(),
+        # Each provider has its own callback URL and its own idea of what goes
+        # in it, so the one shown is the one this channel's operator has to
+        # paste — handing a Twilio user Meta's URL is a support ticket.
+        webhook_url=cloud_webhook_url() if channel.is_cloud else _webhook_url(),
+        phone_number_id=channel.phone_number_id,
+        setup_warning=_cloud_setup_warning() if channel.is_cloud else "",
         created_at=channel.created_at,
+    )
+
+
+def _cloud_setup_warning() -> str:
+    """What is still missing on the deployment side, in the operator's words.
+
+    Both of these live in the environment rather than on the channel, so a
+    tenant can connect a number perfectly and still receive nothing. Saying so
+    on the channel itself is the only place they will look when it happens.
+    """
+    settings = get_settings()
+    missing = []
+    if not settings.whatsapp_cloud_app_secret:
+        missing.append("WHATSAPP_CLOUD_APP_SECRET")
+    if not settings.whatsapp_cloud_verify_token:
+        missing.append("WHATSAPP_CLOUD_VERIFY_TOKEN")
+    if not missing:
+        return ""
+    return (
+        "This deployment cannot receive WhatsApp Cloud messages yet — "
+        f"{' and '.join(missing)} is not set. Inbound messages will be refused "
+        "until it is."
     )
 
 
@@ -81,16 +110,65 @@ async def connect_whatsapp(
                 status_code=409, detail="This phone number is already connected to another chatbot."
             )
 
+        _require_credentials(body)
+
+        if body.provider == "cloud":
+            # Checked before the insert as well as by the unique index, so the
+            # operator gets a sentence rather than a constraint violation. The
+            # index is still what makes it true under a race.
+            taken = await uow.whatsapp_channels.get_by_phone_number_id(body.phone_number_id)
+            if taken is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="That WhatsApp phone number ID is already connected.",
+                )
+
         channel = WhatsAppChannel(
             tenant_id=principal.tenant_id,
             chatbot_id=ChatbotId(body.chatbot_id),
             phone_number=body.phone_number,
+            provider=body.provider,
             twilio_account_sid=body.twilio_account_sid,
             twilio_auth_token=body.twilio_auth_token,
+            phone_number_id=body.phone_number_id.strip(),
+            waba_id=body.waba_id.strip(),
+            access_token=body.access_token.strip(),
         )
         await uow.whatsapp_channels.add(channel)
         await uow.commit()
     return _to_response(channel, bot.name)
+
+
+def _require_credentials(body: ConnectWhatsAppRequest) -> None:
+    """Each provider needs its own credentials, and neither needs the other's.
+
+    Enforced here rather than in the schema because "required" depends on
+    `provider` — and a channel saved without them is not a broken form, it is a
+    number that silently never answers.
+    """
+    if body.provider == "cloud":
+        missing = [
+            name
+            for name, value in (
+                ("phone number ID", body.phone_number_id),
+                ("access token", body.access_token),
+            )
+            if not value.strip()
+        ]
+    else:
+        missing = [
+            name
+            for name, value in (
+                ("Twilio Account SID", body.twilio_account_sid),
+                ("Twilio Auth Token", body.twilio_auth_token),
+            )
+            if not value.strip()
+        ]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing {' and '.join(missing)} for a {body.provider} number.",
+        )
 
 
 @router.get("/channels", response_model=list[WhatsAppChannelResponse])

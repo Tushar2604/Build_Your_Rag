@@ -378,19 +378,48 @@ class OAuthConnectionRepository(Protocol):
 
 @dataclass
 class WhatsAppChannel:
-    """A chatbot deployed to WhatsApp via Twilio. 1:1 with a chatbot — one
-    WhatsApp number serves exactly one chatbot. Credentials are per-channel
-    (entered by the admin when connecting), not an operator .env concern."""
+    """A chatbot deployed to a WhatsApp *business* number. 1:1 with a chatbot —
+    one number serves exactly one chatbot. Credentials are per-channel (entered
+    by the admin when connecting), not an operator .env concern.
+
+    Two providers reach the same number a customer sees:
+
+      * `twilio` — Twilio's WhatsApp API. Identified by the number itself,
+        authenticated per request with an account SID and auth token.
+      * `cloud`  — Meta's WhatsApp Cloud API. Identified by an opaque
+        `phone_number_id`, authenticated with a long-lived access token, and
+        signed with the Meta *app's* secret rather than anything stored here.
+
+    One dataclass with a discriminator rather than two, because everything
+    downstream — conversations, the inbox, the broadcast funnel, which assistant
+    answers — keys off the channel id and has no reason to care which vendor
+    carries the message. Only the send path branches.
+    """
 
     tenant_id: TenantId
     chatbot_id: ChatbotId
     phone_number: str  # E.164, no "whatsapp:" prefix, e.g. "+14155238886"
-    twilio_account_sid: str
-    twilio_auth_token: str
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    provider: str = "twilio"
+    # --- Cloud API only ---
+    # Meta's id for the number. The display number in an inbound payload is
+    # cosmetic and inconsistently formatted, so this is what a webhook is
+    # actually resolved by.
+    phone_number_id: str = ""
+    # The WhatsApp Business Account the number sits under. Not needed to send —
+    # kept because templates and quality ratings are asked of the WABA, and
+    # re-finding it by hand later is a support conversation.
+    waba_id: str = ""
+    access_token: str = ""
     id: uuid.UUID = field(default_factory=new_id)
     status: str = "active"
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    @property
+    def is_cloud(self) -> bool:
+        return self.provider == "cloud"
 
 
 @runtime_checkable
@@ -404,6 +433,13 @@ class WhatsAppChannelRepository(Protocol):
         """Resolve by the Twilio number that received the inbound message —
         NOT tenant-scoped (Twilio's webhook carries no tenant context),
         mirroring ChatbotRepository.get_by_public_key."""
+        ...
+    async def get_by_phone_number_id(self, phone_number_id: str) -> WhatsAppChannel | None:
+        """The Cloud API equivalent: resolve by Meta's `phone_number_id`.
+
+        Also un-scoped, and for the same reason — Meta's webhook knows nothing
+        about tenants. This is the whole tenant-resolution step for an inbound
+        Cloud message, which is why the column is uniquely indexed."""
         ...
     async def list_for_tenant(self, tenant_id: TenantId) -> list[WhatsAppChannel]: ...
     async def delete(self, tenant_id: TenantId, channel_id: uuid.UUID) -> None: ...

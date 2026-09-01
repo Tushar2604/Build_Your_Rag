@@ -380,8 +380,15 @@ class WhatsAppChannelModel(Base):
         UUID(as_uuid=True), ForeignKey("chatbots.id", ondelete="CASCADE"), unique=True
     )
     phone_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    twilio_account_sid: Mapped[str] = mapped_column(String(64))
-    twilio_auth_token: Mapped[str] = mapped_column(Text)
+    # "twilio" | "cloud" (Meta WhatsApp Cloud API) — see WhatsAppChannel.
+    provider: Mapped[str] = mapped_column(String(16), server_default="twilio")
+    twilio_account_sid: Mapped[str] = mapped_column(String(64), server_default="")
+    twilio_auth_token: Mapped[str] = mapped_column(Text, server_default="")
+    # Cloud API only. `phone_number_id` is how an inbound webhook resolves to a
+    # tenant, so migration 0029 indexes it uniquely wherever it is non-empty.
+    phone_number_id: Mapped[str] = mapped_column(String(64), server_default="")
+    waba_id: Mapped[str] = mapped_column(String(64), server_default="")
+    access_token: Mapped[str] = mapped_column(Text, server_default="")
     status: Mapped[str] = mapped_column(String(20), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(

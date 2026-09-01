@@ -241,6 +241,24 @@ class Settings(BaseSettings):
     bridge_token: str = ""
     bridge_base_url: str = "http://127.0.0.1:8081"
 
+    # --- WhatsApp Cloud API (Meta business numbers) ---
+    # Per-number credentials live on the channel row, because a tenant brings
+    # their own number. These three belong to the Meta *app* that fronts every
+    # one of them, which is a deployment-level fact and not a tenant's to set.
+    #
+    # The app secret is what makes an inbound webhook trustworthy: Meta signs
+    # every delivery with it (X-Hub-Signature-256). Blank = the Cloud webhook
+    # refuses everything rather than accepting unsigned posts, because the
+    # endpoint is public by necessity and anyone who finds it could otherwise
+    # put words in a customer's mouth.
+    whatsapp_cloud_app_secret: str = ""
+    # Echoed back during Meta's subscription handshake. A shared string we
+    # choose; it proves the endpoint is ours, nothing more.
+    whatsapp_cloud_verify_token: str = ""
+    # Graph API version, pinned. Meta deprecates versions on a schedule, and a
+    # floating version means the payload shape can change without a deploy.
+    whatsapp_cloud_api_version: str = "v21.0"
+
     # --- Conversation follow-ups ---
     # How long a contact may stay silent before the assistant nudges them, how
     # many nudges they get before the sign-off, and how often the sweep looks.
