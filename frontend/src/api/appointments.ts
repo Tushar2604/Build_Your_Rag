@@ -280,6 +280,9 @@ export interface BookingReadiness {
   resources: number;
   services_with_staff: number;
   resources_with_hours: number;
+  /** Locations with opening hours — a branch with none is closed, so this is
+   * the count that decides whether any slot can exist. */
+  locations_with_hours: number;
   /** In the order they have to be fixed. */
   blockers: string[];
 }

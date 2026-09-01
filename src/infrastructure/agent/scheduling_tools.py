@@ -35,7 +35,7 @@ from src.application.use_cases.appointments import (
     TransitionAppointment,
 )
 from src.application.use_cases.availability import FindAvailability, HoldSlot
-from src.domain.scheduling.entities import ALL_SOURCES, BookingSource
+from src.domain.scheduling.entities import ALL_SOURCES, MAX_NOTES, BookingSource
 from src.domain.shared.errors import DomainError
 from src.domain.shared.identifiers import (
     AppointmentId,
@@ -52,9 +52,69 @@ UowFactory = Callable[[], UnitOfWork]
 # enough to answer "when can I come in?", short enough that the observation
 # stays readable in a prompt.
 DEFAULT_SEARCH_DAYS = 7
-# Slots per observation. A voice agent reads three or four options aloud; a
-# hundred would blow the context window and help nobody.
-MAX_SLOTS_IN_OBSERVATION = 8
+# How many slots the engine is asked for. Higher than what is shown, on purpose:
+# the offer is picked from across the whole window (see `_spread_options`), and a
+# short query would only ever return the first hour of the first open day.
+SLOT_QUERY_LIMIT = 60
+# What the customer is actually offered. Four is the most a person can hold in
+# their head from a chat bubble, and the most a voice agent can read aloud
+# without the caller losing the first one.
+MAX_OFFERED_OPTIONS = 4
+# Extra times kept in the observation so the agent can answer "anything later?"
+# without a second tool call — but not so many that the transcript, which is
+# re-sent on every reasoning step, doubles in size.
+MAX_ALTERNATIVE_SLOTS = 8
+
+
+def _friendly(moment: datetime) -> str:
+    """A time a person would say out loud: "Mon 02 Sep, 9:00 AM".
+
+    The agent is told to read options verbatim, so the readable form is built
+    here rather than left to the model — a model asked to reformat an ISO string
+    is a model given one more chance to change the time while it is at it.
+    """
+    hour = moment.strftime("%I").lstrip("0") or "12"
+    return f"{moment:%a %d %b}, {hour}:{moment:%M} {moment:%p}"
+
+
+def _spread_options(slots: list[Any], timezone: str) -> tuple[list[Any], list[Any]]:
+    """Split the engine's slots into a few distinct offers, plus the rest.
+
+    The engine returns every bookable start on a 15-minute grid, so the first
+    four are 9:00, 9:15, 9:30, 9:45 — which is not a choice, it is the same
+    appointment four times, and it reads to a customer as though the day is
+    nearly full. Offering one slot per clock hour turns it back into the choice
+    they were actually being given: 9, 10, 11, 12.
+
+    Returns (offer, alternatives) — both real slots from the engine, so nothing
+    here can put a time in front of a customer that is not genuinely bookable.
+    """
+    by_hour: dict[tuple[int, int, int, int], Any] = {}
+    for slot in slots:
+        local = _in_zone(slot.starts_at, timezone)
+        key = (local.year, local.month, local.day, local.hour)
+        # Earliest start in each hour: slots arrive in chronological order.
+        by_hour.setdefault(key, slot)
+
+    offer = list(by_hour.values())[:MAX_OFFERED_OPTIONS]
+    # A day that genuinely only has 9:00 and 9:30 free should still offer both
+    # rather than a single option — falling back to consecutive slots is right
+    # exactly when there are no distinct hours left to spread across.
+    # Keyed on the instant rather than on object identity: the engine yields one
+    # slot per start time, so the start IS the identity here.
+    if len(offer) < MAX_OFFERED_OPTIONS:
+        offered = {s.starts_at for s in offer}
+        for slot in slots:
+            if len(offer) >= MAX_OFFERED_OPTIONS:
+                break
+            if slot.starts_at not in offered:
+                offer.append(slot)
+                offered.add(slot.starts_at)
+        offer.sort(key=lambda s: s.starts_at)
+
+    chosen = {s.starts_at for s in offer}
+    alternatives = [s for s in slots if s.starts_at not in chosen][:MAX_ALTERNATIVE_SLOTS]
+    return offer, alternatives
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -171,6 +231,74 @@ def _source_for(ctx: ToolContext) -> BookingSource:
     return cast("BookingSource", source) if source in ALL_SOURCES else "api"
 
 
+# What a tool says when the assistant driving it was never given permission to
+# book. Written as an instruction rather than an error, because the planner reads
+# it as an observation and has to know what to do next — the failure mode being
+# guarded against is an assistant that "helpfully" invents a booking when a tool
+# refuses it.
+BOOKING_NOT_PERMITTED = (
+    "This assistant is not allowed to handle appointments. Do NOT offer a time, "
+    "do NOT hold a slot, and do NOT tell the customer anything is booked, moved "
+    "or cancelled. Say you can't take bookings here and offer to help with "
+    "something else."
+)
+
+
+async def _assistant_may_book(uow_factory: UowFactory, ctx: ToolContext) -> bool:
+    """Is the assistant behind this call the one the operator allowed to book?
+
+    Permission lives on the assistant (`assistant.appointments_enabled`) and is
+    checked here, at the tool, rather than only at the routing layer — because
+    routing decides which agent *answers*, and there is more than one way for a
+    loop to end up holding these tools (the shared document agent registers them
+    whenever `APPOINTMENT_AGENT_TOOLS_ENABLED` is on, for every assistant in the
+    deployment). Enforcing it once at the point of effect is what makes "only
+    this assistant can book" true no matter which path got here.
+
+    An anonymous context — no `chatbot_id`, so no assistant to have been given
+    permission — is refused. Staff bookings do not come through the agent; they
+    go through the appointments API, which carries a real principal.
+    """
+    if ctx.chatbot_id is None:
+        return False
+    async with uow_factory() as uow:
+        uow.set_tenant_scope(ctx.tenant_id)
+        chatbot = await uow.chatbots.get(ctx.tenant_id, ctx.chatbot_id)
+    return bool(chatbot and chatbot.assistant.appointments_enabled)
+
+
+class BookingPermissionGate:
+    """Wraps a scheduling tool so only a booking-enabled assistant can run it.
+
+    A wrapper rather than a check pasted into each `run`: there are seven tools
+    and the one that gets forgotten is the one that leaks. The wrapper also
+    keeps the gate impossible to bypass by registering a tool directly, since
+    `build_scheduling_tools` is the only place they are constructed.
+
+    `spec` is proxied unchanged, so the planner's catalogue — and every prompt
+    written against it — is identical either way.
+    """
+
+    def __init__(self, tool: Any, uow_factory: UowFactory) -> None:
+        self._tool = tool
+        self._uow_factory = uow_factory
+
+    @property
+    def spec(self) -> ToolSpec:
+        return cast("ToolSpec", self._tool.spec)
+
+    async def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
+        if not await _assistant_may_book(self._uow_factory, ctx):
+            log.warning(
+                "scheduling.booking_tool_denied",
+                tenant_id=str(ctx.tenant_id),
+                chatbot_id=str(ctx.chatbot_id) if ctx.chatbot_id else "",
+                tool=self.spec.name,
+            )
+            return ToolResult(observation=BOOKING_NOT_PERMITTED, ok=False)
+        return cast("ToolResult", await self._tool.run(ctx, **kwargs))
+
+
 async def _resolve_reference(
     uow_factory: UowFactory, ctx: ToolContext, reference: str
 ) -> AppointmentId | None:
@@ -233,14 +361,32 @@ class ListServicesTool:
                 data={"services": [], "locations": []},
             )
 
-        lines = ["Services:"]
-        lines += [
-            f"- {s.name} (service_id={s.id}, {s.duration_minutes} minutes)"
-            for s in bookable
-        ]
+        lines = ["Services this business offers:"]
+        for index, s in enumerate(bookable, start=1):
+            detail = f"{s.duration_minutes} min"
+            if s.category:
+                detail = f"{s.category}, {detail}"
+            lines.append(f"  {index}. {s.name} ({detail}) [service_id={s.id}]")
+        # Said explicitly because the alternative behaviour — asking "what kind
+        # of appointment would you like?" and waiting for the customer to guess
+        # the catalogue — is the single thing that makes a receptionist feel like
+        # a form. The tenant's own service list IS the set of options.
+        if len(bookable) > 1:
+            lines.append(
+                "When you need to know what they want booked, offer these as a "
+                "short numbered list (at most four, the most likely ones first) "
+                "and let them reply with a number. Never ask them to describe it "
+                "in their own words first."
+            )
+        else:
+            lines.append(
+                "There is only one service, so do not ask which one they want — "
+                "say what it is and move on to finding them a time."
+            )
+
         lines.append("Locations:")
         lines += [
-            f"- {loc.name} (location_id={loc.id}, timezone {loc.timezone})"
+            f"  - {loc.name} (location_id={loc.id}, timezone {loc.timezone})"
             for loc in locations
         ]
 
@@ -249,11 +395,13 @@ class ListServicesTool:
             data={
                 "services": [
                     {
+                        "option": index,
                         "id": str(s.id),
                         "name": s.name,
+                        "category": s.category,
                         "duration_minutes": s.duration_minutes,
                     }
-                    for s in bookable
+                    for index, s in enumerate(bookable, start=1)
                 ],
                 "locations": [
                     {"id": str(loc.id), "name": loc.name, "timezone": loc.timezone}
@@ -376,7 +524,7 @@ class FindAvailableSlotsTool:
                     if (rid := _parse_uuid(kwargs.get("resource_id")))
                     else None
                 ),
-                limit=MAX_SLOTS_IN_OBSERVATION,
+                limit=SLOT_QUERY_LIMIT,
                 now=now,
             )
         except DomainError as exc:
@@ -394,24 +542,64 @@ class FindAvailableSlotsTool:
                 data={"slots": []},
             )
 
+        offer, alternatives = _spread_options(slots, location.timezone)
+
         lines = [
             f"Available {service.name} appointments at {location.name} "
-            f"(times shown in {location.timezone}):"
+            f"(times shown in {location.timezone})."
         ]
+        lines.append(
+            "Give the customer these as a numbered list, in exactly these words, "
+            "and ask them to reply with a number:"
+        )
         payload = []
-        for slot in slots:
+        for index, slot in enumerate(offer, start=1):
             local = _in_zone(slot.starts_at, location.timezone)
-            lines.append(f"- {local:%a %d %b, %H:%M} (starts_at={slot.starts_at.isoformat()})")
+            lines.append(
+                f"  {index}. {_friendly(local)} (starts_at={slot.starts_at.isoformat()})"
+            )
             payload.append(
                 {
+                    "option": index,
+                    "label": _friendly(local),
                     "starts_at": slot.starts_at.isoformat(),
                     "ends_at": slot.ends_at.isoformat(),
                     "resource_ids": [str(r) for r in slot.resource_ids],
                 }
             )
-        lines.append("Offer ONLY these times. Use the exact starts_at value when holding a slot.")
 
-        return ToolResult(observation="\n".join(lines), data={"slots": payload})
+        if alternatives:
+            # Kept behind the numbered list rather than in it: they exist so the
+            # agent can answer "anything a bit later?" without another tool call,
+            # not so it can read fourteen times out to someone.
+            lines.append(
+                "Also free, only if they ask for a different time (do not list "
+                "these unprompted):"
+            )
+            for slot in alternatives:
+                local = _in_zone(slot.starts_at, location.timezone)
+                lines.append(
+                    f"  - {_friendly(local)} (starts_at={slot.starts_at.isoformat()})"
+                )
+
+        lines.append(
+            "Offer ONLY times from this observation. Use the exact starts_at "
+            "value when holding or booking."
+        )
+
+        return ToolResult(
+            observation="\n".join(lines),
+            data={
+                "slots": payload,
+                "alternatives": [
+                    {
+                        "label": _friendly(_in_zone(s.starts_at, location.timezone)),
+                        "starts_at": s.starts_at.isoformat(),
+                    }
+                    for s in alternatives
+                ],
+            },
+        )
 
 
 class CreateSlotHoldTool:
@@ -540,6 +728,14 @@ class BookAppointmentTool:
             "customer_name": {"type": "string", "description": "The customer's full name."},
             "customer_phone": {"type": "string", "description": "Their phone number."},
             "customer_email": {"type": "string", "description": "Their email address."},
+            "reason_for_visit": {
+                "type": "string",
+                "description": (
+                    "What the appointment is for, in the customer's own words. "
+                    "Pass whatever they told you — never ask a second time for "
+                    "something they already said."
+                ),
+            },
             "hold_token": {
                 "type": "string",
                 "description": "Token from create_slot_hold, if you held the slot.",
@@ -565,6 +761,11 @@ class BookAppointmentTool:
         )
         email = str(kwargs.get("customer_email") or "").strip()
         hold_token = str(kwargs.get("hold_token") or "").strip()
+        # Why they are coming, carried onto the appointment so the person who
+        # sees it on the day knows as much as the assistant did. Truncated to the
+        # column's limit here rather than raising: losing the tail of a note is
+        # not worth failing a booking the customer has already agreed to.
+        reason = str(kwargs.get("reason_for_visit") or "").strip()[:MAX_NOTES]
 
         if service_id is None or location_id is None or starts_at is None:
             return ToolResult(
@@ -610,6 +811,7 @@ class BookAppointmentTool:
                 customer_name=name,
                 customer_phone=phone,
                 customer_email=email,
+                customer_notes=reason,
                 hold_token=hold_token,
                 source=_source_for(ctx),
                 status="confirmed",
@@ -902,16 +1104,23 @@ def _in_zone(moment: datetime, timezone: str) -> datetime:
 def build_scheduling_tools(uow_factory: UowFactory) -> list[Any]:
     """The appointment tools, in the order an agent naturally needs them.
 
-    Read-only first, then the two that change something. The ordering is not
+    Read-only first, then the ones that change something. The ordering is not
     cosmetic: it is the order they appear in the planner's catalogue, and a
     model reads that as a rough sequence.
+
+    Every one of them is wrapped in `BookingPermissionGate`, including the
+    read-only ones — an assistant that was not given permission has no business
+    reading a customer's appointments or quoting the clinic's free slots either.
     """
     return [
-        ListServicesTool(uow_factory),
-        FindAvailableSlotsTool(uow_factory),
-        FindCustomerAppointmentsTool(uow_factory),
-        CreateSlotHoldTool(uow_factory),
-        BookAppointmentTool(uow_factory),
-        RescheduleAppointmentTool(uow_factory),
-        CancelAppointmentTool(uow_factory),
+        BookingPermissionGate(tool, uow_factory)
+        for tool in (
+            ListServicesTool(uow_factory),
+            FindAvailableSlotsTool(uow_factory),
+            FindCustomerAppointmentsTool(uow_factory),
+            CreateSlotHoldTool(uow_factory),
+            BookAppointmentTool(uow_factory),
+            RescheduleAppointmentTool(uow_factory),
+            CancelAppointmentTool(uow_factory),
+        )
     ]

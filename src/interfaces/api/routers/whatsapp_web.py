@@ -64,6 +64,8 @@ from src.interfaces.api.schemas import (
     InboxSendRequest,
     InboxStatsResponse,
     MergeDuplicateNumbersResponse,
+    ReplyCheck,
+    ReplyReadinessResponse,
     WhatsAppWebOptionsResponse,
     WhatsAppWebSessionResponse,
 )
@@ -465,6 +467,110 @@ async def inbox_stats(
         reply_rate=pct(stats.threads_replied, stats.threads_contacted),
         active_campaigns=sum(1 for b in broadcasts if b.status in _LIVE_BROADCAST_STATUSES),
         period_label=f"last {_STATS_WINDOW_DAYS} days",
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/reply-readiness", response_model=ReplyReadinessResponse
+)
+async def reply_readiness(
+    session_id: uuid.UUID, principal: AdminPrincipalDep, container: ContainerDep
+) -> ReplyReadinessResponse:
+    """Can this number answer an inbound message right now — and if not, why.
+
+    Checked in the order the real path checks them, because the first closed
+    gate is the one worth fixing: an unlinked number with no assistant needs
+    the link first, and saying so is more useful than listing both.
+
+    The bridge check is first and it is the one that catches people out. The
+    bridge is a separate process holding the WhatsApp socket; without it no
+    inbound message ever reaches this API, so the console looks perfectly
+    healthy while nothing can possibly be replied to.
+    """
+    checks: list[ReplyCheck] = []
+
+    healthy, bridge_error = await container.whatsapp_bridge.health()
+    if not container.whatsapp_bridge.enabled:
+        checks.append(
+            ReplyCheck(
+                name="bridge",
+                ok=False,
+                detail="Personal WhatsApp isn't configured on this server (BRIDGE_TOKEN unset).",
+            )
+        )
+    elif not healthy:
+        checks.append(
+            ReplyCheck(
+                name="bridge",
+                ok=False,
+                detail=(
+                    "The WhatsApp bridge isn't running, so no incoming message can "
+                    f"reach the assistant. {bridge_error}".strip()
+                ),
+            )
+        )
+    else:
+        checks.append(ReplyCheck(name="bridge", ok=True, detail="Bridge is up."))
+
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
+        ws = await uow.whatsapp_web_sessions.get(principal.tenant_id, session_id)
+        if ws is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        checks.append(
+            ReplyCheck(
+                name="linked",
+                ok=ws.status == "linked",
+                detail=ws.health(),
+            )
+        )
+
+        bot = (
+            await uow.chatbots.get(principal.tenant_id, ws.chatbot_id)
+            if ws.chatbot_id
+            else None
+        )
+        checks.append(
+            ReplyCheck(
+                name="assistant",
+                ok=bot is not None,
+                detail=(
+                    f"{bot.name} answers this number."
+                    if bot
+                    else "No assistant is attached, so messages arrive but nothing replies."
+                ),
+            )
+        )
+
+        # A thread someone took over is a deliberate choice, not a fault — but
+        # it is invisible from the numbers list, and it is a common reason for
+        # "it answered yesterday and not today".
+        paused = await uow.whatsapp_conversations.count_for_owner(
+            principal.tenant_id, session_id, auto_reply=False
+        )
+        total = await uow.whatsapp_conversations.count_for_owner(
+            principal.tenant_id, session_id
+        )
+        checks.append(
+            ReplyCheck(
+                name="conversations",
+                ok=paused == 0 or paused < total,
+                detail=(
+                    f"{paused} of {total} chats are handed to a person, so the "
+                    "assistant stays quiet on those."
+                    if paused
+                    else "The assistant is answering every chat on this number."
+                ),
+            )
+        )
+
+    first_bad = next((c for c in checks if not c.ok), None)
+    return ReplyReadinessResponse(
+        ready=first_bad is None,
+        reason=first_bad.name if first_bad else "",
+        detail=first_bad.detail if first_bad else "This number is answering normally.",
+        checks=checks,
     )
 
 

@@ -9,6 +9,7 @@ import structlog
 from fastapi import APIRouter, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
+from src.application.use_cases.booking_setup import EnsureBookingSetup
 from src.application.use_cases.generate_assistant import (
     USE_CASE_HINTS,
     GenerateAssistantUseCase,
@@ -440,6 +441,28 @@ async def update_chatbot(
 
         await uow.chatbots.update(bot)
         await uow.commit()
+
+    # Turning booking on is a promise the workspace has to be able to keep.
+    # A tenant that has never opened the Scheduling screens has no location,
+    # service, staff or opening hours — so the assistant would gain the tools
+    # and then tell every customer there is no availability, which reads as a
+    # broken feature rather than as missing setup. Run after the commit and
+    # outside the transaction above: the assistant's own change must stand even
+    # if provisioning fails.
+    if bot.assistant.appointments_enabled:
+        try:
+            await EnsureBookingSetup(container.unit_of_work()).execute(
+                principal.tenant_id,
+                timezone=container.settings.default_booking_timezone,
+            )
+        except Exception:  # noqa: BLE001 - never fail the save over the seed
+            log.warning(
+                "chatbots.booking_setup_failed",
+                tenant_id=str(principal.tenant_id),
+                chatbot_id=str(bot.id),
+                exc_info=True,
+            )
+
     return _to_response(bot)
 
 

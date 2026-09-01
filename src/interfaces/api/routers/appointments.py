@@ -252,10 +252,21 @@ async def booking_readiness(
             rules = await uow.availability.list_rules(principal.tenant_id, resource.id)
             if rules:
                 with_hours += 1
+        # The one that actually decides whether any slot exists. `compute_slots`
+        # treats a branch with no rules as closed and returns nothing, while a
+        # resource with no rules of its own simply inherits the branch's — so
+        # counting only resource hours got this backwards in both directions:
+        # a correctly configured workspace was reported as not ready, and one
+        # with staff hours but no branch hours was reported as ready and then
+        # offered no times at all.
+        locations_with_hours = 0
+        for location in locations:
+            if await uow.availability.list_rules(principal.tenant_id, location.id):
+                locations_with_hours += 1
 
     blockers: list[str] = []
     # Ordered as they have to be fixed: a service cannot be given staff who do
-    # not exist, and staff cannot be given hours before they exist.
+    # not exist, and hours cannot be set on a location before there is one.
     if not locations:
         blockers.append("Add a location — the branch appointments are booked at.")
     if not services:
@@ -264,8 +275,11 @@ async def booking_readiness(
         blockers.append("Add a staff member or room under Staff & Resources.")
     if services and resources and not with_staff:
         blockers.append("Assign staff to a service — a service with nobody on it has no slots.")
-    if resources and not with_hours:
-        blockers.append("Set opening hours under Availability — without them nothing is bookable.")
+    if locations and not locations_with_hours:
+        blockers.append(
+            "Set the location's opening hours under Availability — a branch with "
+            "no hours is closed, so nothing is bookable."
+        )
 
     return BookingReadinessResponse(
         ready=not blockers,
@@ -274,6 +288,7 @@ async def booking_readiness(
         resources=len(resources),
         services_with_staff=with_staff,
         resources_with_hours=with_hours,
+        locations_with_hours=locations_with_hours,
         blockers=blockers,
     )
 

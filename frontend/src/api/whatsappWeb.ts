@@ -80,3 +80,29 @@ export interface MergeDuplicatesResult {
 export function mergeDuplicateNumbers(): Promise<MergeDuplicatesResult> {
   return api.post<MergeDuplicatesResult>("/whatsapp-web/sessions/merge-duplicates");
 }
+
+export interface ReplyCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ReplyReadiness {
+  ready: boolean;
+  /** Machine-readable cause: "bridge" | "linked" | "assistant" | "conversations". */
+  reason: string;
+  detail: string;
+  checks: ReplyCheck[];
+}
+
+/**
+ * Why this number is or is not answering right now.
+ *
+ * Several independent conditions sit between an inbound message and a reply,
+ * and each of them fails silently — a line in the server log and nothing on
+ * screen. This names the first one that is closed, which is why "it stopped
+ * replying" stops being a mystery you have to ask someone about.
+ */
+export function getReplyReadiness(sessionId: string): Promise<ReplyReadiness> {
+  return api.get<ReplyReadiness>(`/whatsapp-web/sessions/${sessionId}/reply-readiness`);
+}

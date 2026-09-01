@@ -289,6 +289,12 @@ class Settings(BaseSettings):
     # enough for a phone conversation, short enough that an abandoned booking
     # frees the slot while the customer is still on the page.
     slot_hold_ttl_minutes: int = 10
+    # The timezone given to the location created for a workspace that turns
+    # booking on without having set one up (see use_cases/booking_setup.py).
+    # Only ever used for that first row, which the operator can edit — but it
+    # decides what "9 AM" means to their customers, so it is configurable per
+    # deployment rather than hard-coded to UTC.
+    default_booking_timezone: str = "Asia/Dubai"
 
     # --- Agent ---
     # Hard ceiling on agent reasoning steps per request (defence against a loop

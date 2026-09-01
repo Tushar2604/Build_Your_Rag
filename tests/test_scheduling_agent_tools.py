@@ -291,7 +291,9 @@ class TestFindAvailableSlots:
         # UTC instant to pass back.
         first = result.data["slots"][0]
         assert first["starts_at"] == FIRST_SLOT.isoformat()
-        assert "09:00" in result.observation
+        # Shown the way a receptionist says it, not the way a database stores
+        # it — the agent is told to read the label out verbatim.
+        assert "9:00 AM" in result.observation
 
     async def test_it_tells_the_agent_not_to_invent_a_time_when_there_are_none(
         self, world: _World
@@ -317,7 +319,7 @@ class TestFindAvailableSlots:
             location_id=str(world.location.id),  # type: ignore[attr-defined]
             date=MONDAY_LOCAL_DATE,
         )
-        assert "Offer ONLY these times" in result.observation
+        assert "Offer ONLY times from this observation" in result.observation
 
     async def test_existing_bookings_are_excluded(self, world: _World) -> None:
         world.busy[world.doctor.id] = [  # type: ignore[attr-defined]
@@ -465,3 +467,110 @@ class TestRegistration:
         assert registry.get("find_available_slots") is not None
         # The catalogue is what the planner actually reads.
         assert "find_available_slots" in registry.render_catalog()
+
+
+class TestTheTimesAreOfferedAsChoices:
+    """A customer picking from four times is choosing; a customer reading
+    9:00, 9:15, 9:30, 9:45 is reading the same appointment four times.
+
+    The engine works on a 15-minute grid, so its first four results are always
+    the first hour of the first open day — which also makes a wide-open calendar
+    look nearly full. The tool spreads the offer across distinct clock hours and
+    keeps the rest behind it, so "anything later?" costs no second tool call.
+    """
+
+    async def _slots(self, world: _World, **kwargs):  # type: ignore[no-untyped-def]
+        return await FindAvailableSlotsTool(world.uow_factory).run(
+            _ctx(),
+            service_id=str(world.service.id),  # type: ignore[attr-defined]
+            location_id=str(world.location.id),  # type: ignore[attr-defined]
+            date=MONDAY_LOCAL_DATE,
+            **kwargs,
+        )
+
+    async def test_the_offer_is_one_time_per_clock_hour(self, world: _World) -> None:
+        result = await self._slots(world)
+        hours = [
+            datetime.fromisoformat(s["starts_at"])
+            .astimezone(ZoneInfo("Asia/Dubai"))
+            .hour
+            for s in result.data["slots"]
+        ]
+        assert hours == sorted(hours)
+        assert len(set(hours)) == len(hours), f"same hour offered twice: {hours}"
+
+    async def test_it_offers_a_handful_not_a_wall(self, world: _World) -> None:
+        result = await self._slots(world)
+        assert 1 <= len(result.data["slots"]) <= 4
+
+    async def test_every_offered_time_is_still_one_the_engine_produced(
+        self, world: _World
+    ) -> None:
+        # The whole point of section 61 survives the reshaping: spreading picks
+        # from the engine's list, it does not compute a time of its own.
+        result = await self._slots(world)
+        engine = {
+            slot.starts_at.isoformat()
+            for slot in (await self._raw_slots(world))
+        }
+        assert {s["starts_at"] for s in result.data["slots"]} <= engine
+
+    async def _raw_slots(self, world: _World):  # type: ignore[no-untyped-def]
+        from src.application.use_cases.availability import FindAvailability
+        from src.domain.shared.identifiers import LocationId, ServiceId
+
+        slots, _, _ = await FindAvailability(world.uow_factory()).execute(
+            TENANT,
+            location_id=LocationId(world.location.id),  # type: ignore[attr-defined]
+            service_id=ServiceId(world.service.id),  # type: ignore[attr-defined]
+            range_start=MONDAY,
+            range_end=MONDAY + timedelta(days=1),
+            limit=60,
+        )
+        return slots
+
+    async def test_the_options_are_numbered_for_the_customer(
+        self, world: _World
+    ) -> None:
+        result = await self._slots(world)
+        assert "1. " in result.observation
+        assert "reply with a number" in result.observation
+
+    async def test_the_label_reads_the_way_a_person_says_it(
+        self, world: _World
+    ) -> None:
+        # The agent is told to read the label verbatim, so the readable form is
+        # built here — a model asked to reformat an ISO string is a model given
+        # one more chance to change the time while it is at it.
+        result = await self._slots(world)
+        assert result.data["slots"][0]["label"].endswith(("AM", "PM"))
+        assert "T0" not in result.observation.split("starts_at=")[0]
+
+    async def test_the_other_free_times_are_kept_but_not_offered(
+        self, world: _World
+    ) -> None:
+        result = await self._slots(world)
+        assert result.data["alternatives"], "an open day has more than four slots"
+        assert "do not list these unprompted" in result.observation
+
+    async def test_a_nearly_full_day_still_offers_what_is_left(
+        self, world: _World
+    ) -> None:
+        # Only 09:00-10:15 open: there is one clock hour to spread across, so
+        # consecutive slots are exactly the right answer rather than a single
+        # take-it-or-leave-it option.
+        world.rules.clear()
+        for weekday in range(7):
+            world.rules.append(
+                AvailabilityRule(
+                    tenant_id=TENANT,
+                    owner_kind="location",
+                    owner_id=world.location.id,  # type: ignore[attr-defined]
+                    weekday=weekday,
+                    start_time=time(9, 0),
+                    end_time=time(10, 15),
+                )
+            )
+        result = await self._slots(world)
+        assert len(result.data["slots"]) > 1
+        assert result.data["alternatives"] == []

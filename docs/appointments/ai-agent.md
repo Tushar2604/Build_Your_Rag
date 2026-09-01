@@ -28,6 +28,37 @@ Where it takes effect:
 | Web chat / playground | `chat.py` → `AskFrontOffice` |
 | Anything else | unchanged — `AskChatbot` |
 
+Saving the assistant with it on also runs `EnsureBookingSetup`
+(`use_cases/booking_setup.py`), which fills in anything the workspace is missing
+before it can take a booking: a location, a service, a staff member, the link
+between them, and Mon–Sat 09:00–18:00 opening hours on the location. Each piece
+only if it is absent, so an operator's own configuration is never touched, and
+idempotent, so a second assistant adds nothing.
+
+Without it, turning the switch on was a promise the backend could not keep: a
+workspace that had never opened the Scheduling screens has no opening hours, and
+the availability engine correctly answers "nothing" — which reads from the
+outside as a broken feature rather than as missing setup.
+
+## Only the allowed assistant can book
+
+The switch is the permission, and it is enforced at the tool
+(`BookingPermissionGate` in `scheduling_tools.py`), not only at the routing
+layer. Every tool `build_scheduling_tools` returns is wrapped, the read-only
+ones included; each call re-reads `appointments_enabled` for the assistant in
+`ToolContext.chatbot_id` and returns a refusal observation if it is off.
+
+Routing alone could not carry this. It decides which agent *answers*, but the
+shared document agent also registers these tools whenever
+`APPOINTMENT_AGENT_TOOLS_ENABLED` is on — for every assistant in the
+deployment. One check at the point of effect is what makes "only this assistant
+books" true regardless of which path got there. A context with no assistant is
+refused too: staff bookings go through the appointments API, which carries a
+real principal.
+
+Read per call rather than captured at build time, so switching it off takes the
+capability away immediately instead of at the next deploy.
+
 ## The tools
 
 | Tool | Purpose |
@@ -42,6 +73,38 @@ Where it takes effect:
 
 `search_documents` is registered alongside them, so one assistant can answer
 "do you treat sports injuries?" and then book the appointment that follows.
+
+## Choices, not open questions
+
+A receptionist who says "we're open 9 to 6, what time works?" has handed the
+work back to the customer. The agent offers a short numbered list instead, and
+that is shaped by the tools rather than left to the prompt:
+
+- **`find_available_slots`** asks the engine for up to `SLOT_QUERY_LIMIT` slots
+  and then spreads the offer across distinct clock hours (`_spread_options`).
+  The engine works on a 15-minute grid, so its first four results are always
+  9:00, 9:15, 9:30, 9:45 — the same appointment four times, which also makes an
+  empty day look nearly full. One per hour turns it back into a real choice.
+  The remaining times stay in the observation behind "only if they ask", so
+  "anything later?" costs no second tool call.
+- **Labels are built in the tool** (`_friendly` → "Mon 02 Sep, 9:00 AM") and the
+  agent is told to read them verbatim. A model asked to reformat an ISO string
+  is a model given one more chance to change the time while it is at it.
+- **`list_services`** returns the tenant's own catalogue as the options and says
+  so — three or four, most likely first. A dental clinic's list is whatever it
+  configured (check-up, RCT, cleaning); nothing is invented for it. With exactly
+  one service the observation tells the agent *not* to ask.
+
+Everything offered is still a real slot the engine produced, so the spreading
+changes what the customer is shown and nothing about what is bookable.
+
+## What the agent collects
+
+Name, plus a phone number or an email (whichever the channel does not already
+know), plus `reason_for_visit`, which lands on the appointment as
+`customer_notes` so whoever sees it on the day knows what the assistant knew.
+One thing per message, and only what is actually missing — re-asking something
+the customer already said is the fastest way to sound like a form.
 
 ## Why the guardrails hold
 

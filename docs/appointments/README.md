@@ -52,6 +52,13 @@ being a document-answering bot and becomes a booking-capable receptionist on
 WhatsApp and web chat: it checks real availability, holds the slot, and books.
 See [ai-agent.md](ai-agent.md).
 
+That switch is also the permission. Only the assistant it is on can touch the
+appointment tools — enforced at the tools themselves, so it holds no matter
+which agent path a message arrives on. Saving it on also provisions whatever the
+workspace is missing (location, service, staff, opening hours), so a brand-new
+assistant can book on its first message instead of reporting no availability
+forever.
+
 ## Feature flags
 
 | Setting | Default | Effect |

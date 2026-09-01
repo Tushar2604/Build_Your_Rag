@@ -1,4 +1,5 @@
 import { useState, useEffect, FormEvent } from "react";
+import { AlertTriangle, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   listWhatsAppChannels, connectWhatsAppChannel, disconnectWhatsAppChannel, WhatsAppChannel,
@@ -7,8 +8,9 @@ import { listChatbots, Chatbot } from "../api/chatbots";
 import { ApiError } from "../api/client";
 import WhatsAppQrModal from "../components/WhatsAppQrModal";
 import {
-  WhatsAppWebSession, WhatsAppWebOptions, attachAssistant, createWebSession,
-  getWhatsAppWebOptions, listWebSessions, mergeDuplicateNumbers, unlinkWebSession,
+  ReplyReadiness, WhatsAppWebSession, WhatsAppWebOptions, attachAssistant,
+  createWebSession, getReplyReadiness, getWhatsAppWebOptions, listWebSessions,
+  mergeDuplicateNumbers, unlinkWebSession,
 } from "../api/whatsappWeb";
 
 function ConnectModal({
@@ -272,6 +274,14 @@ function WebSessionRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Why this number is or is not answering. Asked per row rather than once for
+  // the page: the bridge check is shared, but "linked", "assistant attached"
+  // and "chats handed to a person" are all per number.
+  const [readiness, setReadiness] = useState<ReplyReadiness | null>(null);
+
+  useEffect(() => {
+    getReplyReadiness(session.id).then(setReadiness).catch(() => setReadiness(null));
+  }, [session.id, session.status, session.chatbot_id]);
 
   async function pickAssistant(chatbotId: string) {
     setBusy(true);
@@ -314,6 +324,25 @@ function WebSessionRow({
             </span>
           </div>
           <p className="text-xs text-gray-500 mt-0.5">{session.health}</p>
+          {/* The single most useful sentence on this page. Every condition
+              between an inbound message and a reply used to fail silently —
+              a log line and nothing on screen — which is why "it stopped
+              replying" kept coming back looking like the same bug when it was
+              a different gate each time. */}
+          {readiness && (
+            <p
+              className={`mt-1 flex items-start gap-1.5 text-xs ${
+                readiness.ready ? "text-emerald-700" : "text-amber-700"
+              }`}
+            >
+              {readiness.ready ? (
+                <Check className="mt-px h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.5} />
+              ) : (
+                <AlertTriangle className="mt-px h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.5} />
+              )}
+              <span>{readiness.detail}</span>
+            </p>
+          )}
           {session.last_error && (
             <p className="text-xs text-red-600 mt-1">{session.last_error}</p>
           )}

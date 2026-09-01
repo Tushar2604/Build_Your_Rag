@@ -1177,8 +1177,12 @@ class BookingReadinessResponse(BaseModel):
     # Services with at least one staff member or room attached. A service with
     # none is bookable in theory and never in practice.
     services_with_staff: int = 0
-    # Resources with at least one opening-hours rule.
+    # Resources with at least one opening-hours rule. Informational: a resource
+    # without its own hours inherits the branch's, which is the usual setup.
     resources_with_hours: int = 0
+    # Locations with opening hours. This is the one that decides whether any
+    # slot can exist at all — a branch with no hours is closed.
+    locations_with_hours: int = 0
     blockers: list[str] = Field(default_factory=list)
 
 
@@ -1196,6 +1200,36 @@ class NewAppointmentsResponse(BaseModel):
     # advances its watermark to this rather than to "now", so a booking that
     # lands between the query and the click is not silently marked as seen.
     latest_at: datetime | None = None
+
+
+class ReplyCheck(BaseModel):
+    name: str
+    ok: bool
+    detail: str = ""
+
+
+class ReplyReadinessResponse(BaseModel):
+    """Why this number is or is not answering, right now.
+
+    There are several independent conditions between an inbound WhatsApp
+    message and a generated reply, and every one of them fails *silently* —
+    each writes a different line to the server log and nothing to the screen.
+    That is why "the assistant stopped replying" kept coming back looking like
+    the same bug: it was a different gate each time, and there was no way to
+    tell which without reading logs.
+
+    This checks them in the order they actually fire, and names the first one
+    that is closed.
+    """
+
+    ready: bool = False
+    # A short machine-readable cause, so the UI can choose its own wording.
+    # "" when ready.
+    reason: str = ""
+    # What to do about it, in the operator's language.
+    detail: str = ""
+    # Every check, in order, for the cases where more than one is wrong.
+    checks: list[ReplyCheck] = Field(default_factory=list)
 
 
 class MergeDuplicateNumbersResponse(BaseModel):

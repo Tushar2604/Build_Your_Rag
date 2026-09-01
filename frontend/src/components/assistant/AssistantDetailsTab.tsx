@@ -204,17 +204,38 @@ function PillToggle({
  * indistinguishable from a broken assistant — and there was nowhere to find
  * out which of the four requirements was the missing one. So it asks.
  */
-function BookingReadinessNote() {
+function BookingReadinessNote({ saved }: { saved: boolean }) {
   const [state, setState] = useState<BookingReadiness | null>(null);
 
+  // Re-asked whenever the *saved* value changes, because saving is what
+  // provisions the missing pieces: the answer from before the save is about a
+  // workspace that no longer exists.
   useEffect(() => {
+    if (!saved) return;
+    let alive = true;
     appointmentsApi
       .readiness()
-      .then(setState)
+      .then((r) => alive && setState(r))
       // A failed check must not imply a broken setup — say nothing rather than
       // something wrong.
-      .catch(() => setState(null));
-  }, []);
+      .catch(() => alive && setState(null));
+    return () => {
+      alive = false;
+    };
+  }, [saved]);
+
+  // Turned on but not saved yet. Showing the blocker list here would be a lie
+  // by timing — those blockers are exactly what saving clears.
+  if (!saved) {
+    return (
+      <p className="mt-4 ml-9 rounded-lg bg-brand-500/5 px-3 py-2 text-xs text-gray-600">
+        Save to turn this on. If this workspace has no scheduling set up yet,
+        we'll add a location, a service, a staff member and Mon–Sat opening
+        hours so it can book straight away — all editable under{" "}
+        <strong>Appointments</strong>.
+      </p>
+    );
+  }
 
   if (!state) return null;
 
@@ -223,10 +244,14 @@ function BookingReadinessNote() {
       <p className="mt-4 ml-9 flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2
                     text-xs text-emerald-800">
         <Check className="h-3.5 w-3.5 flex-shrink-0" strokeWidth={2.5} />
+        {/* Counts the staff who exist, not the ones with their own hours: a
+            resource without its own rules inherits the branch's, which is the
+            normal setup — the old wording reported "0 staff on the calendar"
+            for a workspace that books perfectly well. */}
         Ready to book — {state.services} service{state.services === 1 ? "" : "s"} across{" "}
         {state.locations} location{state.locations === 1 ? "" : "s"}, with{" "}
-        {state.resources_with_hours} staff member
-        {state.resources_with_hours === 1 ? "" : "s"} on the calendar.
+        {state.resources} staff member{state.resources === 1 ? "" : "s"} on the
+        calendar.
       </p>
     );
   }
@@ -410,7 +435,9 @@ export default function AssistantDetailsTab({ bot, draft, onDraftChange, onRepla
           </div>
         </div>
 
-        {a.appointments_enabled && <BookingReadinessNote />}
+        {a.appointments_enabled && (
+          <BookingReadinessNote saved={bot.assistant.appointments_enabled} />
+        )}
       </section>
 
       {/* ── Conversational Flow ── */}
