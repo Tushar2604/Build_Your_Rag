@@ -339,3 +339,69 @@ class TestResponseLanguagePolicy:
     def test_a_pinned_language_does_not_leak_the_auto_mirror_wording(self) -> None:
         prompt = build_grounded_prompt("ctx", "q", response_language="Hindi")
         assert "same language the person just used" not in prompt
+
+
+class TestTheHistoryAnchoringRegression:
+    """The bug actually reported in production: response_language="English
+    (India)" held for a fresh conversation, but a live customer thread kept
+    reverting to Hinglish "again and again". Reproduced against a real model:
+    once the assistant's OWN prior turn in <conversation_history> was in
+    Hinglish, every later reply matched it regardless of the LANGUAGE rule
+    stated once at the top of the prompt — the transcript right next to
+    <question> outweighs an instruction stated once, further away. A short
+    reminder immediately around the history block is what held, confirmed
+    against a live model repeatedly before being written here.
+    """
+
+    def test_a_reminder_is_added_around_the_history_when_a_language_is_pinned(
+        self,
+    ) -> None:
+        prompt = build_grounded_prompt(
+            "ctx",
+            "q",
+            history="candidate: hii\nassistant: hi",
+            response_language="English (India)",
+        )
+        assert prompt.count("REMINDER") == 2
+        # Both copies appear where they can actually work: bracketing the
+        # transcript, not buried somewhere the model has already moved past.
+        # The real block start is searched for specifically — "<question>"
+        # alone also matches the earlier sentence that just mentions the tag
+        # by name ("...latest message is in the <question> block").
+        history_end = prompt.index("</conversation_history>")
+        question_start = prompt.index("\n<question>\n")
+        first_reminder = prompt.index("REMINDER")
+        assert history_end < first_reminder < question_start
+        assert prompt.rindex("REMINDER") > question_start
+
+    def test_no_reminder_is_added_without_a_conversation_yet(self) -> None:
+        # Nothing to anchor on in a fresh conversation — confirmed live that
+        # the leading rule alone already holds there; the extra text would
+        # just be noise.
+        prompt = build_grounded_prompt("ctx", "q", response_language="English (India)")
+        assert "REMINDER" not in prompt
+
+    def test_no_reminder_under_the_auto_mirror_policy(self) -> None:
+        # Matching whatever the conversation has been doing IS correct there
+        # — reminding the model not to do it would fight the intended policy.
+        prompt = build_grounded_prompt(
+            "ctx",
+            "q",
+            history="candidate: hii\nassistant: hi",
+            response_language=RESPONSE_LANGUAGE_AUTO,
+        )
+        assert "REMINDER" not in prompt
+
+    def test_the_reminder_names_the_pinned_language(self) -> None:
+        prompt = build_grounded_prompt(
+            "ctx", "q", history="candidate: hi\nassistant: hi", response_language="Spanish"
+        )
+        assert "reply in Spanish only" in prompt
+
+    def test_the_reminder_explicitly_disowns_the_assistants_own_prior_turns(self) -> None:
+        # The exact failure mode: the assistant's OWN earlier replies, not
+        # just the customer's messages, were what the model was matching.
+        prompt = build_grounded_prompt(
+            "ctx", "q", history="candidate: hi\nassistant: hi", response_language="Hindi"
+        )
+        assert "this assistant's own earlier replies" in prompt

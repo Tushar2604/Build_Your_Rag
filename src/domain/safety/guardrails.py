@@ -334,6 +334,35 @@ def language_rules(response_language: str = RESPONSE_LANGUAGE_AUTO) -> str:
     )
 
 
+def _language_reminder(response_language: str) -> str:
+    """A short repeat of the language rule, for the two spots right next to
+    where the model actually starts writing.
+
+    Exists because the full rule at the top of the prompt is not enough on its
+    own — measured, not assumed. A conversation whose OWN earlier turns (this
+    assistant's own prior replies, not just the customer's) were in Hinglish
+    keeps the assistant answering in Hinglish on every later turn even with a
+    pinned language and the full rule leading the prompt: the conversation
+    history sitting right before <question> reads as precedent and wins,
+    exactly the way a few worked examples outweigh an instruction stated once,
+    earlier, further away. The fix that actually held across repeated live
+    tests was placing a short reminder on both sides of the history block —
+    the model's most recent context before it writes is then a rule, not a
+    transcript in the wrong language.
+
+    Returns "" for `RESPONSE_LANGUAGE_AUTO`: matching whatever the
+    conversation has been doing IS the correct behaviour there, so there is
+    nothing to remind it not to do.
+    """
+    if response_language == RESPONSE_LANGUAGE_AUTO:
+        return ""
+    return (
+        f"REMINDER: reply in {response_language} only. If any turn above — "
+        "including this assistant's own earlier replies — used a different "
+        "language, that was a mistake and is not a precedent to continue."
+    )
+
+
 # What to do with a question the reference material cannot answer. Attached to
 # BOTH rule sets, because "I don't have that" is the moment the assistant most
 # needs to sound like a person: the stock behaviour — one flat "I'll check and
@@ -450,11 +479,22 @@ def build_grounded_prompt(
     working exactly as it did.
     """
     grounded = context.strip() and context.strip() != NO_CONTEXT_MARKER
+    # The reminder sandwiches the actual point of failure: a conversation
+    # whose own earlier turns drifted into another language pulls harder on
+    # the next reply than a rule stated once, further up the prompt — proven
+    # against a live model, where the full rule alone did not hold but a short
+    # repeat immediately before and after the transcript did. Only inserted
+    # when there is a transcript to anchor on; a fresh conversation has
+    # nothing to drift from, and `_language_reminder` is already "" for the
+    # auto-mirror policy, where drifting IS the correct behaviour.
+    reminder = _language_reminder(response_language) if history.strip() else ""
     history_block = (
         f"\n\n<conversation_history>\n{_neutralise(history)}\n</conversation_history>"
+        + (f"\n\n{reminder}" if reminder else "")
         if history.strip()
         else ""
     )
+    trailing_reminder = f"\n\n{reminder}" if reminder else ""
     history_note = (
         " The conversation so far is in the <conversation_history> block — use "
         "it to avoid repeating a question the candidate already answered."
@@ -483,4 +523,5 @@ def build_grounded_prompt(
         f"<document_context>\n{_neutralise(context)}\n</document_context>"
         f"{history_block}\n\n"
         f"<question>\n{_neutralise(question)}\n</question>"
+        f"{trailing_reminder}"
     )

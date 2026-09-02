@@ -34,7 +34,7 @@ from src.domain.chatbot.entities import (
     origin_allowed,
     static_welcome,
 )
-from src.domain.safety.guardrails import build_grounded_prompt
+from src.domain.safety.guardrails import build_grounded_prompt, language_rules
 from src.domain.shared.identifiers import SessionId
 from src.infrastructure.rag.graph import RagGraph, build_context
 from src.interfaces.api.deps import ContainerDep
@@ -415,7 +415,7 @@ async def greet_public(
         else:
             try:
                 async for token in container.llm.stream(
-                    bot.system_prompt,
+                    f"{language_rules(bot.assistant.response_language)}\n\n{bot.system_prompt}",
                     instruction,
                     on_provider=lambda name: served_by.__setitem__("provider", name),
                 ):

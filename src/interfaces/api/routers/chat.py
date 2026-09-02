@@ -22,6 +22,7 @@ from src.domain.safety.guardrails import (
     build_grounded_prompt,
     count_repeat_asks,
     format_message_history,
+    language_rules,
     scan_input,
     scan_output,
 )
@@ -451,7 +452,7 @@ async def greet(
         else:
             try:
                 async for token in container.llm.stream(
-                    bot.system_prompt,
+                    f"{language_rules(bot.assistant.response_language)}\n\n{bot.system_prompt}",
                     instruction,
                     on_provider=lambda name: served_by.__setitem__("provider", name),
                 ):
