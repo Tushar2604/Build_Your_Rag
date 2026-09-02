@@ -98,8 +98,17 @@ USE_CASE_HINTS: dict[str, str] = {
 
 # The section spine. Order here is the order the model sees the prompt in, so it
 # is also the order the generator is told to emit. "Flow: …" is a family — an
-# assistant may have several, one per branch of its conversation.
-_SPINE = ("Identity & Purpose", "Facts", "Actions & Limits", "Scope & Redirects", "Guardrails")
+# assistant may have several, one per branch of its conversation. "FAQ" sits
+# last on purpose: it is worked examples, not a rule, and it should read as
+# illustration of everything above it rather than one more instruction.
+_SPINE = (
+    "Identity & Purpose",
+    "Facts",
+    "Actions & Limits",
+    "Scope & Redirects",
+    "Guardrails",
+    "FAQ",
+)
 
 # Appended verbatim when the model doesn't produce its own. Mirrors the
 # "Injection Resistance" language in the stock prompt — this text is what makes
@@ -170,33 +179,69 @@ Rules for `sections` — this is the assistant's system prompt, authored as an \
 ordered list of named blocks. Emit them in exactly this order:
 
 1. "Identity & Purpose" — who the assistant is, who it works for, its goal on \
-this call, and how it speaks. Always instruct short spoken replies (1-2 \
-sentences), one question at a time, plain text with no markdown, and never \
-identifying itself as an AI.
-2. "Facts" — the concrete, checkable facts about this business and this call, \
-written as bullet lines starting with "- ". Include what the assistant does NOT \
-know and must not guess (exact prices, dates, availability) and say a human will \
-confirm those.
+this call, and how it speaks. Name the business by name. If the description \
+implies distinct kinds of people it talks to (employees vs managers, patients \
+vs referring doctors, students vs parents), say so here — it is what makes the \
+rest of the flow able to behave differently for each. Always instruct short \
+spoken replies (1-2 sentences), one question at a time, plain text with no \
+markdown, and never identifying itself as an AI.
+2. "Facts" — bullet lines starting with "- ". Do not write meta-instructions \
+like "add your policies here" — write the actual policies. When the operator's \
+description does not hand you exact numbers, fill the gap with the specific, \
+plausible figure a real business of this kind typically uses (a standard notice \
+period, common leave categories, typical hours), and say inline that it should \
+be confirmed — "Notice period: 60 days (standard; confirm for this business)" \
+is the shape, not "notice period varies." A detailed draft the operator edits \
+down is a far better starting point than an empty instruction telling them to \
+fill it in themselves, and it is what makes the difference between an assistant \
+that sounds ready to use and one that sounds like an empty form. Still end with \
+a line naming what genuinely cannot be guessed (real-time availability, a \
+specific person's private data, this month's actual figures) and that a human \
+will confirm those.
 3. "Actions & Limits" — two bullet lines, "- CAN: ..." and "- CANNOT: ...", \
-naming exactly what the assistant may do and what it must refuse or hand off, \
+each specific to this job, not generic. CAN should name the concrete things \
+this assistant retrieves and does (by name — "check leave balance", "look up a \
+patient's next appointment", not "answer questions"). CANNOT should name the \
+concrete boundary this exact job has to protect (one employee's data from \
+another, a diagnosis it isn't qualified to give, approving its own request) \
 plus any hard "never promise X" rules.
-4. One or more "Flow: <short lowercase name>" sections — the actual conversation \
-steps as a numbered list, written the way the real professional you identified \
-above would actually run this conversation: the specific things they would ask \
-about, in the order that profession naturally asks them, not a reordering of \
-generic small talk. Give each distinct branch of the conversation its own \
-section (for example "Flow: qualification" and "Flow: callback request"). These \
-must be specific to THIS assistant's job, not generic. If nothing already tells \
-the assistant who it is speaking to (no name in the reference material, no \
-[user_name]-style variable in the welcome message), the flow's first step must \
-be asking for their name warmly, before anything else — a real conversation \
-does not start by talking business at a stranger. Never invent this step when \
-the assistant already has a name to work with.
-5. "Scope & Redirects" — what is off-topic, and the exact sentence to say when \
-redirecting back on topic.
+4. Two or more "Flow: <short lowercase name>" sections. Do not write one \
+catch-all flow — split by the shape of what is actually being asked, the way \
+the real professional you identified above mentally sorts requests: a general \
+question anyone could ask, a question that needs looking someone specific up, \
+someone asking you to actually DO something (book, apply, submit, cancel), and, \
+if the description implies a privileged caller (a manager, an admin, a vet vs a \
+receptionist), what changes for them. Not every job has all four branches — \
+write the ones that are real for this one, specific to what that professional \
+actually asks, not a reordering of generic small talk. Say HOW to answer, not \
+only what to ask: for a lookup, say to cite where the answer came from; for an \
+action, say to confirm the details before doing it and to state plainly what \
+happened after. If nothing already tells the assistant who it is speaking to \
+(no name in the reference material, no [user_name]-style variable in the \
+welcome message), the first flow's first step must be asking for their name \
+warmly, before anything else — a real conversation does not start by talking \
+business at a stranger. Never invent this step when the assistant already has \
+a name to work with.
+5. "Scope & Redirects" — name the SPECIFIC adjacent thing someone is likely to \
+ask that this assistant should not handle (an HR assistant for employees will \
+be asked about applying for a job; a dental receptionist will be asked about a \
+dental emergency; a college admissions line will be asked about financial aid \
+appeals) and give a genuinely useful redirect for it — a real next step (an \
+email address, a department, an offer to connect them), not only "I can't help \
+with that." A flat bounce-back line is the single most common way a generated \
+assistant reads as generic instead of as someone who actually works there.
+6. "FAQ" — 5 to 8 short worked exchanges, using the real figures from the \
+Facts section above (cite a source when the Facts named one). This is what \
+teaches the model the exact voice and precision to answer with — skip it only \
+if the description is genuinely too thin to draw a real example from. Like \
+every other section, its "body" is ONE STRING, not a list of objects — write \
+the exchanges directly into that string, each as a line "User: <a realistic \
+question>" followed by a line "Agent: <exactly the answer you want given>", \
+separated by blank lines. Never structure FAQ as JSON objects inside `body`.
 
 Write every body in the second person, addressed to the assistant ("You are...", \
-"Ask them..."). Go into real, specific detail — up to about 2000 characters per \
+"Ask them..."), except FAQ, which is written as the literal exchanges \
+themselves. Go into real, specific detail — up to about 2000 characters per \
 body where the job warrants it; a thin one-liner is a worse answer than one \
 that actually spells out how this specific professional handles this specific \
 step. Be concrete and specific to the described business — never write \
@@ -315,6 +360,36 @@ def _clean(value: object, limit: int) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _body_text(value: object) -> str:
+    """A section body as plain text, however the model chose to shape it.
+
+    The prompt asks for `body` as a single string, but a "FAQ" section — worked
+    exchanges — is exactly the shape a model reaches for structured JSON on its
+    own: `[{"user": "...", "agent": "..."}, ...]` instead of the requested
+    "User: ...\\nAgent: ..." text. Coercing that straight through `str()` (what
+    used to happen here) prints Python's own repr of the list — literal curly
+    braces and quotes — into the assistant's own prompt, which is worse than no
+    FAQ section at all. This reshapes the common structured forms back into
+    readable text instead of rejecting them; only a truly unrecognised shape
+    falls back to `str()`.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        lines: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                lines.append(
+                    "\n".join(f"{str(k).strip().title()}: {v}" for k, v in item.items())
+                )
+            elif item is not None:
+                lines.append(str(item))
+        return "\n\n".join(lines)
+    if isinstance(value, dict):
+        return "\n".join(f"{str(k).strip().title()}: {v}" for k, v in value.items())
+    return str(value or "")
+
+
 def _order_key(title: str) -> tuple[int, int]:
     """Sort sections back onto the spine regardless of what order they arrived in.
 
@@ -339,7 +414,7 @@ def _blueprint_from_payload(payload: dict, description: str) -> AssistantBluepri
         if not isinstance(item, dict):
             continue
         title = _clean(item.get("title"), 120)
-        body = _clean(item.get("body"), MAX_SECTION_BODY)
+        body = _clean(_body_text(item.get("body")), MAX_SECTION_BODY)
         # A titled section with no body contributes nothing to the composed
         # prompt but still occupies a row in the editor, which reads as a bug.
         if not title or not body or title.lower() in seen:
@@ -353,6 +428,10 @@ def _blueprint_from_payload(payload: dict, description: str) -> AssistantBluepri
     sections.sort(key=lambda s: _order_key(s.title))
     if not any(s.title.lower().startswith("guardrail") for s in sections):
         sections.append(FlowSection(title="Guardrails", body=GUARDRAILS_BODY))
+        # Re-sorted rather than left appended: Guardrails belongs before FAQ on
+        # the spine, and an append lands it after everything, FAQ included, if
+        # the model wrote its own FAQ but skipped Guardrails.
+        sections.sort(key=lambda s: _order_key(s.title))
 
     direction = str(payload.get("direction", "outgoing")).lower()
     return AssistantBlueprint(

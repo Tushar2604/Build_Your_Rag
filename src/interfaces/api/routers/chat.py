@@ -223,6 +223,22 @@ async def ask_stream(
     # same assistant worked over WhatsApp and not in its own test panel.
     if bot.assistant.appointments_enabled:
         return _agent_stream(container, principal, session_id, body, "web_widget")
+
+    # A SEPARATE short transaction, not a continuation of the one above: that
+    # one already closed when its `async with` block exited (its `uow` cannot
+    # be reused outside it), and the retrieval-path bookkeeping below is only
+    # reachable for a non-booking assistant anyway.
+    #
+    # This block used to sit *inside* the `if` above, after the `return` —
+    # unreachable there when appointments are enabled, and skipped entirely
+    # otherwise, so `history_text`/`repeat_count` were never assigned on
+    # ANY path. The first token requested from a plain (non-booking, non
+    # -flagged-input) assistant then raised `UnboundLocalError` deep inside
+    # the SSE generator, after the `citations` event had already gone out —
+    # which is what made the Test panel and the public widget hang on an
+    # answer that was never coming, for the ordinary case, not an edge one.
+    async with container.unit_of_work() as uow:
+        uow.set_tenant_scope(principal.tenant_id)
         tenant = await uow.tenants.get(principal.tenant_id)
         used = await uow.usage.tokens_used_today(principal.tenant_id)
         if tenant and used >= tenant.daily_token_quota:

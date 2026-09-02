@@ -316,3 +316,158 @@ class TestQualityDoesNotDependOnPickingAUseCaseChip:
         # ceiling was part of why. Confirms the guidance actually changed
         # rather than only the reasoning instruction being added on top of it.
         assert "1200 characters" not in _SYSTEM
+
+
+class TestTheFAQSectionAndItsOrdering:
+    """FAQ is worked examples — the single structural piece the reported
+    comparison showed missing entirely. It has to land last, after Guardrails,
+    even in the common case where the model wrote its own FAQ but the
+    generator had to append a fallback Guardrails section."""
+
+    async def test_a_models_faq_section_is_kept(self) -> None:
+        payload = _payload(
+            sections=[
+                {"title": "Identity & Purpose", "body": "You are a rep."},
+                {"title": "Facts", "body": "- A fact."},
+                {
+                    "title": "FAQ",
+                    "body": "User: What are your hours?\nAgent: 9 to 6, Monday to Saturday.",
+                },
+            ]
+        )
+        blueprint = await GenerateAssistantUseCase(StubLLM(payload)).execute("run a shop")
+
+        faqs = [s for s in blueprint.sections if s.title == "FAQ"]
+        assert len(faqs) == 1
+        assert "User:" in faqs[0].body
+
+    async def test_faq_sorts_after_guardrails_even_when_guardrails_is_appended(
+        self,
+    ) -> None:
+        # The regression this guards: Guardrails used to be appended AFTER
+        # sorting, landing it after a model-written FAQ instead of before it.
+        payload = _payload(
+            sections=[
+                {"title": "Identity & Purpose", "body": "You are a rep."},
+                {"title": "Facts", "body": "- A fact."},
+                {"title": "FAQ", "body": "User: Hi\nAgent: Hello!"},
+                # No Guardrails section — the generator must supply one.
+            ]
+        )
+        blueprint = await GenerateAssistantUseCase(StubLLM(payload)).execute("run a shop")
+
+        titles = [s.title for s in blueprint.sections]
+        assert titles.index("Guardrails") < titles.index("FAQ"), (
+            f"Guardrails must come before FAQ, got order: {titles}"
+        )
+
+    async def test_faq_sorts_after_guardrails_when_both_are_model_written(self) -> None:
+        payload = _payload(
+            sections=[
+                {"title": "FAQ", "body": "User: Hi\nAgent: Hello!"},
+                {"title": "Identity & Purpose", "body": "You are a rep."},
+                {"title": "Guardrails", "body": "Custom guard."},
+            ]
+        )
+        blueprint = await GenerateAssistantUseCase(StubLLM(payload)).execute("run a shop")
+
+        titles = [s.title for s in blueprint.sections]
+        assert titles == ["Identity & Purpose", "Guardrails", "FAQ"]
+
+    async def test_the_prompt_asks_for_worked_examples_with_realistic_figures(self) -> None:
+        lowered = _SYSTEM.lower()
+        assert '"faq"' in lowered
+        assert "user:" in lowered and "agent:" in lowered
+
+
+class TestFactsAreConcreteNotMetaInstructions:
+    """The reported comparison: the competitor's Facts section was a fully
+    drafted, specific policy list; ours was meta-instructions telling the
+    operator to go write it themselves. The prompt now has to ask for the
+    former."""
+
+    def test_the_prompt_forbids_meta_instructions_in_facts(self) -> None:
+        lowered = _SYSTEM.lower()
+        assert "add your policies here" in lowered  # named as the bad example
+        assert "do not write meta-instructions" in lowered
+
+    def test_the_prompt_asks_for_a_plausible_specific_default_with_a_caveat(self) -> None:
+        lowered = _SYSTEM.lower()
+        assert "confirm" in lowered
+        assert "standard" in lowered or "typical" in lowered
+
+
+class TestFlowsSplitByRequestShapeNotOneCatchAll:
+    def test_the_prompt_requires_at_least_two_flow_sections(self) -> None:
+        assert "two or more" in _SYSTEM.lower()
+
+    def test_the_prompt_names_the_shapes_a_flow_should_split_by(self) -> None:
+        lowered = _SYSTEM.lower()
+        assert "general question" in lowered
+        assert "do something" in lowered or "book, apply, submit" in lowered
+
+
+class TestRedirectsAreSpecificNotAGenericBounce:
+    def test_the_prompt_asks_for_a_specific_adjacent_off_topic_example(self) -> None:
+        lowered = _SYSTEM.lower()
+        assert "adjacent" in lowered
+        assert "email address" in lowered or "genuinely useful redirect" in lowered
+
+
+class TestFAQSurvivesAStructuredModelResponse:
+    """A model asked for worked exchanges reaches for structured JSON on its
+    own often enough that this needs a real regression test: a list of
+    {"user": ..., "agent": ...} objects, or a bare list of strings, coerced
+    straight through `str()` prints Python's own repr — literal braces and
+    quotes — into the assistant's live prompt, which is worse than no FAQ at
+    all.
+    """
+
+    async def test_a_list_of_user_agent_objects_becomes_readable_text(self) -> None:
+        payload = _payload(
+            sections=[
+                {"title": "Identity & Purpose", "body": "You are a rep."},
+                {
+                    "title": "FAQ",
+                    "body": [
+                        {"user": "What are your hours?", "agent": "9 to 6, Mon-Sat."},
+                        {"user": "Do you deliver?", "agent": "Yes, within the city."},
+                    ],
+                },
+            ]
+        )
+        blueprint = await GenerateAssistantUseCase(StubLLM(payload)).execute("run a shop")
+
+        faq = next(s for s in blueprint.sections if s.title == "FAQ")
+        assert "{" not in faq.body and "}" not in faq.body
+        assert "User: What are your hours?" in faq.body
+        assert "Agent: 9 to 6, Mon-Sat." in faq.body
+
+    async def test_a_bare_list_of_strings_is_joined_readably(self) -> None:
+        payload = _payload(
+            sections=[
+                {"title": "Identity & Purpose", "body": "You are a rep."},
+                {"title": "FAQ", "body": ["User: Hi", "Agent: Hello!"]},
+            ]
+        )
+        blueprint = await GenerateAssistantUseCase(StubLLM(payload)).execute("run a shop")
+
+        faq = next(s for s in blueprint.sections if s.title == "FAQ")
+        assert faq.body == "User: Hi\n\nAgent: Hello!"
+
+    async def test_a_plain_string_body_is_unaffected(self) -> None:
+        payload = _payload(
+            sections=[
+                {"title": "Identity & Purpose", "body": "You are a rep."},
+                {"title": "FAQ", "body": "User: Hi\nAgent: Hello!"},
+            ]
+        )
+        blueprint = await GenerateAssistantUseCase(StubLLM(payload)).execute("run a shop")
+
+        faq = next(s for s in blueprint.sections if s.title == "FAQ")
+        assert faq.body == "User: Hi\nAgent: Hello!"
+
+    def test_the_prompt_forbids_structuring_faq_as_json_objects(self) -> None:
+        lowered = _SYSTEM.lower()
+        assert "one string" in lowered
+        assert "never structure faq as json objects" in lowered
