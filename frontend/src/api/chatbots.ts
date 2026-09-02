@@ -22,6 +22,13 @@ export interface FlowSection {
 export interface AssistantConfig {
   direction: "outgoing" | "incoming";
   languages: string[];
+  /** What the assistant writes back in on text channels (chat, WhatsApp, the
+   *  widget) — separate from `languages` above, which is a voice STT/TTS
+   *  hint and was never wired into text replies at all. Defaults to
+   *  "English (India)"; pick "Match the customer's language" to restore the
+   *  old behaviour of mirroring whatever language and script the customer
+   *  just used. */
+  response_language: string;
   tts_voice: string;
   llm_model: string;
   stt_model: string;
@@ -38,6 +45,9 @@ export interface AssistantConfig {
 
 export interface AssistantOptions {
   languages: string[];
+  /** Includes "Match the customer's language" as its first entry — rendered
+   *  as an ordinary option, not a special case. */
+  response_languages: string[];
   tts_voices: string[];
   llm_models: string[];
   stt_models: string[];

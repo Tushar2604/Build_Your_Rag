@@ -253,6 +253,17 @@ LANGUAGE_OPTIONS: tuple[str, ...] = (
     "English (India)", "English (US)", "English (UK)", "Hindi", "Spanish",
     "French", "German", "Portuguese", "Arabic", "Japanese",
 )
+# The sentinel that keeps the old, always-on behaviour available as a choice:
+# reply in whatever language and script the other person just used, switching
+# turn to turn if they do. That used to be the ONLY behaviour, unconditionally,
+# for every assistant — which reads as unprofessional the moment a customer
+# writes Hindi in Latin letters ("Hinglish") and gets it echoed straight back,
+# rather than a clean reply in one language the operator actually chose.
+# `RESPONSE_LANGUAGE_OPTIONS` puts it alongside a fixed list instead: pick a
+# language and the assistant stays in it regardless of what arrives, or pick
+# this and get the previous behaviour back.
+RESPONSE_LANGUAGE_AUTO = "Match the customer's language"
+RESPONSE_LANGUAGE_OPTIONS: tuple[str, ...] = (RESPONSE_LANGUAGE_AUTO, *LANGUAGE_OPTIONS)
 TTS_VOICE_OPTIONS: tuple[str, ...] = (
     "Cartesia - Riya", "Cartesia - Aarav", "ElevenLabs - Rachel",
     "ElevenLabs - Adam", "OpenAI - Alloy", "OpenAI - Nova", "Browser default",
@@ -275,6 +286,16 @@ class AssistantConfig:
 
     direction: str = "outgoing"
     languages: list[str] = field(default_factory=lambda: ["English (India)"])
+    # What the assistant actually WRITES back in, on every text channel (chat,
+    # WhatsApp, the widget). Distinct from `languages` above, which is a
+    # multi-select hint for voice recognition/synthesis and was never wired
+    # into what a reply is generated in at all — this is the one setting that
+    # is. Defaults to plain English rather than mirroring the customer, which
+    # used to be the only behaviour there was: a customer who writes in
+    # Romanized Hindi got Romanized Hindi back, unconditionally, and an
+    # operator had no way to say otherwise. Set to `RESPONSE_LANGUAGE_AUTO` to
+    # restore that behaviour deliberately.
+    response_language: str = "English (India)"
     tts_voice: str = "Cartesia - Riya"
     llm_model: str = "gpt-4.1-mini"
     stt_model: str = "Soniox"
@@ -300,6 +321,11 @@ class AssistantConfig:
                 dict.fromkeys(lang.strip() for lang in self.languages if lang.strip())
             )
             or ["English (India)"],
+            response_language=(
+                self.response_language.strip()
+                if self.response_language.strip() in RESPONSE_LANGUAGE_OPTIONS
+                else "English (India)"
+            ),
             tts_voice=self.tts_voice.strip() or "Browser default",
             llm_model=self.llm_model.strip() or "gpt-4.1-mini",
             stt_model=self.stt_model.strip() or "Browser",

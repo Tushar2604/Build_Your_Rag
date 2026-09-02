@@ -48,9 +48,17 @@ class _SpyAgent:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def run(self, ctx, message, *, history="", tenant_prompt=""):  # type: ignore[no-untyped-def]
+    async def run(  # type: ignore[no-untyped-def]
+        self, ctx, message, *, history="", tenant_prompt="", response_language=""
+    ):
         self.calls.append(
-            {"ctx": ctx, "message": message, "history": history, "tenant_prompt": tenant_prompt}
+            {
+                "ctx": ctx,
+                "message": message,
+                "history": history,
+                "tenant_prompt": tenant_prompt,
+                "response_language": response_language,
+            }
         )
         return _AgentResult(answer="Sure, happy to help.", trace=_Trace())
 
@@ -163,3 +171,14 @@ class TestTheAssistantsOwnPromptReachesTheAgent:
             await use_case.execute(
                 TENANT, session.id, message="hi", chatbot_id=ChatbotId(new_id())
             )
+
+
+class TestTheAssistantsLanguagePolicyReachesTheAgent:
+    async def test_the_response_language_is_passed_through(self, world) -> None:  # type: ignore[no-untyped-def]
+        uow, agent, bot, session = world
+        bot.assistant.response_language = "Hindi"
+        use_case = AskFrontOffice(uow, agent)
+
+        await use_case.execute(TENANT, session.id, message="who are you?")
+
+        assert agent.calls[0]["response_language"] == "Hindi"

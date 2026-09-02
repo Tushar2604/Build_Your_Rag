@@ -103,7 +103,11 @@ class RagGraph:
         bot = state["chatbot"]
         # Isolate untrusted context + question in labelled blocks (injection
         # defence); pairs with the hardened grounding system prompt.
-        prompt = build_grounded_prompt(state["context"], state["question"])
+        prompt = build_grounded_prompt(
+            state["context"],
+            state["question"],
+            response_language=bot.assistant.response_language,
+        )
         result = await self._llm.generate(bot.system_prompt, prompt)
         state["answer"] = result.text
         state["tokens_used"] = result.tokens_used

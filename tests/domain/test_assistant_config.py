@@ -86,3 +86,34 @@ class TestOpener:
 
     def test_no_welcome_message_uses_the_stock_opener(self) -> None:
         assert opener_instruction(AssistantConfig()) == OPENER_INSTRUCTION
+
+
+class TestResponseLanguage:
+    """The operator's own control over what the assistant writes back in — see
+    `RESPONSE_LANGUAGE_AUTO` and `domain/safety/guardrails.language_rules`.
+    """
+
+    def test_the_default_is_english_not_auto_mirror(self) -> None:
+        # A brand-new assistant's out-of-the-box behaviour, per the direct
+        # request this replaced: "the default should be English, pure
+        # English" — not silently mirroring whatever a customer writes.
+        assert AssistantConfig().normalized().response_language == "English (India)"
+
+    def test_a_valid_choice_is_kept(self) -> None:
+        config = AssistantConfig(response_language="Hindi").normalized()
+        assert config.response_language == "Hindi"
+
+    def test_auto_mirror_is_still_a_selectable_choice(self) -> None:
+        from src.domain.chatbot.entities import RESPONSE_LANGUAGE_AUTO
+
+        config = AssistantConfig(response_language=RESPONSE_LANGUAGE_AUTO).normalized()
+        assert config.response_language == RESPONSE_LANGUAGE_AUTO
+
+    def test_an_unknown_value_falls_back_to_english(self) -> None:
+        config = AssistantConfig(response_language="Klingon").normalized()
+        assert config.response_language == "English (India)"
+
+    def test_an_empty_value_falls_back_to_english(self) -> None:
+        assert AssistantConfig(response_language="  ").normalized().response_language == (
+            "English (India)"
+        )

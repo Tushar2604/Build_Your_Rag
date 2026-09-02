@@ -18,6 +18,7 @@ from src.config.settings import get_settings
 from src.domain.chatbot.entities import (
     LANGUAGE_OPTIONS,
     LLM_MODEL_OPTIONS,
+    RESPONSE_LANGUAGE_OPTIONS,
     STT_MODEL_OPTIONS,
     TTS_VOICE_OPTIONS,
     AssistantConfig,
@@ -91,6 +92,7 @@ def _to_response(
         assistant=AssistantConfigSchema(
             direction=bot.assistant.direction,  # type: ignore[arg-type]
             languages=bot.assistant.languages,
+            response_language=bot.assistant.response_language,
             tts_voice=bot.assistant.tts_voice,
             llm_model=bot.assistant.llm_model,
             stt_model=bot.assistant.stt_model,
@@ -126,6 +128,7 @@ async def assistant_options(principal: PrincipalDep) -> AssistantOptionsResponse
     """
     return AssistantOptionsResponse(
         languages=list(LANGUAGE_OPTIONS),
+        response_languages=list(RESPONSE_LANGUAGE_OPTIONS),
         tts_voices=list(TTS_VOICE_OPTIONS),
         llm_models=list(LLM_MODEL_OPTIONS),
         stt_models=list(STT_MODEL_OPTIONS),
@@ -416,6 +419,7 @@ async def update_chatbot(
             bot.assistant = AssistantConfig(
                 direction=body.assistant.direction,
                 languages=list(body.assistant.languages),
+                response_language=body.assistant.response_language,
                 tts_voice=body.assistant.tts_voice,
                 llm_model=body.assistant.llm_model,
                 stt_model=body.assistant.stt_model,

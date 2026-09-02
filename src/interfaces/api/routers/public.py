@@ -318,7 +318,9 @@ async def ask_public_stream(
         }
         # Isolate untrusted reference material + candidate message in labelled
         # blocks (injection defence); mirrors the authenticated stream path.
-        prompt = build_grounded_prompt(context, message)
+        prompt = build_grounded_prompt(
+            context, message, response_language=bot.assistant.response_language
+        )
         full: list[str] = []
         served_by: dict[str, str] = {}
         try:

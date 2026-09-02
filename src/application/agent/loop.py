@@ -31,6 +31,8 @@ from src.application.agent.router import ModelRouter
 from src.application.agent.tools import ToolContext
 from src.application.agent.trace import AgentStep, AgentTrace
 from src.application.ports.observability import NoOpTracer, Tracer
+from src.domain.chatbot.entities import RESPONSE_LANGUAGE_AUTO
+from src.domain.safety.guardrails import language_rules
 
 log = structlog.get_logger(__name__)
 
@@ -43,6 +45,7 @@ _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 # `str.format()` would raise on the operator's own content; `str.replace()`
 # treats it as inert text, which is what "we don't control this string" means.
 _BUSINESS_CONTEXT_MARKER = "<<BUSINESS_CONTEXT>>"
+_LANGUAGE_RULES_MARKER = "<<LANGUAGE_RULES>>"
 
 # Appended to every system prompt this loop renders, tenant content or not.
 # Both rules exist because of the same failure: the loop had no fallback for
@@ -120,6 +123,8 @@ Rules:
   good question, and close by briefly inviting a follow-up (e.g. ask what else
   they'd like to know). Keep it natural and grounded in the tool results.
 <<IDENTITY_AND_VOICE>>
+
+<<LANGUAGE_RULES>>
 """
 
 
@@ -152,7 +157,9 @@ class AgentLoop:
         # original template leaves every existing caller unchanged.
         self._system_template = system_template or _SYSTEM_TEMPLATE
 
-    def _system_prompt(self, tenant_prompt: str = "") -> str:
+    def _system_prompt(
+        self, tenant_prompt: str = "", response_language: str = RESPONSE_LANGUAGE_AUTO
+    ) -> str:
         """Render the template: today's date, the tool catalog, and — the part
         that used to be missing — which business this actually is.
 
@@ -176,10 +183,17 @@ class AgentLoop:
         rendered = rendered.replace(
             _BUSINESS_CONTEXT_MARKER, _render_business_context(tenant_prompt)
         )
-        return rendered.replace("<<IDENTITY_AND_VOICE>>", _IDENTITY_AND_VOICE)
+        rendered = rendered.replace("<<IDENTITY_AND_VOICE>>", _IDENTITY_AND_VOICE)
+        return rendered.replace(_LANGUAGE_RULES_MARKER, language_rules(response_language))
 
     async def run(
-        self, ctx: ToolContext, question: str, *, history: str = "", tenant_prompt: str = ""
+        self,
+        ctx: ToolContext,
+        question: str,
+        *,
+        history: str = "",
+        tenant_prompt: str = "",
+        response_language: str = RESPONSE_LANGUAGE_AUTO,
     ) -> AgentResult:
         """Answer `question`, optionally in the context of a conversation.
 
@@ -194,9 +208,14 @@ class AgentLoop:
         personality the model has, on every channel that reaches it — which is
         indistinguishable from a generic template no matter how carefully an
         operator wrote their own.
+
+        `response_language` is the assistant's own language policy — see
+        `guardrails.language_rules` for what each value means. Defaults to the
+        auto-mirror behaviour so a caller that omits it keeps working exactly
+        as it always did.
         """
         trace = AgentTrace(question=question)
-        system = self._system_prompt(tenant_prompt)
+        system = self._system_prompt(tenant_prompt, response_language)
         transcript = (
             f"Conversation so far:\n{history}\n\nLatest message: {question}"
             if history

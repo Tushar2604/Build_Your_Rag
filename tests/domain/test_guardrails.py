@@ -6,12 +6,13 @@ import uuid
 
 import pytest
 from src.domain.chat.entities import Message, MessageRole
-from src.domain.chatbot.entities import DEFAULT_SYSTEM_PROMPT
+from src.domain.chatbot.entities import DEFAULT_SYSTEM_PROMPT, RESPONSE_LANGUAGE_AUTO
 from src.domain.safety.guardrails import (
     GUARD_REFUSAL,
     NO_CONTEXT_MARKER,
     build_grounded_prompt,
     count_repeat_asks,
+    language_rules,
     scan_input,
     scan_output,
 )
@@ -284,3 +285,57 @@ def test_a_language_mismatch_is_not_an_excuse_to_refuse() -> None:
 def test_the_other_rules_are_not_suspended_in_translation() -> None:
     prompt = build_grounded_prompt(NO_CONTEXT_MARKER, "kitna?")
     assert "still applies in their language" in prompt
+
+
+class TestResponseLanguagePolicy:
+    """The operator's own escape hatch from the auto-mirror default: a
+    customer writing Romanized Hindi used to get Romanized Hindi back,
+    unconditionally, with nothing to configure. `response_language` is what
+    lets an operator pin a fixed language instead — and its absence must
+    still be the exact old behaviour, so nothing already deployed changes.
+    """
+
+    def test_the_default_keyword_is_the_auto_mirror_rules(self) -> None:
+        assert language_rules() == language_rules(RESPONSE_LANGUAGE_AUTO)
+        assert "same language the person just used" in language_rules()
+
+    def test_a_pinned_language_replaces_the_mirror_instruction(self) -> None:
+        rules = language_rules("Hindi")
+        assert "reply in Hindi" in rules
+        assert "same language the person just used" not in rules
+
+    def test_a_pinned_language_still_protects_identifiers(self) -> None:
+        # The one thing that must survive regardless of which policy is in
+        # effect: a translated price or booking code is a wrong one.
+        rules = language_rules("Spanish")
+        assert "never translate" in rules.lower()
+        assert "reference or booking code" in rules
+
+    def test_a_pinned_language_still_handles_reference_material_mismatch(self) -> None:
+        rules = language_rules("French")
+        assert "never treat a language mismatch as 'not found'" in rules
+
+    def test_build_grounded_prompt_defaults_to_auto_mirror(self) -> None:
+        # Every existing caller that never passes `response_language` at all
+        # must keep getting exactly the old prompt.
+        assert build_grounded_prompt("ctx", "q") == build_grounded_prompt(
+            "ctx", "q", response_language=RESPONSE_LANGUAGE_AUTO
+        )
+
+    def test_build_grounded_prompt_honours_a_pinned_language(self) -> None:
+        prompt = build_grounded_prompt(
+            "Cleaning is 1500 INR.", "safai kitne ka hai?", response_language="English (India)"
+        )
+        assert "reply in English (India)" in prompt
+        assert "strict operator setting" in prompt
+
+    def test_the_pinned_language_rule_leads_the_prompt(self) -> None:
+        # Measured, not assumed: the same instruction placed after the
+        # grounding rules and unknown-answer playbook was reliably ignored by
+        # a live model. Leading with it is what actually changed the output.
+        prompt = build_grounded_prompt("ctx", "q", response_language="Hindi")
+        assert prompt.index("LANGUAGE RULE") < prompt.index("GROUNDING RULES")
+
+    def test_a_pinned_language_does_not_leak_the_auto_mirror_wording(self) -> None:
+        prompt = build_grounded_prompt("ctx", "q", response_language="Hindi")
+        assert "same language the person just used" not in prompt

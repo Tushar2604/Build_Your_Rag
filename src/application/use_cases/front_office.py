@@ -138,6 +138,7 @@ class AskFrontOffice:
             message,
             history=history,
             tenant_prompt=bot.system_prompt,
+            response_language=bot.assistant.response_language,
         )
 
         # --- 3. Persist the reply and meter it (short transaction) ---

@@ -19,6 +19,7 @@ from src.application.ports.repositories import (
 from src.domain.broadcast.entities import Broadcast, BroadcastRecipient
 from src.domain.chat.entities import ChatSession, Citation, Message, MessageRole
 from src.domain.chatbot.entities import (
+    RESPONSE_LANGUAGE_AUTO,
     AssistantConfig,
     Chatbot,
     FlowSection,
@@ -145,6 +146,17 @@ def chatbot_to_domain(row: m.ChatbotModel) -> Chatbot:
         assistant=AssistantConfig(
             direction=ac.get("direction", default_assistant.direction),
             languages=list(ac.get("languages") or default_assistant.languages),
+            # Deliberately NOT `default_assistant.response_language` ("English
+            # (India)"): every row written before this setting existed was
+            # running the old unconditional auto-mirror behaviour, on a
+            # platform where several tenants' assistants genuinely field
+            # Hindi/Hinglish traffic. Falling back to English here would
+            # silently change what an already-deployed assistant says to a
+            # real customer on the next message, with nobody having asked for
+            # that. A brand-new assistant gets English by construction — see
+            # `AssistantConfig`'s own default — this fallback only covers rows
+            # that predate the field.
+            response_language=ac.get("response_language", RESPONSE_LANGUAGE_AUTO),
             tts_voice=ac.get("tts_voice", default_assistant.tts_voice),
             llm_model=ac.get("llm_model", default_assistant.llm_model),
             stt_model=ac.get("stt_model", default_assistant.stt_model),
@@ -184,6 +196,7 @@ def assistant_config_to_jsonb(ac: AssistantConfig) -> dict:
     return {
         "direction": ac.direction,
         "languages": list(ac.languages),
+        "response_language": ac.response_language,
         "tts_voice": ac.tts_voice,
         "llm_model": ac.llm_model,
         "stt_model": ac.stt_model,

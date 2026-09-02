@@ -335,7 +335,11 @@ async def ask_stream(
         prompt = (
             "" if not input_verdict.allowed
             else build_grounded_prompt(
-                context, body.message, history=history_text, repeat_count=repeat_count
+                context,
+                body.message,
+                history=history_text,
+                repeat_count=repeat_count,
+                response_language=bot.assistant.response_language,
             )
         )
         full: list[str] = []

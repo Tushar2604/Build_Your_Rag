@@ -136,7 +136,11 @@ class AskChatbot:
         # system-prompt leakage. A high-risk verdict short-circuits to a refusal.
         context = _build_context(citations)
         user_prompt = build_grounded_prompt(
-            context, data.message, history=history_text, repeat_count=repeat_count
+            context,
+            data.message,
+            history=history_text,
+            repeat_count=repeat_count,
+            response_language=chatbot.assistant.response_language,
         )
 
         input_verdict = scan_input(data.message)

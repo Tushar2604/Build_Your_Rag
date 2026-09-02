@@ -81,7 +81,12 @@ class RunAgent:
             extras={"allowed_document_ids": chatbot.allowed_document_ids or None},
         )
         try:
-            result = await self._loop.run(ctx, data.message, tenant_prompt=chatbot.system_prompt)
+            result = await self._loop.run(
+                ctx,
+                data.message,
+                tenant_prompt=chatbot.system_prompt,
+                response_language=chatbot.assistant.response_language,
+            )
         except Exception as exc:  # noqa: BLE001 - log the failed request, then surface
             await self._log_failure(tenant_id, chatbot.id, session_id, data.message, started, exc)
             raise

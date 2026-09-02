@@ -139,6 +139,11 @@ class AssistantConfigSchema(BaseModel):
 
     direction: Literal["outgoing", "incoming"] = "outgoing"
     languages: list[str] = Field(default_factory=lambda: ["English (India)"], max_length=10)
+    # What the assistant writes back in, on text channels — chat, WhatsApp, the
+    # widget. Defaults to English rather than mirroring whatever the customer
+    # wrote, which used to be the only behaviour and is still available as
+    # `RESPONSE_LANGUAGE_AUTO` ("Match the customer's language").
+    response_language: str = Field(default="English (India)", max_length=80)
     tts_voice: str = Field(default="Cartesia - Riya", max_length=80)
     llm_model: str = Field(default="gpt-4.1-mini", max_length=80)
     stt_model: str = Field(default="Soniox", max_length=80)
@@ -155,6 +160,9 @@ class AssistantOptionsResponse(BaseModel):
     domain lists so the UI can never offer a value the backend rejects."""
 
     languages: list[str]
+    # Includes the "match the customer" sentinel as its first entry — the
+    # builder renders it as an ordinary option rather than a special case.
+    response_languages: list[str]
     tts_voices: list[str]
     llm_models: list[str]
     stt_models: list[str]

@@ -5,7 +5,7 @@
 // (Welcome Message), whether it can actually book (Appointments), and
 // everything it does after that (Conversational Flow).
 import { useEffect, useState } from "react";
-import { AudioLines, Brain, CalendarCheck, Check, Globe, Info, Mic } from "lucide-react";
+import { AudioLines, Brain, CalendarCheck, Check, Globe, Info, Languages, Mic } from "lucide-react";
 import {
   AssistantConfig,
   AssistantOptions,
@@ -320,11 +320,24 @@ export default function AssistantDetailsTab({ bot, draft, onDraftChange, onRepla
           </span>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <LanguagesCard
             selected={a.languages}
             options={options?.languages ?? a.languages}
             onChange={(languages) => patchAssistant({ languages })}
+          />
+          <SettingCard
+            icon={Languages}
+            label="Reply Language"
+            hint={
+              'What the assistant writes back in on chat and WhatsApp — separate from ' +
+              '"Languages" above, which is only for voice. Pick "Match the customer’s ' +
+              'language" to have it mirror whatever language and script the customer ' +
+              "just used; anything else keeps it in that one language regardless."
+            }
+            value={a.response_language}
+            options={options?.response_languages ?? [a.response_language]}
+            onChange={(response_language) => patchAssistant({ response_language })}
           />
           <SettingCard
             icon={Mic}

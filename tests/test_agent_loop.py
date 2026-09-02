@@ -255,3 +255,40 @@ class TestIdentityAndPlaceholderGuardrails:
         system_seen = llm.calls[0][0]
         assert "NEVER SHOW A PLACEHOLDER" in system_seen
         assert "[user_name]" in system_seen or "[name]" in system_seen
+
+
+class TestLanguagePolicyReachesTheModel:
+    """The reported bug: a customer writing Romanized Hindi ("Hinglish") got
+    it echoed straight back, unconditionally, with no way for the operator to
+    say otherwise. `response_language` is that control; its absence must keep
+    the old auto-mirror behaviour so no existing caller changes.
+    """
+
+    async def test_a_pinned_language_reaches_the_system_prompt(self) -> None:
+        tool = SearchToolStub(ToolResult(observation="x"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+
+        await loop.run(_ctx(), "namaste", response_language="Hindi")
+
+        system_seen = llm.calls[0][0]
+        assert "reply in Hindi" in system_seen
+
+    async def test_no_response_language_keeps_the_auto_mirror_behaviour(self) -> None:
+        tool = SearchToolStub(ToolResult(observation="x"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+
+        await loop.run(_ctx(), "hello")
+
+        system_seen = llm.calls[0][0]
+        assert "same language the person just used" in system_seen
+
+    async def test_no_leftover_marker_in_the_rendered_prompt(self) -> None:
+        tool = SearchToolStub(ToolResult(observation="x"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+
+        await loop.run(_ctx(), "hello", response_language="Spanish")
+
+        assert "<<LANGUAGE_RULES>>" not in llm.calls[0][0]
