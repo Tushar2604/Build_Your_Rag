@@ -12,6 +12,7 @@ import json
 import pytest
 from src.application.ports.services import LLMResult
 from src.application.use_cases.generate_assistant import (
+    _SYSTEM,
     GUARDRAILS_BODY,
     GenerateAssistantUseCase,
     fallback_blueprint,
@@ -202,3 +203,116 @@ def test_the_fallback_restates_the_operators_own_description() -> None:
 
     identity = next(s for s in blueprint.sections if s.title == "Identity & Purpose")
     assert "chase overdue invoices politely" in identity.body
+
+
+class TestRecruitingIsAFirstClassUseCase:
+    """The reported failure: describing a hiring/recruiting assistant produced
+    a noticeably weaker flow than every other category, because every other
+    category had a hint steering the model toward a concrete structure and
+    recruiting — this platform's own most common assistant — had none at all.
+    """
+
+    def test_a_recruiting_hint_exists(self) -> None:
+        from src.application.use_cases.generate_assistant import USE_CASE_HINTS
+
+        assert "recruiting" in USE_CASE_HINTS
+
+    def test_the_recruiting_hint_demands_the_name_first_sequence(self) -> None:
+        from src.application.use_cases.generate_assistant import USE_CASE_HINTS
+
+        hint = USE_CASE_HINTS["recruiting"].lower()
+        assert "name" in hint
+        assert "before" in hint  # name comes before diving into the role
+        assert "opportunity" in hint or "role" in hint
+
+    async def test_the_recruiting_hint_reaches_the_model(self) -> None:
+        llm = StubLLM(_payload())
+        await GenerateAssistantUseCase(llm).execute(
+            "call candidates about a BIM engineer opening", use_case="recruiting"
+        )
+
+        _, user_prompt = llm.calls[0]
+        assert "recruiting" in user_prompt.lower() or "candidate" in user_prompt.lower()
+
+    def test_every_advertised_use_case_chip_has_a_matching_hint(self) -> None:
+        # Guards the exact gap that caused this: a chip the frontend can show
+        # with no hint behind it silently degrades to a generic generation.
+        from src.application.use_cases.generate_assistant import USE_CASE_HINTS
+        from src.interfaces.api.routers.chatbots import _USE_CASE_LABELS
+
+        missing = [key for key in _USE_CASE_LABELS if key not in USE_CASE_HINTS]
+        assert missing == [], f"these chips have no generator hint: {missing}"
+
+
+class TestEveryGeneratedFlowAsksWhoItIsTalkingToFirst:
+    """Not just recruiting: any generated assistant that has no name to work
+    with should get to know who it's speaking to before it gets down to
+    business — the shape of a real conversation, not a form."""
+
+    def test_the_system_prompt_instructs_asking_for_a_name_when_unknown(self) -> None:
+        from src.application.use_cases.generate_assistant import _SYSTEM
+
+        lowered = _SYSTEM.lower()
+        assert "asking for their name" in lowered or "name warmly" in lowered
+
+    def test_the_instruction_does_not_apply_when_a_name_is_already_known(self) -> None:
+        # Must not invent a redundant "what's your name" step for a call where
+        # the operator already has one — that is a worse, not better, opener.
+        from src.application.use_cases.generate_assistant import _SYSTEM
+
+        lowered = _SYSTEM.lower()
+        assert "already has a name" in lowered or "never invent this step" in lowered
+
+
+class TestQualityDoesNotDependOnPickingAUseCaseChip:
+    """The six use-case chips are a closed set (recruiting, lead generation,
+    appointments, support, negotiation, collections) — a dental clinic, a
+    college admissions office, a veterinary practice, a law firm none of them
+    name a category at all. The fix cannot be "add more chips forever"; the
+    base prompt itself has to reason about whatever profession the description
+    actually describes, chip or no chip.
+    """
+
+    def test_the_system_prompt_demands_inferring_the_profession(self) -> None:
+        lowered = _SYSTEM.lower()
+        assert "profession" in lowered or "real-world" in lowered
+
+    def test_the_standard_is_explicitly_independent_of_a_use_case_hint(self) -> None:
+        lowered = _SYSTEM.lower()
+        assert "with or without a use-case hint" in lowered or (
+            "never a reason to write" in lowered
+        )
+
+    def test_worked_examples_show_domain_specific_reasoning_not_small_talk(self) -> None:
+        # Pinned loosely on purpose — these exact professions may be edited,
+        # but the prompt must keep teaching the PATTERN (infer the specific
+        # first question a real professional in this job would ask) rather
+        # than naming only the six chip categories.
+        lowered = _SYSTEM.lower()
+        assert "dental" in lowered or "receptionist" in lowered
+
+    async def test_a_dental_clinic_description_gets_no_hint_but_still_generates(
+        self,
+    ) -> None:
+        # No use_case passed at all — the common path for a business that
+        # matches none of the six chips. Generation must not degrade to
+        # nothing just because USE_CASE_HINTS has nothing for it.
+        llm = StubLLM(_payload(name="Bright Smile Dental Receptionist"))
+
+        blueprint = await GenerateAssistantUseCase(llm).execute(
+            "answer calls for my dental clinic and book appointments"
+        )
+
+        assert blueprint.ai_generated
+        system_prompt_sent, user_prompt_sent = llm.calls[0]
+        # The reasoning instruction lives in the SYSTEM prompt, sent on every
+        # call regardless of use_case — this is the property that makes it
+        # apply universally rather than only to the six named categories.
+        assert "profession" in system_prompt_sent.lower()
+        assert "dental clinic" in user_prompt_sent.lower()
+
+    def test_the_detail_ceiling_was_raised_for_super_detailed_bodies(self) -> None:
+        # The reported complaint was thin, generic output — a 1200-character
+        # ceiling was part of why. Confirms the guidance actually changed
+        # rather than only the reasoning instruction being added on top of it.
+        assert "1200 characters" not in _SYSTEM

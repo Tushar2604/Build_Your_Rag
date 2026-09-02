@@ -157,3 +157,101 @@ def test_parse_action_strips_markdown_fence() -> None:
 def test_parse_action_reports_missing_action() -> None:
     _, _, _, error = _parse_action('{"thought": "no action here"}')
     assert error == "missing 'action' field"
+
+
+class TestBusinessContextReachesTheModel:
+    """The bug behind "the assistant ignores everything I configured": the
+    loop used to build its system prompt from nothing but its own fixed
+    tool-use rules, on every channel that runs through it. A tenant's own
+    Identity/Facts/Flow content — however carefully written in the builder —
+    was never in the prompt at all. `tenant_prompt` is how it gets there.
+    """
+
+    async def test_the_tenants_own_prompt_is_sent_to_the_model(self) -> None:
+        tool = SearchToolStub(ToolResult(observation="found it"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+
+        await loop.run(
+            _ctx(),
+            "who are you?",
+            tenant_prompt="You are Maya, the receptionist for Bright Smile Dental.",
+        )
+
+        system_seen = llm.calls[0][0]
+        assert "Bright Smile Dental" in system_seen
+        assert "Maya" in system_seen
+
+    async def test_an_empty_tenant_prompt_does_not_crash_and_says_so_honestly(
+        self,
+    ) -> None:
+        tool = SearchToolStub(ToolResult(observation="x"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+
+        await loop.run(_ctx(), "hello", tenant_prompt="")
+
+        system_seen = llm.calls[0][0]
+        assert "No business details are configured" in system_seen
+
+    async def test_tenant_content_with_literal_braces_does_not_break_formatting(
+        self,
+    ) -> None:
+        # The regression this guards: `tenant_prompt` is free text an operator
+        # typed in a browser. Threading it through `str.format()` — the same
+        # mechanism that fills {catalog}/{refusal}/{today} — would raise on a
+        # stray brace in the tenant's own words. It must reach the model
+        # completely intact instead.
+        tool = SearchToolStub(ToolResult(observation="x"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+        tricky = 'Reply in this exact JSON shape: {"greeting": "hi"} and never {improvise}.'
+
+        await loop.run(_ctx(), "hello", tenant_prompt=tricky)
+
+        assert tricky in llm.calls[0][0]
+
+    async def test_the_default_system_template_still_has_no_business_section_gap(
+        self,
+    ) -> None:
+        # A caller that never passes tenant_prompt at all (the pre-existing
+        # calling convention) must still render cleanly rather than leaving a
+        # literal marker string in the prompt.
+        tool = SearchToolStub(ToolResult(observation="x"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+
+        await loop.run(_ctx(), "hello")
+
+        system_seen = llm.calls[0][0]
+        assert "<<BUSINESS_CONTEXT>>" not in system_seen
+        assert "<<IDENTITY_AND_VOICE>>" not in system_seen
+
+
+class TestIdentityAndPlaceholderGuardrails:
+    """Requested directly: a human-sounding answer to "who are you", and no
+    literal [bracket] placeholder ever reaching a real customer. Both are
+    baked into every prompt this loop renders — not tenant configuration,
+    because every assistant on the platform benefits from both."""
+
+    async def test_the_identity_instruction_is_present(self) -> None:
+        tool = SearchToolStub(ToolResult(observation="x"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+
+        await loop.run(_ctx(), "who are you?")
+
+        system_seen = llm.calls[0][0]
+        assert "never say" in system_seen.lower()
+        assert "first name" in system_seen.lower()
+
+    async def test_the_no_placeholder_instruction_is_present(self) -> None:
+        tool = SearchToolStub(ToolResult(observation="x"))
+        llm = FakeLLM(['{"action": "final", "action_input": {"answer": "done"}}'])
+        loop = _loop(llm, tool)
+
+        await loop.run(_ctx(), "hi")
+
+        system_seen = llm.calls[0][0]
+        assert "NEVER SHOW A PLACEHOLDER" in system_seen
+        assert "[user_name]" in system_seen or "[name]" in system_seen

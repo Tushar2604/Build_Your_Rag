@@ -51,6 +51,7 @@ log = structlog.get_logger(__name__)
 # Labels for the use-case chips under the create box. Paired with the hint text
 # in `USE_CASE_HINTS` so a chip can never exist without a generator hint.
 _USE_CASE_LABELS: dict[str, str] = {
+    "recruiting": "Recruiting",
     "lead_generation": "Lead Generation",
     "appointments": "Appointments",
     "support": "Support",

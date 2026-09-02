@@ -80,47 +80,73 @@ class SendFollowUps:
 
         sent = 0
         for conversation in due:
-            # Re-checked against the entity rather than trusting the query
-            # alone: the row may have been answered between the two statements,
-            # and nudging someone who has just replied is the one outcome this
-            # feature must never produce.
-            if not conversation.follow_up_due(
-                after=self._after, max_follow_ups=self._max, now=moment
-            ):
-                continue
             if await self._send_one(conversation, moment):
                 sent += 1
         return sent
 
     async def _send_one(self, conversation: WhatsAppConversation, moment: datetime) -> bool:
-        final = conversation.is_final_follow_up(max_follow_ups=self._max)
-        body = (
-            SIGN_OFF_MESSAGE
-            if final
-            else FOLLOW_UP_MESSAGES[
-                min(conversation.followups_sent, len(FOLLOW_UP_MESSAGES) - 1)
-            ]
-        )
+        """Claim this conversation's nudge and send it — atomically enough
+        that two overlapping sweeps cannot both do it.
 
-        ok, error = await self._deliver(conversation, body)
-        if not ok:
-            # Left as-is so the next sweep retries. A number that is
-            # unreachable for good keeps failing, which is noisy in the logs
-            # but never silently drops someone who was only briefly offline.
-            log.warning(
-                "followup.send_failed",
-                conversation_id=str(conversation.id),
-                tenant_id=str(conversation.tenant_id),
-                error=error,
-            )
-            return False
-
+        The advisory lock around the whole tick (`_sweep_lease` in the API app)
+        is supposed to make that impossible on its own, but it protects a
+        *tick*, not a conversation — and this codebase has observed, in
+        production, the same nudge delivered to the same contact two and three
+        times within a couple of seconds of each other, which is a single-tick
+        timescale, not a sweep-interval one. Rather than depend on diagnosing
+        exactly how two sends started (another process, a retried tick,
+        anything else that can end up running this loop twice), this makes the
+        one moment that actually matters — deciding to send, and sending —
+        safe under real concurrency on its own terms: everything from the
+        fresh re-check through the send happens inside one transaction holding
+        a row lock (`lock_for_follow_up`), so a second caller racing on the
+        same conversation gets `None` back and does nothing, before either of
+        them has sent a thing.
+        """
         async with self._uow as uow:
             uow.set_tenant_scope(conversation.tenant_id)
+            fresh = await uow.whatsapp_conversations.lock_for_follow_up(
+                conversation.tenant_id, conversation.id
+            )
+            if fresh is None:
+                # Gone, or another caller has the lock right now — either way
+                # this is not this call's to send.
+                return False
+            # Re-checked against a row fetched *inside* this lock, not the one
+            # `execute()` read a moment ago: the whole point of the lock is
+            # that nothing about this conversation can be trusted from before
+            # it was taken. A reply that arrived in between is the case that
+            # matters most — nudging someone who has just answered is the one
+            # outcome this feature must never produce.
+            if not fresh.follow_up_due(after=self._after, max_follow_ups=self._max, now=moment):
+                return False
+
+            final = fresh.is_final_follow_up(max_follow_ups=self._max)
+            body = (
+                SIGN_OFF_MESSAGE
+                if final
+                else FOLLOW_UP_MESSAGES[min(fresh.followups_sent, len(FOLLOW_UP_MESSAGES) - 1)]
+            )
+
+            ok, error = await self._deliver(uow, fresh, body)
+            if not ok:
+                # Left as-is so the next sweep retries. A number that is
+                # unreachable for good keeps failing, which is noisy in the
+                # logs but never silently drops someone who was only briefly
+                # offline. The row lock releases when this transaction ends
+                # either way, so the retry is not blocked by this attempt.
+                log.warning(
+                    "followup.send_failed",
+                    conversation_id=str(fresh.id),
+                    tenant_id=str(fresh.tenant_id),
+                    error=error,
+                )
+                return False
+
             await uow.chats.add_message(
                 Message(
-                    session_id=conversation.session_id,
-                    tenant_id=conversation.tenant_id,
+                    session_id=fresh.session_id,
+                    tenant_id=fresh.tenant_id,
                     role=MessageRole.ASSISTANT,
                     content=body,
                     # Distinguishes an automated nudge from a generated answer
@@ -128,39 +154,43 @@ class SendFollowUps:
                     provider="whatsapp:follow_up",
                 )
             )
-            conversation.note_message(preview=body, has_media=False, inbound=False)
+            fresh.note_message(preview=body, has_media=False, inbound=False)
             # After note_message, which would otherwise restart the clock on a
             # thread we have just finished signing off.
-            conversation.record_follow_up(final=final, now=moment)
-            await uow.whatsapp_conversations.update(conversation)
+            fresh.record_follow_up(final=final, now=moment)
+            await uow.whatsapp_conversations.update(fresh)
             await uow.commit()
 
         log.info(
             "followup.sent",
-            conversation_id=str(conversation.id),
-            tenant_id=str(conversation.tenant_id),
-            attempt=conversation.followups_sent,
+            conversation_id=str(fresh.id),
+            tenant_id=str(fresh.tenant_id),
+            attempt=fresh.followups_sent,
             final=final,
         )
         return True
 
-    async def _deliver(self, conversation: WhatsAppConversation, body: str):
+    async def _deliver(self, uow, conversation: WhatsAppConversation, body: str):  # type: ignore[no-untyped-def]
         """Send through whichever transport owns this conversation.
+
+        Takes the caller's own open `uow` rather than starting a fresh one:
+        `_send_one` is holding a row lock for the duration of this call
+        precisely so the send happens under it, and a second, separate
+        transaction here would look up channel credentials outside that
+        protection for no reason.
 
         `whatsapp_channel_id` is polymorphic — a linked personal session or a
         Cloud API channel — so the owner is resolved by lookup rather than
         assumed, exactly as the campaign sender does.
         """
-        async with self._uow as uow:
-            uow.set_tenant_scope(conversation.tenant_id)
-            session = await uow.whatsapp_web_sessions.get(
+        session = await uow.whatsapp_web_sessions.get(
+            conversation.tenant_id, conversation.whatsapp_channel_id
+        )
+        channel = None
+        if session is None:
+            channel = await uow.whatsapp_channels.get(
                 conversation.tenant_id, conversation.whatsapp_channel_id
             )
-            channel = None
-            if session is None:
-                channel = await uow.whatsapp_channels.get(
-                    conversation.tenant_id, conversation.whatsapp_channel_id
-                )
 
         if session is not None:
             if self._bridge is None or not self._bridge.enabled:

@@ -36,9 +36,72 @@ log = structlog.get_logger(__name__)
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
+# A stable, non-brace marker rather than a `{business_context}` format field.
+# The text it is replaced with is a tenant's own Conversational Flow — free
+# text an operator typed into a browser, which can contain literal `{` or `}`
+# (a pasted JSON example, a stray curly quote). Feeding that through
+# `str.format()` would raise on the operator's own content; `str.replace()`
+# treats it as inert text, which is what "we don't control this string" means.
+_BUSINESS_CONTEXT_MARKER = "<<BUSINESS_CONTEXT>>"
+
+# Appended to every system prompt this loop renders, tenant content or not.
+# Both rules exist because of the same failure: the loop had no fallback for
+# either question, so a weaker model either dodged ("I'm an AI assistant...")
+# or echoed a template placeholder it did not know how to fill
+# (a literal "Hi [name]," sent to a real customer). Neither is a tenant
+# setting — every assistant on the platform benefits from both being fixed.
+_IDENTITY_AND_VOICE = """
+IDENTITY
+  If asked who or what you are, answer warmly and naturally, the way a real \
+person on the team would — never say "AI", "bot", "model", "assistant", \
+"virtual", or "language model", and never dodge the question. Give yourself a \
+first name if the business identity above does not already give you one, and \
+once you have used a name in this conversation, keep using that same one — \
+check the conversation so far before picking a new one. Answer briefly, then \
+move on: "I'm Maya, happy to help — what can I do for you?" is the shape, not \
+a script to copy.
+
+NEVER SHOW A PLACEHOLDER
+  If the business identity above (or your own draft answer) contains a \
+bracket like [name] or [user_name] and you do not have a real value for it, \
+do NOT write the bracket itself. Rephrase naturally without it, or ask for the \
+detail instead. A customer must never see literal square brackets in a message \
+— that is a template you forgot to fill in, not something to send.
+"""
+
+
+def _render_business_context(tenant_prompt: str) -> str:
+    """The block that tells this loop which business it is actually working for.
+
+    Without this, the loop's own tool-use rules are the entire personality the
+    model has — which is why an assistant with a fully written Conversational
+    Flow (its identity, its facts, its own do's and don'ts) still answered like
+    a generic template on any channel that ran through this loop instead of the
+    plain retrieval path. Whatever the tenant configured takes priority for
+    facts, tone and business rules; it never overrides the loop's own tool-use
+    and safety rules below it, which are the platform's, not the tenant's.
+    """
+    text = tenant_prompt.strip()
+    if not text:
+        return (
+            "(No business details are configured for this assistant yet. Be "
+            "honest that you don't have specifics rather than inventing any, "
+            "and keep the rules below.)"
+        )
+    return (
+        "The following is this business's own configuration — its identity, "
+        "facts, and how it wants you to behave. Follow it for tone, facts and "
+        "business rules; it never overrides the rules below it.\n\n"
+        f"{text}"
+    )
+
+
 _SYSTEM_TEMPLATE = """You are a warm, friendly, and genuinely helpful assistant \
 answering questions about a specific set of documents. You must ground every \
 answer in tool results — never answer from your own prior knowledge.
+
+ABOUT THIS BUSINESS
+<<BUSINESS_CONTEXT>>
 
 You have these tools:
 {catalog}
@@ -56,6 +119,7 @@ Rules:
 - Write the final "answer" in a warm, human, humble voice: you may acknowledge a
   good question, and close by briefly inviting a follow-up (e.g. ask what else
   they'd like to know). Keep it natural and grounded in the tool results.
+<<IDENTITY_AND_VOICE>>
 """
 
 
@@ -88,22 +152,34 @@ class AgentLoop:
         # original template leaves every existing caller unchanged.
         self._system_template = system_template or _SYSTEM_TEMPLATE
 
-    def _system_prompt(self) -> str:
-        """Render the template, including today's date.
+    def _system_prompt(self, tenant_prompt: str = "") -> str:
+        """Render the template: today's date, the tool catalog, and — the part
+        that used to be missing — which business this actually is.
+
+        `tenant_prompt` is inserted via `str.replace()`, after `.format()` has
+        already consumed the template's own `{catalog}`/`{refusal}`/`{today}`
+        fields. It has to happen in that order and with that method: the
+        tenant's own text is not ours to control, `.format()` would raise on a
+        stray `{` inside it, and `replace()` treats the marker as inert text
+        rather than a field to fill.
 
         A model has no clock. Without being told the date it cannot resolve
         "tomorrow" or "Monday" into anything a tool will accept, and the failure
         looks like "no availability" rather than like a mistake — which is how an
         AI receptionist tells someone the business is shut on a day it is open.
         """
-        return self._system_template.format(
+        rendered = self._system_template.format(
             catalog=self._registry.render_catalog(),
             refusal=self._refusal,
             today=datetime.now(UTC).strftime("%A %d %B %Y"),
         )
+        rendered = rendered.replace(
+            _BUSINESS_CONTEXT_MARKER, _render_business_context(tenant_prompt)
+        )
+        return rendered.replace("<<IDENTITY_AND_VOICE>>", _IDENTITY_AND_VOICE)
 
     async def run(
-        self, ctx: ToolContext, question: str, *, history: str = ""
+        self, ctx: ToolContext, question: str, *, history: str = "", tenant_prompt: str = ""
     ) -> AgentResult:
         """Answer `question`, optionally in the context of a conversation.
 
@@ -111,9 +187,16 @@ class AgentLoop:
         conversation — "I need physio", "tomorrow evening", "6:15 works" — and
         each of those turns is meaningless alone. Without the prior turns the
         planner re-asks which service they wanted on every single message.
+
+        `tenant_prompt` is the assistant's own Conversational Flow — its
+        Identity, Facts, and business rules, exactly as configured in the
+        builder. Without it, this loop's fixed tool-use rules are the entire
+        personality the model has, on every channel that reaches it — which is
+        indistinguishable from a generic template no matter how carefully an
+        operator wrote their own.
         """
         trace = AgentTrace(question=question)
-        system = self._system_prompt()
+        system = self._system_prompt(tenant_prompt)
         transcript = (
             f"Conversation so far:\n{history}\n\nLatest message: {question}"
             if history

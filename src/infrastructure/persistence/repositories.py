@@ -1456,6 +1456,24 @@ class WhatsAppConversationRepositoryImpl:
             return None
         return map_.whatsapp_conversation_to_domain(row[0], row[1] or "")
 
+    async def lock_for_follow_up(
+        self, tenant_id: TenantId, conversation_id: uuid.UUID
+    ) -> WhatsAppConversation | None:
+        # No join here, deliberately: `FOR UPDATE` cannot be combined with an
+        # outer join in Postgres, and this caller only needs the follow-up
+        # fields — not the assignee email `get_by_id` joins in for the inbox.
+        row = (
+            await self._s.execute(
+                select(m.WhatsAppConversationModel)
+                .where(
+                    m.WhatsAppConversationModel.id == conversation_id,
+                    m.WhatsAppConversationModel.tenant_id == tenant_id,
+                )
+                .with_for_update(skip_locked=True)
+            )
+        ).scalar_one_or_none()
+        return map_.whatsapp_conversation_to_domain(row) if row else None
+
     def _owner_filters(
         self,
         tenant_id: TenantId,

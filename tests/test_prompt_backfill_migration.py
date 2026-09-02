@@ -1,13 +1,19 @@
-"""Guard: migration 0014's frozen copy of the stock prompt must match the domain.
+"""Guard: the newest backfill migration's frozen copy of the stock prompt must
+match the domain.
 
-0014 backfills existing assistants with a copy of the section bodies inlined at
-the time it was written (deliberately — a migration that imports live domain
-constants stops being reproducible the moment those constants change).
+Each prompt-wording change ships two things together: an edit to
+`_DEFAULT_SECTIONS`, and a migration that backfills existing assistants still
+running the *previous* stock wording (matched by SHA-256, so an operator's own
+edits are never touched — see 0014 and 0030's own docstrings for why the
+section bodies are frozen inline rather than imported from `src.domain`).
 
-The cost of freezing is drift: edit `_DEFAULT_SECTIONS` and migrated assistants
-silently end up with different wording from newly created ones. This test makes
-that drift fail immediately. If it fires, the fix is a NEW migration, not an
-edit to 0014.
+The cost of freezing is drift: edit `_DEFAULT_SECTIONS` without a new migration
+and newly created assistants end up with different wording from freshly
+migrated ones. This test makes that drift fail immediately by comparing the
+domain constant against whichever migration is currently the newest. If it
+fires because you just changed the stock prompt, the fix is a new migration —
+freeze the new sections in it, and repoint `MIGRATION`/`_MODULE_NAME` below at
+it, the same way this file moved from 0014 to 0030.
 """
 
 from __future__ import annotations
@@ -23,17 +29,18 @@ from src.domain.chatbot.entities import (
     default_flow_sections,
 )
 
+_MODULE_NAME = "m0030"
 MIGRATION = (
     Path(__file__).resolve().parents[1]
     / "migrations"
     / "versions"
-    / "0014_tighten_default_prompt.py"
+    / "0030_recruiting_flow_asks_name_first.py"
 )
 
 
 @pytest.fixture(scope="module")
 def migration():
-    spec = importlib.util.spec_from_file_location("m0014", MIGRATION)
+    spec = importlib.util.spec_from_file_location(_MODULE_NAME, MIGRATION)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
@@ -44,8 +51,8 @@ def test_frozen_sections_match_the_domain_sections(migration) -> None:
     frozen = [(t, b) for t, b in migration._NEW_SECTIONS]
     live = [(s.title, s.body) for s in default_flow_sections()]
     assert frozen == live, (
-        "migration 0014 has drifted from _DEFAULT_SECTIONS — add a new migration "
-        "rather than editing 0014"
+        "migration 0030 has drifted from _DEFAULT_SECTIONS — add a new migration "
+        "rather than editing 0030"
     )
 
 
@@ -57,18 +64,13 @@ def test_frozen_compose_matches_the_domain_compose(migration) -> None:
 
 
 def test_current_default_is_not_treated_as_stale(migration) -> None:
-    # The digest set names prompts to REPLACE. If the current default ever lands
-    # in it, the migration would rewrite assistants that are already correct.
+    # The digest names the prompt to REPLACE. If the current default's own
+    # digest ever matched it, the migration would rewrite assistants that are
+    # already correct on every future run.
     digest = hashlib.sha256(DEFAULT_SYSTEM_PROMPT.encode()).hexdigest()
-    assert digest not in migration._STOCK_DIGESTS
-
-
-def test_stale_digests_are_recorded_for_both_shipped_defaults(migration) -> None:
-    # One per prompt this project has shipped: the original single blob, and the
-    # same text recomposed as sections. Losing either strands those assistants.
-    assert len(migration._STOCK_DIGESTS) == 2
+    assert digest != migration._STOCK_DIGEST
 
 
 def test_empty_prompt_is_not_matched_as_stock(migration) -> None:
     # Defensive: a NULL/empty system_prompt must not hash into the replace set.
-    assert hashlib.sha256(b"").hexdigest() not in migration._STOCK_DIGESTS
+    assert hashlib.sha256(b"").hexdigest() != migration._STOCK_DIGEST

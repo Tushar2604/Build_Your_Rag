@@ -577,6 +577,22 @@ class WhatsAppConversationRepository(Protocol):
     async def get_by_id(
         self, tenant_id: TenantId, conversation_id: uuid.UUID
     ) -> WhatsAppConversation | None: ...
+    async def lock_for_follow_up(
+        self, tenant_id: TenantId, conversation_id: uuid.UUID
+    ) -> WhatsAppConversation | None:
+        """The row, locked for the rest of this transaction — or None if
+        another transaction already has it locked, meaning this one has
+        nothing to do.
+
+        `SendFollowUps` needs this because its own batch read
+        (`list_due_follow_ups`, `FOR UPDATE SKIP LOCKED`) commits long before
+        anything is sent — that lock cannot, by itself, stop two overlapping
+        sweeps from each starting a send for the same contact. Locking again
+        here, immediately before sending, is what actually closes that window:
+        of two callers racing on the same conversation, one gets the row and
+        proceeds, the other gets None and quietly has nothing to do.
+        """
+        ...
     async def list_for_owner(
         self,
         tenant_id: TenantId,

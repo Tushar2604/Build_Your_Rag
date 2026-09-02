@@ -82,6 +82,14 @@ class AskFrontOffice:
             if answering_as is None:
                 raise NotFoundError("No assistant is attached to this conversation.")
 
+            # The assistant's own Conversational Flow — Identity, Facts, its
+            # own do's and don'ts. Without loading it here, the agent has
+            # nothing but the loop's fixed tool-use rules to work from, on
+            # every channel this use case serves.
+            bot = await uow.chatbots.get(tenant_id, answering_as)
+            if bot is None:
+                raise NotFoundError("Assistant not found.")
+
             tenant = await uow.tenants.get(tenant_id)
             assert tenant is not None
             used = await uow.usage.tokens_used_today(tenant_id)
@@ -129,6 +137,7 @@ class AskFrontOffice:
             ),
             message,
             history=history,
+            tenant_prompt=bot.system_prompt,
         )
 
         # --- 3. Persist the reply and meter it (short transaction) ---

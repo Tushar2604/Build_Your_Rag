@@ -50,6 +50,24 @@ logger = logging.getLogger(__name__)
 # shape of conversation that category actually has — they are hints in the
 # prompt, not switches selecting a canned template.
 USE_CASE_HINTS: dict[str, str] = {
+    # The platform's own most common assistant, and the one use case that used
+    # to have no hint at all — every other category here steered the model
+    # toward a concrete structure, and a recruiting description got nothing,
+    # which is why generated recruiting flows read weaker than the rest.
+    "recruiting": (
+        "Recruiting outreach or candidate screening for a specific role. If the "
+        "candidate's name is not already known, the flow's first step must be "
+        "asking for it warmly — never launch into the role before you have a "
+        "name to use. Once you know who you're speaking with, make sure they "
+        "actually know what this is about: state the opportunity plainly (the "
+        "role, the company, and one honest line on why it might suit them) "
+        "before asking anything of them. Only then move into screening — "
+        "experience, notice period, salary expectation, whatever this role "
+        "needs — one question at a time, the way a real recruiter texts: warm, "
+        "brief, never a form. Close by explaining the next step and thanking "
+        "them. It must never invent salary figures, visa terms, or benefits "
+        "that are not in the reference material."
+    ),
     "lead_generation": (
         "Outbound lead generation. The flow should qualify interest, capture "
         "budget/timeline/authority where natural, and book a follow-up with a "
@@ -115,6 +133,30 @@ _SYSTEM = """\
 You design voice AI assistants. Given a description of what an assistant should \
 do, you output its complete configuration as JSON.
 
+BEFORE YOU WRITE ANYTHING: work out which real-world profession or role this \
+assistant is standing in for — a dental clinic receptionist, a college \
+admissions counselor, a real-estate leasing agent, a veterinary receptionist, \
+whatever the description actually implies — even when the description names no \
+category and even when nothing below hints at one. This is the single most \
+important judgment call you make, because it decides whether the flow you write \
+sounds like that specific professional or like a generic script wearing their \
+name badge.
+
+Then ask yourself: what does someone in that exact job actually say and ask, in \
+what order, and why? A dental receptionist's first real question is what's \
+bringing the patient in and how urgent it feels to them — not "how can I help \
+you today." A college admissions receptionist's is what they're hoping to \
+study and at what level, because everything else (which office, which forms, \
+which deadlines) depends on that answer. A veterinary receptionist asks which \
+animal and what's wrong before anything about the owner. None of this is named \
+in a description that just says "answer calls for my dental clinic" — it comes \
+from you reasoning about the profession itself and writing the flow the way \
+that professional actually works, using only this business's own facts for the \
+specifics. This standard applies to every assistant you generate, with or \
+without a use-case hint below — a hint, when given, hands you one extra layer \
+of structure for that category; its absence is never a reason to write \
+something generic.
+
 Return ONLY a JSON object, no prose and no markdown fences, with exactly these keys:
 
 {
@@ -139,17 +181,30 @@ confirm those.
 naming exactly what the assistant may do and what it must refuse or hand off, \
 plus any hard "never promise X" rules.
 4. One or more "Flow: <short lowercase name>" sections — the actual conversation \
-steps as a numbered list. Give each distinct branch of the conversation its own \
+steps as a numbered list, written the way the real professional you identified \
+above would actually run this conversation: the specific things they would ask \
+about, in the order that profession naturally asks them, not a reordering of \
+generic small talk. Give each distinct branch of the conversation its own \
 section (for example "Flow: qualification" and "Flow: callback request"). These \
-must be specific to THIS assistant's job, not generic.
+must be specific to THIS assistant's job, not generic. If nothing already tells \
+the assistant who it is speaking to (no name in the reference material, no \
+[user_name]-style variable in the welcome message), the flow's first step must \
+be asking for their name warmly, before anything else — a real conversation \
+does not start by talking business at a stranger. Never invent this step when \
+the assistant already has a name to work with.
 5. "Scope & Redirects" — what is off-topic, and the exact sentence to say when \
 redirecting back on topic.
 
 Write every body in the second person, addressed to the assistant ("You are...", \
-"Ask them..."). Keep each body under 1200 characters. Be concrete and specific to \
-the described business — never write placeholder text like "[company name]" in a \
-body. The welcome_message MAY use square-bracket variables such as [user_name] \
-because those are filled from call data at dial time."""
+"Ask them..."). Go into real, specific detail — up to about 2000 characters per \
+body where the job warrants it; a thin one-liner is a worse answer than one \
+that actually spells out how this specific professional handles this specific \
+step. Be concrete and specific to the described business — never write \
+placeholder text like "[company name]" in a body. Every body should read like \
+it was written by the best, most professional person who has ever done this \
+exact job — polished and classy, never stiff, never generic, never a template \
+with the nouns swapped. The welcome_message MAY use square-bracket variables \
+such as [user_name] because those are filled from call data at dial time."""
 
 
 class SectionStreamParser:
