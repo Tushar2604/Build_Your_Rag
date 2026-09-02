@@ -24,7 +24,7 @@ than imported from `src.domain`, for the same reason 0014 froze its own: this
 has to keep producing the same result even after the domain constants move on
 again.
 
-Revision ID: 0030_recruiting_flow_asks_name_first
+Revision ID: 0030_flow_asks_name_first
 Revises: 0029_whatsapp_cloud_channel
 Create Date: 2026-09-01
 """
@@ -38,7 +38,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0030_recruiting_flow_asks_name_first"
+revision: str = "0030_flow_asks_name_first"
 down_revision: str | None = "0029_whatsapp_cloud_channel"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

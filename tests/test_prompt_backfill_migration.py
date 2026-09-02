@@ -34,7 +34,7 @@ MIGRATION = (
     Path(__file__).resolve().parents[1]
     / "migrations"
     / "versions"
-    / "0030_recruiting_flow_asks_name_first.py"
+    / "0030_flow_asks_name_first.py"
 )
 
 
