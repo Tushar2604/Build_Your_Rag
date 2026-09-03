@@ -41,7 +41,7 @@ async def bridge_liveness() -> dict[str, object]:
 
 
 @router.get("/healthz/providers")
-async def provider_health() -> dict[str, object]:
+async def provider_health(probe: bool = False) -> dict[str, object]:
     """Per-provider circuit-breaker state for the generation chain.
 
     Answers "which of my accounts is throttling right now?" directly, instead
@@ -55,12 +55,21 @@ async def provider_health() -> dict[str, object]:
     """
     llm = get_container().llm
     health = llm.health() if hasattr(llm, "health") else {}
-    return {
+    payload: dict[str, object] = {
         # Chain order is the failover order, so the first healthy entry is the
         # one currently serving.
         "chain": list(health.keys()),
         "providers": health,
     }
+    # `?probe=true` actually calls each backend. Off by default because it costs
+    # a completion per provider, but it is the only form that catches a tier
+    # whose model name has been retired: breaker state is built from observed
+    # failures, and a provider nobody calls never records one.
+    if probe and hasattr(llm, "probe"):
+        results = await llm.probe()
+        payload["probe"] = results
+        payload["unreachable"] = [n for n, r in results.items() if not r.get("ok")]
+    return payload
 
 
 @router.get("/readyz")

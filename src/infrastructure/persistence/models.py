@@ -43,7 +43,7 @@ class TenantModel(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    daily_token_quota: Mapped[int] = mapped_column(Integer, default=200_000)
+    daily_token_quota: Mapped[int] = mapped_column(Integer, default=2_000_000)
     max_documents: Mapped[int] = mapped_column(Integer, default=200)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

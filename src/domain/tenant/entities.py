@@ -26,7 +26,7 @@ class Tenant:
     name: str
     slug: str
     id: TenantId = field(default_factory=lambda: TenantId(new_id()))
-    daily_token_quota: int = 200_000
+    daily_token_quota: int = 2_000_000
     max_documents: int = 200
     is_active: bool = True
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

@@ -10,6 +10,7 @@ offline/private deployments or a free fallback.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Callable
 
 import structlog
@@ -422,6 +423,41 @@ class FailoverLLM:
             breaker.record_success()
         elif should_trip_circuit(exc):
             breaker.record_failure(provider_name)
+
+    async def probe(self, *, timeout_seconds: float = 20.0) -> dict[str, dict[str, object]]:
+        """Actually call every provider, and report what each one said.
+
+        Distinct from `health()`, which reports circuit-breaker state and so can
+        only describe providers that have already been tried. This one is the
+        difference between "nothing has gone wrong" and "everything works".
+
+        Never raises, and deliberately does not touch the breakers: a probe is a
+        diagnostic, and letting it trip a breaker would mean checking your
+        providers could take one out of rotation.
+        """
+        results: dict[str, dict[str, object]] = {}
+        for provider in self._providers:
+            started = time.perf_counter()
+            try:
+                await asyncio.wait_for(
+                    provider.generate("You are terse.", "Reply with: ok"),
+                    timeout=timeout_seconds,
+                )
+                results[provider.name] = {
+                    "ok": True,
+                    "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "model": getattr(provider, "_model", None)
+                    or getattr(provider, "model", ""),
+                }
+            except Exception as exc:  # noqa: BLE001 - the failure IS the result
+                results[provider.name] = {
+                    "ok": False,
+                    "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "model": getattr(provider, "_model", None)
+                    or getattr(provider, "model", ""),
+                    "error": f"{type(exc).__name__}: {exc}"[:300],
+                }
+        return results
 
     def health(self) -> dict[str, dict[str, object]]:
         """Per-provider breaker state, surfaced on the health endpoint so an

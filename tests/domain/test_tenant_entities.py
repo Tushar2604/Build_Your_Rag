@@ -22,7 +22,10 @@ def test_role_values() -> None:
 # --- Tenant ---
 def test_tenant_defaults() -> None:
     t = Tenant(name="Acme", slug="acme")
-    assert t.daily_token_quota == 200_000
+    # Raised in 0032: the booking agent is a multi-step tool loop, and at the
+    # old 200k ceiling a workspace ran dry after about four bookings — then
+    # every conversation on it failed until midnight.
+    assert t.daily_token_quota == 2_000_000
     assert t.max_documents == 200
     assert t.is_active is True
     assert isinstance(t.id, uuid.UUID)

@@ -179,7 +179,19 @@ class Settings(BaseSettings):
 
     # --- Limits / quotas ---
     max_upload_mb: int = 100
-    tenant_daily_token_quota: int = 200_000
+    # Raised from 200_000, which was sized for the retrieval path: one question
+    # in, one answer out, a couple of thousand tokens. The booking agent is a
+    # different shape entirely -- a multi-step tool loop that re-sends the whole
+    # catalogue on every step, so a single booking conversation can cost 40-50k.
+    # At the old ceiling a workspace ran dry after about four bookings, and
+    # every conversation on it then failed until midnight.
+    # Call every generation provider once at boot. Cheap (three tiny
+    # completions) and the only thing that catches a fallback tier whose model
+    # name has been retired -- breaker state cannot, because a tier nobody
+    # calls never records a failure.
+    llm_probe_on_startup: bool = True
+
+    tenant_daily_token_quota: int = 2_000_000
     tenant_max_documents: int = 200
     retrieval_top_k: int = 5
 

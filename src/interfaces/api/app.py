@@ -162,6 +162,29 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     if settings.appointments_enabled and settings.appointment_reminders_enabled:
         reminders = asyncio.create_task(_reminder_loop(settings))
 
+    # Exercise the failover chain once, so a retired model name is a loud line
+    # in the boot log rather than a surprise during the outage it exists to
+    # absorb. Three trivial completions; skipped with LLM_PROBE_ON_STARTUP=false.
+    if settings.llm_probe_on_startup:
+        try:
+            probe = await container.llm.probe()
+            dead = [n for n, r in probe.items() if not r.get("ok")]
+            for name in dead:
+                log.error(
+                    "llm.provider_unreachable",
+                    provider=name,
+                    model=probe[name].get("model"),
+                    error=probe[name].get("error"),
+                )
+            log.info(
+                "llm.chain_probed",
+                chain=list(probe),
+                healthy=[n for n in probe if n not in dead],
+                dead=dead,
+            )
+        except Exception:  # noqa: BLE001 - a diagnostic must never block startup
+            log.exception("llm.probe_failed")
+
     log.info("app.started", env=settings.app_env)
     yield
 

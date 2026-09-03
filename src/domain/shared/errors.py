@@ -33,3 +33,16 @@ class RateLimitedError(DomainError):
 
 class InvalidStateError(DomainError):
     """An operation is not valid for the entity's current lifecycle state."""
+
+
+# What a customer is told when the workspace has run out of tokens for the day.
+#
+# Deliberately says nothing about quotas or tokens: the person on the other end
+# is a patient or a client, and "daily token quota exceeded" is both meaningless
+# to them and alarming. It also does not blame a glitch, because this is not
+# one — it is a limit that will clear, and in the meantime a human has to pick
+# the conversation up.
+QUOTA_REPLY = (
+    "Sorry, I can't reply right now — I've passed this to the team and "
+    "someone will get back to you shortly."
+)

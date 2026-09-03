@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 from xml.sax.saxutils import escape
 
+import structlog
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from src.application.dtos import AskInput
@@ -21,6 +22,7 @@ from src.application.ports.repositories import WhatsAppChannel, WhatsAppConversa
 from src.application.use_cases.ask_chatbot import AskChatbot
 from src.config.settings import get_settings
 from src.domain.chat.entities import ChatSession
+from src.domain.shared.errors import QUOTA_REPLY, QuotaExceededError
 from src.domain.shared.identifiers import ChatbotId
 from src.domain.shared.phone import canonical_phone
 from src.infrastructure.messaging.twilio_signature import verify_twilio_signature
@@ -28,6 +30,8 @@ from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.routers.broadcasts import mark_replied
 from src.interfaces.api.routers.whatsapp_cloud import webhook_url as cloud_webhook_url
 from src.interfaces.api.schemas import ConnectWhatsAppRequest, WhatsAppChannelResponse
+
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
@@ -254,6 +258,12 @@ async def whatsapp_webhook(request: Request, container: ContainerDep) -> Respons
     try:
         result = await use_case.execute(channel.tenant_id, session_id, AskInput(message=body_text))
         answer = result.answer
+    except QuotaExceededError:
+        # Not a fault: the workspace has spent its daily token allowance, so
+        # every conversation on it is affected until midnight UTC. Said plainly
+        # in the log because the operator now has to answer by hand.
+        log.error("whatsapp.reply.quota_exceeded", tenant_id=str(channel.tenant_id))
+        answer = QUOTA_REPLY
     except Exception:  # noqa: BLE001 - a WhatsApp reply must always be sent, even on failure
         answer = "Sorry, something went wrong on our end. Please try again shortly."
 

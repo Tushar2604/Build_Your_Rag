@@ -45,6 +45,7 @@ from src.application.use_cases.front_office import AskFrontOffice
 from src.config.container import get_container
 from src.config.settings import get_settings
 from src.domain.chat.entities import Message, MessageRole
+from src.domain.shared.errors import QUOTA_REPLY, QuotaExceededError
 from src.domain.shared.identifiers import ChatbotId, SessionId, TenantId
 from src.domain.shared.phone import canonical_phone
 from src.infrastructure.messaging.whatsapp_cloud import (
@@ -358,6 +359,14 @@ async def _generate_and_send(
             mode=mode,
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
+    except QuotaExceededError:
+        # Not a fault: the workspace has spent its daily token allowance, so
+        # every conversation on it is affected at once and stays that way until
+        # midnight UTC. Logged as its own event rather than a stack trace,
+        # because the operator now has to answer by hand until it resets.
+        log.error("whatsapp.reply.quota_exceeded", tenant_id=str(tenant_id))
+        answer = QUOTA_REPLY
+        persist_answer = True
     except Exception as exc:  # noqa: BLE001 — always answer, even on a pipeline failure
         log.exception(
             "whatsapp_cloud.reply_failed",
