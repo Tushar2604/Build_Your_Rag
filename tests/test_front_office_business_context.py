@@ -49,7 +49,14 @@ class _SpyAgent:
         self.calls: list[dict] = []
 
     async def run(  # type: ignore[no-untyped-def]
-        self, ctx, message, *, history="", tenant_prompt="", response_language=""
+        self,
+        ctx,
+        message,
+        *,
+        history="",
+        tenant_prompt="",
+        response_language="",
+        state_block="",
     ):
         self.calls.append(
             {
@@ -58,6 +65,7 @@ class _SpyAgent:
                 "history": history,
                 "tenant_prompt": tenant_prompt,
                 "response_language": response_language,
+                "state_block": state_block,
             }
         )
         return _AgentResult(answer="Sure, happy to help.", trace=_Trace())
@@ -100,6 +108,7 @@ class _FakeChats:
     def __init__(self, session: ChatSession) -> None:
         self._session = session
         self.added: list = []
+        self.booking_state: dict | None = None
 
     async def get_session(self, tenant_id, session_id):  # type: ignore[no-untyped-def]
         return self._session if session_id == self._session.id else None
@@ -109,6 +118,12 @@ class _FakeChats:
 
     async def add_message(self, message) -> None:  # type: ignore[no-untyped-def]
         self.added.append(message)
+
+    async def get_booking_state(self, tenant_id, session_id):  # type: ignore[no-untyped-def]
+        return self.booking_state
+
+    async def save_booking_state(self, tenant_id, session_id, state) -> None:  # type: ignore[no-untyped-def]
+        self.booking_state = state
 
 
 class _FakeTenants:
@@ -182,3 +197,85 @@ class TestTheAssistantsLanguagePolicyReachesTheAgent:
         await use_case.execute(TENANT, session.id, message="who are you?")
 
         assert agent.calls[0]["response_language"] == "Hindi"
+
+
+class TestTheBookingSlateCrossesTurns:
+    """The use case's half of the fix for the conversation that never booked.
+
+    The tools keep a `BookingSlate`; this is what loads it before the run, hands
+    it to the agent both as a live object and as a rendered prompt block, and
+    stores whatever the run learned. Without every one of those, a customer's
+    "2" arrives at an agent that has forgotten what it offered.
+    """
+
+    async def test_the_agent_receives_the_state_as_a_prompt_block(self, world) -> None:  # type: ignore[no-untyped-def]
+        uow, agent, bot, session = world
+        await AskFrontOffice(uow, agent).execute(TENANT, session.id, message="hi")
+
+        assert "state_block" in agent.calls[0]
+        # An empty slate still says something, so the model is never handed a
+        # blank section it has to interpret.
+        assert "Nothing yet" in agent.calls[0]["state_block"]
+
+    async def test_a_stored_slate_is_loaded_and_rendered(self, world) -> None:  # type: ignore[no-untyped-def]
+        uow, agent, bot, session = world
+        uow.chats.booking_state = {
+            "service_id": "11111111-1111-1111-1111-111111111111",
+            "service_name": "Consultation",
+            "customer_name": "Tushar",
+        }
+
+        await AskFrontOffice(uow, agent).execute(TENANT, session.id, message="1")
+
+        block = agent.calls[0]["state_block"]
+        assert "Consultation" in block
+        assert "Name: Tushar" in block
+
+    async def test_the_tools_get_the_same_slate_the_prompt_describes(self, world) -> None:  # type: ignore[no-untyped-def]
+        # One object, not two views that can drift apart.
+        uow, agent, bot, session = world
+        uow.chats.booking_state = {"customer_name": "Tushar"}
+
+        await AskFrontOffice(uow, agent).execute(TENANT, session.id, message="hi")
+
+        slate = agent.calls[0]["ctx"].extras["slate"]
+        assert slate.customer_name == "Tushar"
+
+    async def test_a_turn_that_changes_nothing_writes_nothing(self, world) -> None:  # type: ignore[no-untyped-def]
+        # An ordinary question on a booking-capable assistant must not cost a
+        # write on every message.
+        uow, agent, bot, session = world
+        uow.chats.booking_state = {"customer_name": "Tushar"}
+
+        await AskFrontOffice(uow, agent).execute(TENANT, session.id, message="hi")
+
+        assert uow.chats.booking_state == {"customer_name": "Tushar"}
+
+    async def test_what_the_run_learned_is_persisted(self, world) -> None:  # type: ignore[no-untyped-def]
+        uow, agent, bot, session = world
+
+        class _Booking(_SpyAgent):
+            async def run(self, ctx, message, **kwargs):  # type: ignore[no-untyped-def]
+                ctx.extras["slate"].remember(name="Tushar", reason="eye checkup")
+                return await super().run(ctx, message, **kwargs)
+
+        await AskFrontOffice(uow, _Booking()).execute(
+            TENANT, session.id, message="Tushar, eye checkup"
+        )
+
+        assert uow.chats.booking_state is not None
+        assert uow.chats.booking_state["customer_name"] == "Tushar"
+        assert uow.chats.booking_state["reason_for_visit"] == "eye checkup"
+
+    async def test_the_channels_own_number_counts_as_already_given(self, world) -> None:  # type: ignore[no-untyped-def]
+        # On WhatsApp the customer is messaging from the number. An assistant
+        # told a phone number is still missing goes and asks for it.
+        uow, agent, bot, session = world
+
+        await AskFrontOffice(uow, agent).execute(
+            TENANT, session.id, message="hi", customer_phone="91220910827"
+        )
+
+        block = agent.calls[0]["state_block"]
+        assert "Phone: 91220910827" in block
+        assert "a phone number or email" not in block

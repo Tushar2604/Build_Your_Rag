@@ -46,6 +46,9 @@ _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 # treats it as inert text, which is what "we don't control this string" means.
 _BUSINESS_CONTEXT_MARKER = "<<BUSINESS_CONTEXT>>"
 _LANGUAGE_RULES_MARKER = "<<LANGUAGE_RULES>>"
+# Where a caller's per-turn working state is spliced in. Inert for a template
+# that does not contain it, which is why the document agent needs no change.
+_STATE_MARKER = "<<CONVERSATION_STATE>>"
 
 # Appended to every system prompt this loop renders, tenant content or not.
 # Both rules exist because of the same failure: the loop had no fallback for
@@ -158,7 +161,10 @@ class AgentLoop:
         self._system_template = system_template or _SYSTEM_TEMPLATE
 
     def _system_prompt(
-        self, tenant_prompt: str = "", response_language: str = RESPONSE_LANGUAGE_AUTO
+        self,
+        tenant_prompt: str = "",
+        response_language: str = RESPONSE_LANGUAGE_AUTO,
+        state_block: str = "",
     ) -> str:
         """Render the template: today's date, the tool catalog, and — the part
         that used to be missing — which business this actually is.
@@ -184,6 +190,10 @@ class AgentLoop:
             _BUSINESS_CONTEXT_MARKER, _render_business_context(tenant_prompt)
         )
         rendered = rendered.replace("<<IDENTITY_AND_VOICE>>", _IDENTITY_AND_VOICE)
+        # Same `replace()` discipline as the tenant prompt, and for a stronger
+        # reason: this block carries a customer's own words — their name, their
+        # reason for visiting — which `.format()` would try to read as fields.
+        rendered = rendered.replace(_STATE_MARKER, state_block)
         return rendered.replace(_LANGUAGE_RULES_MARKER, language_rules(response_language))
 
     async def run(
@@ -194,6 +204,7 @@ class AgentLoop:
         history: str = "",
         tenant_prompt: str = "",
         response_language: str = RESPONSE_LANGUAGE_AUTO,
+        state_block: str = "",
     ) -> AgentResult:
         """Answer `question`, optionally in the context of a conversation.
 
@@ -213,9 +224,17 @@ class AgentLoop:
         `guardrails.language_rules` for what each value means. Defaults to the
         auto-mirror behaviour so a caller that omits it keeps working exactly
         as it always did.
+
+        `state_block` is structured working state the caller keeps between
+        turns — for the receptionist, the times it has already offered and which
+        one the customer picked. `history` alone cannot carry that: it records
+        what was *said*, and "Thu 03 Sep, 9:00 AM" is not an instant a tool will
+        accept. Without it the agent re-derives availability every turn, and
+        re-deriving availability means re-offering it, which is the loop that
+        never books. Empty by default, so the document agent is untouched.
         """
         trace = AgentTrace(question=question)
-        system = self._system_prompt(tenant_prompt, response_language)
+        system = self._system_prompt(tenant_prompt, response_language, state_block)
         transcript = (
             f"Conversation so far:\n{history}\n\nLatest message: {question}"
             if history

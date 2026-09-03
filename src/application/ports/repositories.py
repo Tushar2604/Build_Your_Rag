@@ -195,6 +195,20 @@ class ChatRepository(Protocol):
         chatbot_id: ChatbotId | None,
     ) -> int: ...
 
+    # --- the booking agent's working memory for this thread ------------------
+    #
+    # Read at the start of every inbound message and written back at the end.
+    # An opaque dict here on purpose: the shape belongs to
+    # `domain.scheduling.slate`, and the repository's job is to store it, not to
+    # understand it. `None` means "this conversation has no booking in flight",
+    # which is both the default and what a completed booking resets to.
+    async def get_booking_state(
+        self, tenant_id: TenantId, session_id: SessionId
+    ) -> dict | None: ...
+    async def save_booking_state(
+        self, tenant_id: TenantId, session_id: SessionId, state: dict | None
+    ) -> None: ...
+
 
 @runtime_checkable
 class UsageRepository(Protocol):
@@ -558,6 +572,18 @@ class WhatsAppConversation:
         self.awaiting_reply_since = None if final else (now or datetime.now(UTC))
         self.updated_at = datetime.now(UTC)
 
+    def stop_waiting(self) -> None:
+        """Give up on the ladder without sending anything.
+
+        Distinct from `record_follow_up(final=True)`, which books a sign-off
+        that a contact actually received. This is for a thread nobody should
+        nudge at all — the handset is answered by a different session now, or
+        the number it arrived on is gone. Leaving `awaiting_reply_since` set
+        would have every sweep, forever, pick the row up, fail, and log.
+        """
+        self.awaiting_reply_since = None
+        self.updated_at = datetime.now(UTC)
+
     def mark_read(self) -> None:
         self.unread_count = 0
         self.updated_at = datetime.now(UTC)
@@ -830,6 +856,22 @@ class WhatsAppWebSessionRepository(Protocol):
         Re-scanning the QR for a number that is already connected creates a
         second session, and without this the workspace ends up showing the
         same number twice with its history split between them."""
+        ...
+    async def list_linked_to_number_anywhere(
+        self, phone_number: str
+    ) -> list[WhatsAppWebSession]:
+        """Every LINKED session on this handset, in any tenant.
+
+        Deliberately unscoped, and the only method on this port that is:
+        WhatsApp's multi-device linking has no concept of "this number belongs
+        to one workspace" — the same phone can be scanned into two entirely
+        different tenants, and both bridge connections then stay genuinely
+        alive and both receive every inbound message. `list_linked_to_number`
+        catches an operator re-scanning their own number twice; it cannot see
+        this, because it never looks past its own tenant. Used only to detect
+        and retire a cross-tenant collision the moment a new link completes —
+        never for anything that answers a request within a tenant's own scope.
+        """
         ...
     async def update(self, ws: WhatsAppWebSession) -> None: ...
     async def delete(self, tenant_id: TenantId, session_id: uuid.UUID) -> None: ...

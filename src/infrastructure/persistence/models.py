@@ -185,6 +185,13 @@ class ChatSessionModel(Base):
     )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Added in 0031: the booking agent's working memory for this thread — the
+    # numbered times it last offered, which one the customer picked, the hold
+    # token, and the details already given. Lives on the session rather than in
+    # a table of its own because its lifetime IS the session's: one row, deleted
+    # by the same cascade, and read on every inbound message. NULL for every
+    # conversation that never mentions an appointment.
+    booking_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class ChatMessageModel(Base):

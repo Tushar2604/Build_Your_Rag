@@ -170,13 +170,24 @@ def _neutralise(s: str) -> str:
 _HISTORY_TURNS = 12
 
 
-def format_message_history(messages: list[Message]) -> str:
+def format_message_history(
+    messages: list[Message], *, user_label: str = "candidate"
+) -> str:
     """Render recent session messages as plain lines for the
     `<conversation_history>` block — the only "memory" a turn has of earlier
-    ones, since each generation call is otherwise stateless."""
+    ones, since each generation call is otherwise stateless.
+
+    `user_label` is what the other side of the conversation is *called* in that
+    rendering, and it is not cosmetic: the model reads it as who it is talking
+    to. "candidate" is right for the screening interview this was written for
+    and wrong everywhere else — a receptionist handed a transcript labelled
+    "candidate" is being told, on every turn, that the person booking a dental
+    appointment is applying for a job. Defaulted to the original so the hiring
+    path is unchanged.
+    """
     recent = messages[-_HISTORY_TURNS:]
     return "\n".join(
-        f"{'candidate' if m.role == MessageRole.USER else 'assistant'}: {m.content}"
+        f"{user_label if m.role == MessageRole.USER else 'assistant'}: {m.content}"
         for m in recent
     )
 

@@ -55,7 +55,15 @@ class _Sessions:
 
     async def list_linked_to_number(self, tenant_id, phone_number):
         wanted = _digits(phone_number)
-        return [r for r in self.rows if _digits(r.phone_number) == wanted]
+        return [
+            r for r in self.rows if r.tenant_id == tenant_id and _digits(r.phone_number) == wanted
+        ]
+
+    async def list_linked_to_number_anywhere(self, phone_number):
+        wanted = _digits(phone_number)
+        return [
+            r for r in self.rows if r.status == "linked" and _digits(r.phone_number) == wanted
+        ]
 
     async def update(self, ws) -> None:
         self.updated.append(ws)
@@ -248,3 +256,115 @@ def test_a_session_that_linked_without_a_number_merges_nothing() -> None:
 
     assert conversations.calls == []
     assert sessions.deleted == []
+
+
+# --- cross-tenant collisions ---------------------------------------------------
+#
+# The bug actually reported in production: the same real phone linked into
+# TWO DIFFERENT TENANTS at once. WhatsApp's multi-device linking has no
+# concept of "this number belongs to one workspace" — a phone can have
+# several companion devices connected simultaneously, and nothing stopped a
+# second, unrelated tenant from scanning the same QR-eligible number. Both
+# bridge connections stayed genuinely alive; both received every inbound
+# message; both independently generated and sent their own reply — observed
+# directly as one customer message answered twice, in two different
+# languages, because two different tenants' assistants each believed they
+# alone were talking to that contact.
+#
+# `_absorb_duplicates` (tested above) cannot catch this: it is scoped to one
+# tenant by construction, because "you scanned your own number twice" is a
+# different bug with a different fix (move history across, keep both
+# threads' record). A cross-tenant collision must NOT move any history —
+# reassigning it the way `_absorb_session` does within one tenant would leak
+# that tenant's conversations into this one, which is a second problem, not
+# a fix for the first.
+
+OTHER_TENANT = TenantId(new_id())
+
+
+def _session_for(tenant_id: TenantId, phone: str) -> WhatsAppWebSession:
+    ws = WhatsAppWebSession(tenant_id=tenant_id)
+    ws.mark_linked(phone)
+    return ws
+
+
+def test_a_different_tenants_live_session_on_the_same_number_is_severed() -> None:
+    mine = _session_for(TENANT, "+971501234567")
+    theirs = _session_for(OTHER_TENANT, "971501234567")
+    sessions = _Sessions([mine, theirs])
+    bridge = _Bridge()
+    container = _Container(sessions, _Conversations(), bridge)
+
+    asyncio.run(_absorb_duplicates(container, mine))
+
+    assert sessions.deleted == [theirs.id]
+    assert bridge.logged_out == [str(theirs.id)]
+    assert mine.id in [r.id for r in sessions.rows], "the just-linked session must survive"
+
+
+def test_the_other_tenants_conversations_are_never_reassigned() -> None:
+    # The privacy property that matters most: severing a collision must not
+    # move the other tenant's conversation history anywhere, let alone here.
+    mine = _session_for(TENANT, "+971501234567")
+    theirs = _session_for(OTHER_TENANT, "971501234567")
+    sessions = _Sessions([mine, theirs])
+    conversations = _Conversations()
+    container = _Container(sessions, conversations, _Bridge())
+
+    asyncio.run(_absorb_duplicates(container, mine))
+
+    assert conversations.calls == [], "a cross-tenant collision must never move conversations"
+
+
+def test_an_unrelated_tenants_different_number_is_left_alone() -> None:
+    mine = _session_for(TENANT, "+971501234567")
+    unrelated = _session_for(OTHER_TENANT, "+971509999999")
+    sessions = _Sessions([mine, unrelated])
+    container = _Container(sessions, _Conversations(), _Bridge())
+
+    asyncio.run(_absorb_duplicates(container, mine))
+
+    assert sessions.deleted == []
+
+
+def test_a_disconnected_session_elsewhere_is_not_treated_as_a_collision() -> None:
+    # Only a LIVE, "linked" session on the other end is a genuine collision —
+    # a row already retired is not sending anyone a second reply.
+    mine = _session_for(TENANT, "+971501234567")
+    theirs = _session_for(OTHER_TENANT, "971501234567")
+    theirs.status = "disconnected"
+    sessions = _Sessions([mine, theirs])
+    container = _Container(sessions, _Conversations(), _Bridge())
+
+    asyncio.run(_absorb_duplicates(container, mine))
+
+    assert sessions.deleted == []
+
+
+def test_an_unreachable_bridge_still_removes_the_other_tenants_row() -> None:
+    # The same discipline as the same-tenant merge: a failed logout call must
+    # not leave the colliding row (and its live replies) behind.
+    mine = _session_for(TENANT, "+971501234567")
+    theirs = _session_for(OTHER_TENANT, "971501234567")
+    sessions = _Sessions([mine, theirs])
+    container = _Container(sessions, _Conversations(), _Bridge(fails=True))
+
+    asyncio.run(_absorb_duplicates(container, mine))
+
+    assert sessions.deleted == [theirs.id]
+
+
+def test_same_tenant_duplicates_and_cross_tenant_collisions_both_resolve_together() -> None:
+    # The realistic case: re-scanning your own number (same-tenant merge)
+    # while a completely different workspace also happens to hold it.
+    keeper = _session_for(TENANT, "+971501234567")
+    my_stale = _session_for(TENANT, "971501234567")
+    their_live = _session_for(OTHER_TENANT, "971501234567")
+    sessions = _Sessions([keeper, my_stale, their_live])
+    conversations = _Conversations()
+    container = _Container(sessions, conversations, _Bridge())
+
+    asyncio.run(_absorb_duplicates(container, keeper))
+
+    assert conversations.calls == [(my_stale.id, keeper.id)]
+    assert set(sessions.deleted) == {my_stale.id, their_live.id}

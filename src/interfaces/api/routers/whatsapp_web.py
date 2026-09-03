@@ -44,7 +44,7 @@ from src.config.settings import get_settings
 from src.domain.chat.entities import ChatSession, Message, MessageRole
 from src.domain.shared.identifiers import ChatbotId, SessionId, TenantId
 from src.domain.shared.phone import canonical_phone
-from src.domain.whatsapp_web.entities import WhatsAppWebSession
+from src.domain.whatsapp_web.entities import WhatsAppWebSession, answering_session
 from src.infrastructure.llm.resilience import Bulkhead
 from src.interfaces.api.deps import AdminPrincipalDep, ContainerDep
 from src.interfaces.api.routers.broadcasts import mark_replied
@@ -177,6 +177,108 @@ async def _absorb_duplicates(container, ws: WhatsAppWebSession) -> None:
     for other in same_number:
         if other.id != ws.id:
             await _absorb_session(container, ws, other)
+
+    await _sever_cross_tenant_collisions(container, ws)
+
+
+async def _speaks_for_number(container, ws: WhatsAppWebSession) -> bool:
+    """Is this the session that should be answering for this handset?
+
+    Almost always yes, and then this is one small query against a table capped
+    at a handful of rows per workspace — bought immediately before a reply that
+    costs a full agent run, so the cost is not the consideration.
+
+    It exists because `_absorb_duplicates` and `_sever_cross_tenant_collisions`
+    only run when a QR is scanned. They cannot reach a collision that was
+    already in the database when they shipped, and nothing else re-runs them —
+    which is exactly the state a live workspace was found in: the same handset
+    still linked into two places, every inbound message still answered twice,
+    long after the link-time fix existed. Asking the question here, at the
+    moment of sending, is what makes that stop on the next message rather than
+    on the next re-scan.
+
+    Deliberately does NOT delete the losing session. Severing is destructive
+    and cross-tenant, and it belongs to a deliberate human action — someone
+    scanning a QR — not to an inbound message arriving. Going quiet stops the
+    duplicate just as completely and can be undone by a re-scan.
+    """
+    if not ws.phone_number:
+        return True
+    async with container.unit_of_work() as uow:
+        live = await uow.whatsapp_web_sessions.list_linked_to_number_anywhere(
+            ws.phone_number
+        )
+    # `ws` is included explicitly, and counted as live, rather than trusted to
+    # come back from that query: a message arriving is itself proof this socket
+    # is up (see `observe_traffic`), and a row still recorded as disconnected
+    # must not lose its own number to a stale twin on a technicality.
+    candidates = [other for other in live if other.id != ws.id] + [ws]
+    if len(candidates) == 1:
+        return True
+
+    owner = answering_session(candidates, assume_live=ws.id)
+    if owner is None or owner.id == ws.id:
+        return True
+
+    log.error(
+        "whatsapp.duplicate_link.muted",
+        phone=ws.phone_number,
+        muted_session=str(ws.id),
+        muted_tenant=str(ws.tenant_id),
+        answering_session=str(owner.id),
+        answering_tenant=str(owner.tenant_id),
+    )
+    return False
+
+
+async def _sever_cross_tenant_collisions(container, ws: WhatsAppWebSession) -> None:
+    """The same handset, linked into a DIFFERENT tenant's workspace.
+
+    Not a "you scanned twice" situation — `_absorb_duplicates` above already
+    handles that, inside one tenant. This is WhatsApp's multi-device linking
+    doing exactly what it is designed to do (a phone can have several
+    companion devices connected at once) in a place our product has no
+    concept for: two unrelated workspaces both holding a live bridge
+    connection to the same real phone, both receiving every inbound message,
+    both independently generating and sending their own reply to it. Found in
+    production this way — the same customer message answered twice, in two
+    different languages, because two different tenants' assistants each
+    genuinely believed they were the one talking to that contact.
+
+    The just-completed link is treated as the one with current intent —
+    scanning a QR code requires physical access to the phone's WhatsApp app,
+    so whoever just did it is the one deciding where the number goes now. The
+    older tenant's session is logged out at WhatsApp and deleted; its
+    conversations are NOT touched or moved — reassigning them the way
+    `_absorb_session` does within one tenant would leak that tenant's history
+    into this one, which is a second problem, not a fix for the first.
+    """
+    if not ws.phone_number:
+        return
+    async with container.unit_of_work() as uow:
+        collisions = await uow.whatsapp_web_sessions.list_linked_to_number_anywhere(
+            ws.phone_number
+        )
+
+    for other in collisions:
+        if other.id == ws.id or other.tenant_id == ws.tenant_id:
+            continue
+        log.error(
+            "whatsapp.cross_tenant_collision",
+            phone=ws.phone_number,
+            kept_session=str(ws.id),
+            kept_tenant=str(ws.tenant_id),
+            severed_session=str(other.id),
+            severed_tenant=str(other.tenant_id),
+        )
+        try:
+            await container.whatsapp_bridge.logout_session(str(other.id))
+        except Exception:  # noqa: BLE001 - the row still has to go
+            log.warning("whatsapp.cross_tenant_collision.logout_failed", session_id=str(other.id))
+        async with container.unit_of_work() as uow:
+            uow.set_tenant_scope(other.tenant_id)
+            await uow.whatsapp_web_sessions.delete(other.tenant_id, other.id)
+            await uow.commit()
 
 # Caps how many auto-replies are generated at once in this process. Lazily
 # built so the semaphore binds to the event loop actually serving requests
@@ -1672,6 +1774,14 @@ async def bridge_events(
             # A human has taken this conversation over.
             log.info("whatsapp.reply.skipped", session_id=str(ws.id), reason="paused")
             return {"status": "paused"}
+        if not await _speaks_for_number(container, ws):
+            # This handset is connected in more than one place and another
+            # session is the one answering for it. The message is stored, so
+            # nothing is lost from this inbox — it just is not answered twice.
+            log.info(
+                "whatsapp.reply.skipped", session_id=str(ws.id), reason="duplicate_link"
+            )
+            return {"status": "duplicate_link"}
 
         background.add_task(
             _reply_to_message,

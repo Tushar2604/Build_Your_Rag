@@ -560,6 +560,40 @@ class ChatRepositoryImpl:
         )
         return int(result.rowcount or 0)
 
+    async def get_booking_state(
+        self, tenant_id: TenantId, session_id: SessionId
+    ) -> dict | None:
+        """The booking agent's working memory for this thread, or None.
+
+        Returned as the raw dict rather than as a domain object: the slate's
+        shape belongs to `domain.scheduling.slate`, which parses it defensively
+        because a row written by an older revision of that shape must degrade to
+        an empty slate, never to a 500 on an inbound message.
+        """
+        state = (
+            await self._s.execute(
+                select(m.ChatSessionModel.booking_state).where(
+                    m.ChatSessionModel.id == session_id,
+                    m.ChatSessionModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return state if isinstance(state, dict) else None
+
+    async def save_booking_state(
+        self, tenant_id: TenantId, session_id: SessionId, state: dict | None
+    ) -> None:
+        """Write the slate back. An empty slate is stored as NULL, so "nothing in
+        flight" is one representation rather than two."""
+        await self._s.execute(
+            update(m.ChatSessionModel)
+            .where(
+                m.ChatSessionModel.id == session_id,
+                m.ChatSessionModel.tenant_id == tenant_id,
+            )
+            .values(booking_state=state or None)
+        )
+
     async def add_message(self, message: Message) -> None:
         self._s.add(
             m.ChatMessageModel(
@@ -2781,6 +2815,22 @@ class WhatsAppWebSessionRepositoryImpl:
             for ws in await self.list_for_tenant(tenant_id)
             if _digits(ws.phone_number) == wanted
         ]
+
+    async def list_linked_to_number_anywhere(
+        self, phone_number: str
+    ) -> list[WhatsAppWebSession]:
+        wanted = _digits(phone_number)
+        if not wanted:
+            return []
+        rows = (
+            await self._s.execute(
+                select(m.WhatsAppWebSessionModel).where(
+                    m.WhatsAppWebSessionModel.status == "linked"
+                )
+            )
+        ).scalars()
+        sessions = [map_.whatsapp_web_session_to_domain(r) for r in rows]
+        return [ws for ws in sessions if _digits(ws.phone_number) == wanted]
 
     async def update(self, ws: WhatsAppWebSession) -> None:
         row = await self._s.get(m.WhatsAppWebSessionModel, ws.id)

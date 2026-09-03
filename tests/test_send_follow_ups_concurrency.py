@@ -61,6 +61,12 @@ class _Session:
     def __init__(self, id: uuid.UUID) -> None:  # noqa: A002
         self.id = id
         self.status = "linked"
+        # A real linked session always knows its handset, and the send path
+        # reads it to check nothing else is answering for the same number.
+        self.phone_number = "+919999000011"
+        self.tenant_id = TENANT
+        self.linked_at = NOW - timedelta(days=1)
+        self.created_at = NOW - timedelta(days=1)
 
 
 class _SharedConversationStore:
@@ -113,9 +119,15 @@ class _ConversationsHandle:
 class _FakeWebSessions:
     def __init__(self, session: _Session) -> None:
         self._session = session
+        # Every session linked to this handset, anywhere. One, unless a test
+        # is describing the same phone connected in two places at once.
+        self.everywhere: list[_Session] = [session]
 
     async def get(self, tenant_id, channel_id):  # type: ignore[no-untyped-def]
         return self._session
+
+    async def list_linked_to_number_anywhere(self, phone_number):  # type: ignore[no-untyped-def]
+        return [s for s in self.everywhere if s.phone_number == phone_number]
 
 
 class _FakeChats:

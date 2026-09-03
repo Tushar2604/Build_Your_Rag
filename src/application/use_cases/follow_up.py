@@ -28,6 +28,7 @@ import structlog
 
 from src.application.ports.repositories import UnitOfWork, WhatsAppConversation
 from src.domain.chat.entities import Message, MessageRole
+from src.domain.whatsapp_web.entities import answering_session
 
 log = structlog.get_logger(__name__)
 
@@ -128,19 +129,30 @@ class SendFollowUps:
                 else FOLLOW_UP_MESSAGES[min(fresh.followups_sent, len(FOLLOW_UP_MESSAGES) - 1)]
             )
 
-            ok, error = await self._deliver(uow, fresh, body)
+            ok, error, permanent = await self._deliver(uow, fresh, body)
             if not ok:
-                # Left as-is so the next sweep retries. A number that is
-                # unreachable for good keeps failing, which is noisy in the
-                # logs but never silently drops someone who was only briefly
-                # offline. The row lock releases when this transaction ends
-                # either way, so the retry is not blocked by this attempt.
+                # A transient failure is left as-is so the next sweep retries:
+                # a number that is unreachable for good keeps failing, which is
+                # noisy in the logs but never silently drops someone who was
+                # only briefly offline. The row lock releases when this
+                # transaction ends either way, so the retry is not blocked by
+                # this attempt.
+                #
+                # A permanent one stops the ladder instead. Retrying something
+                # that cannot succeed is not resilience — it is this row being
+                # picked up, failed and logged by every sweep from now until
+                # someone notices.
                 log.warning(
                     "followup.send_failed",
                     conversation_id=str(fresh.id),
                     tenant_id=str(fresh.tenant_id),
                     error=error,
+                    permanent=permanent,
                 )
+                if permanent:
+                    fresh.stop_waiting()
+                    await uow.whatsapp_conversations.update(fresh)
+                    await uow.commit()
                 return False
 
             await uow.chats.add_message(
@@ -170,8 +182,15 @@ class SendFollowUps:
         )
         return True
 
-    async def _deliver(self, uow, conversation: WhatsAppConversation, body: str):  # type: ignore[no-untyped-def]
+    async def _deliver(  # type: ignore[no-untyped-def]
+        self, uow, conversation: WhatsAppConversation, body: str
+    ) -> tuple[bool, str, bool]:
         """Send through whichever transport owns this conversation.
+
+        Returns `(sent, error, permanent)`. `permanent` marks a failure that
+        retrying cannot fix — the thread is not this session's to nudge, or the
+        number it arrived on no longer exists — so the caller can stop the
+        ladder rather than re-attempting it on every sweep forever.
 
         Takes the caller's own open `uow` rather than starting a fresh one:
         `_send_one` is holding a row lock for the duration of this call
@@ -193,17 +212,24 @@ class SendFollowUps:
             )
 
         if session is not None:
+            if await self._answered_by_another_session(uow, session):
+                return (
+                    False,
+                    "Another linked session answers for this handset now.",
+                    True,
+                )
             if self._bridge is None or not self._bridge.enabled:
-                return False, "The WhatsApp bridge is not configured on this server."
+                return False, "The WhatsApp bridge is not configured on this server.", False
             if session.status != "linked":
-                return False, "This WhatsApp number is not currently linked."
+                return False, "This WhatsApp number is not currently linked.", False
             jid = f"{conversation.phone_number.lstrip('+')}@s.whatsapp.net"
-            return await self._bridge.send_text(str(session.id), jid, body)
+            ok, error = await self._bridge.send_text(str(session.id), jid, body)
+            return ok, error, False
 
         if channel is None:
-            return False, "The WhatsApp number this conversation came in on is gone."
+            return False, "The WhatsApp number this conversation came in on is gone.", True
         if self._sender is None:
-            return False, "No WhatsApp sender is configured on this server."
+            return False, "No WhatsApp sender is configured on this server.", False
         ok, _sid, error = await self._sender.send(
             account_sid=channel.twilio_account_sid,
             auth_token=channel.twilio_auth_token,
@@ -211,4 +237,40 @@ class SendFollowUps:
             to_number=conversation.phone_number,
             body=body,
         )
-        return ok, error
+        return ok, error, False
+
+    async def _answered_by_another_session(self, uow, session) -> bool:  # type: ignore[no-untyped-def]
+        """Is this handset connected somewhere else that is doing the nudging?
+
+        The same collision the reply path guards (`answering_session`), asked
+        again here because a nudge is a send like any other. Without it, a
+        handset linked in two places ran two independent ladders side by side
+        and the contact got two of every message — the same nudge twice, then
+        the other nudge twice, then the sign-off twice, each pair within the
+        same minute. The row lock above cannot see that: it protects one
+        conversation row, and this is two of them.
+        """
+        if not session.phone_number:
+            return False
+        live = await uow.whatsapp_web_sessions.list_linked_to_number_anywhere(
+            session.phone_number
+        )
+        candidates = [other for other in live if other.id != session.id] + [session]
+        if len(candidates) == 1:
+            return False
+        # This session competes on its own link time even if its row currently
+        # says disconnected, so it only ever loses to a link that is genuinely
+        # more recent. Without that, a socket that dropped for a minute hands
+        # its contacts to an older twin nobody is using — and because muting is
+        # permanent for the thread, it would not get them back.
+        owner = answering_session(candidates, assume_live=session.id)
+        if owner is None or owner.id == session.id:
+            return False
+        log.error(
+            "followup.duplicate_link.muted",
+            phone=session.phone_number,
+            muted_session=str(session.id),
+            answering_session=str(owner.id),
+            answering_tenant=str(owner.tenant_id),
+        )
+        return True

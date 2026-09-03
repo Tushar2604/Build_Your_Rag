@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -36,6 +37,7 @@ from src.application.use_cases.appointments import (
 )
 from src.application.use_cases.availability import FindAvailability, HoldSlot
 from src.domain.scheduling.entities import ALL_SOURCES, MAX_NOTES, BookingSource
+from src.domain.scheduling.slate import BookingSlate, SlateOption
 from src.domain.shared.errors import DomainError
 from src.domain.shared.identifiers import (
     AppointmentId,
@@ -215,6 +217,99 @@ def _reference(appointment_id: uuid.UUID) -> str:
     vanishingly unlikely, and the lookup is scoped to exactly that set.
     """
     return f"APT-{appointment_id.hex[:8].upper()}"
+
+
+def _slate(ctx: ToolContext) -> BookingSlate | None:
+    """This conversation's booking slate, if the channel supplies one.
+
+    Optional by design. A caller that keeps no state (a one-shot API call, an
+    eval harness) gets `None` and every tool behaves exactly as it did before the
+    slate existed — the model must then pass service_id, location_id and
+    starts_at explicitly, which it always could.
+    """
+    slate = ctx.extras.get("slate")
+    return slate if isinstance(slate, BookingSlate) else None
+
+
+# What a tool says when the customer's pick cannot be matched to anything that
+# was actually offered. An instruction rather than an error, because the planner
+# reads it as an observation — and the wrong recovery here (guessing which time
+# they meant) books someone into a slot they never chose.
+UNREADABLE_OPTION = (
+    "I could not match {value!r} to any time you have offered. Do not guess "
+    "which one they meant. Call find_available_slots and offer the customer the "
+    "real times again."
+)
+
+
+@dataclass(frozen=True)
+class _Target:
+    """What service, branch and instant a mutating call is actually about.
+
+    Assembled from what the model passed *plus* what the conversation already
+    knows, so the planner only has to supply the new fact — usually just the
+    number the customer replied with. Every field can still be given explicitly;
+    an explicit value always wins.
+    """
+
+    service_id: uuid.UUID | None
+    location_id: uuid.UUID | None
+    starts_at: datetime | None
+    option: SlateOption | None = None
+    # Set when the planner named an option that matches nothing on offer. Kept
+    # separate from "no option given": one is a mistake to correct, the other is
+    # the ordinary case of a call that identified the slot some other way.
+    unreadable_option: str = ""
+
+
+def _resolve_target(ctx: ToolContext, kwargs: dict[str, Any], now: datetime) -> _Target:
+    """Fill in a booking call from the slate, without ever inventing a time.
+
+    Order of precedence, and the reason for it:
+
+      1. An `option` the planner passed — the customer's own reply ("2", "10am").
+         Resolved against the times *actually offered*, so it cannot land on
+         anything the engine did not produce.
+      2. An explicit `starts_at` — still accepted, and still checked by the
+         engine, so a model that works the old way keeps working.
+      3. The slot already chosen earlier in this conversation. This is the case
+         that was broken: the customer picks a time, then spends three messages
+         giving a name and a number, and by the last one the agent no longer knew
+         which slot "1" had been.
+    """
+    slate = _slate(ctx)
+    service_id = _parse_uuid(kwargs.get("service_id"))
+    location_id = _parse_uuid(kwargs.get("location_id"))
+    starts_at = _parse_dt(kwargs.get("starts_at"))
+    raw_option = kwargs.get("option")
+
+    if slate is None:
+        return _Target(service_id, location_id, starts_at)
+
+    option: SlateOption | None = None
+    if raw_option not in (None, ""):
+        option = slate.resolve(raw_option, now)
+        if option is None:
+            return _Target(
+                service_id,
+                location_id,
+                starts_at,
+                unreadable_option=str(raw_option),
+            )
+    elif starts_at is not None:
+        option = next(
+            (o for o in slate.fresh_options(now) if o.starts_at == starts_at), None
+        )
+    else:
+        option = slate.chosen
+
+    if option is not None:
+        starts_at = option.starts_at
+    if service_id is None:
+        service_id = _parse_uuid(slate.service_id)
+    if location_id is None:
+        location_id = _parse_uuid(slate.location_id)
+    return _Target(service_id, location_id, starts_at, option)
 
 
 def _source_for(ctx: ToolContext) -> BookingSource:
@@ -548,11 +643,19 @@ class FindAvailableSlotsTool:
             f"Available {service.name} appointments at {location.name} "
             f"(times shown in {location.timezone})."
         ]
+        # Descriptive, not imperative. This observation used to *order* the
+        # planner to read the list out, which made re-calling the tool mid-flow
+        # reset the conversation to the offer step — a customer who had already
+        # picked, given their name and given their number got the same four
+        # times back instead of a booking.
         lines.append(
-            "Give the customer these as a numbered list, in exactly these words, "
-            "and ask them to reply with a number:"
+            "These are the real options. If the customer has not seen them yet, "
+            "send them as this numbered list, in exactly these words, and ask "
+            "them to reply with a number. If they have ALREADY picked one, do "
+            "not list them again — hold it and book it:"
         )
         payload = []
+        remembered: list[SlateOption] = []
         for index, slot in enumerate(offer, start=1):
             local = _in_zone(slot.starts_at, location.timezone)
             lines.append(
@@ -566,6 +669,17 @@ class FindAvailableSlotsTool:
                     "ends_at": slot.ends_at.isoformat(),
                     "resource_ids": [str(r) for r in slot.resource_ids],
                 }
+            )
+            remembered.append(
+                SlateOption(
+                    option=index,
+                    label=_friendly(local),
+                    starts_at=slot.starts_at,
+                    ends_at=slot.ends_at,
+                    local_hour=local.hour,
+                    local_minute=local.minute,
+                    resource_ids=[str(r) for r in slot.resource_ids],
+                )
             )
 
         if alternatives:
@@ -583,9 +697,24 @@ class FindAvailableSlotsTool:
                 )
 
         lines.append(
-            "Offer ONLY times from this observation. Use the exact starts_at "
-            "value when holding or booking."
+            "Offer ONLY times from this observation. To hold or book one, pass "
+            "option=<the number> — the exact time is remembered for you."
         )
+
+        # The numbered list is now state the *next* turn can read, which is what
+        # lets "2", arriving as a separate message minutes later, resolve to an
+        # instant instead of being re-derived by asking the engine again.
+        slate = _slate(ctx)
+        if slate is not None:
+            slate.offer(
+                service_id=str(service_id),
+                service_name=service.name,
+                location_id=str(location_id),
+                location_name=location.name,
+                timezone=location.timezone,
+                options=remembered,
+                now=now,
+            )
 
         return ToolResult(
             observation="\n".join(lines),
@@ -617,12 +746,22 @@ class CreateSlotHoldTool:
             "Only for a NEW booking — never when moving an existing appointment. "
             "Temporarily reserve one of the exact times returned by "
             "find_available_slots, while you collect the customer's details. "
-            "Only use a starts_at value that find_available_slots returned. "
+            "Normally the whole call is option=<the number the customer replied "
+            "with>: the service, the branch and the exact time are taken from "
+            "the list you already offered them. Pass starts_at instead only if "
+            "you have no offered list to pick from. "
             "If this fails, the slot was just taken: call find_available_slots "
             "again and offer what is actually left. Never tell a customer a slot "
             "is held unless this succeeds."
         ),
         parameters={
+            "option": {
+                "type": "string",
+                "description": (
+                    "What the customer replied to your numbered list — \"2\", "
+                    "\"10am\", or the time as you wrote it."
+                ),
+            },
             "service_id": {"type": "string", "description": "Service to book."},
             "location_id": {"type": "string", "description": "Branch to book at."},
             "starts_at": {
@@ -640,14 +779,25 @@ class CreateSlotHoldTool:
         self._uow_factory = uow_factory
 
     async def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
-        service_id = _parse_uuid(kwargs.get("service_id"))
-        location_id = _parse_uuid(kwargs.get("location_id"))
-        starts_at = _parse_dt(kwargs.get("starts_at"))
+        now = datetime.now(UTC)
+        target = _resolve_target(ctx, kwargs, now)
+        if target.unreadable_option:
+            return ToolResult(
+                observation=UNREADABLE_OPTION.format(value=target.unreadable_option),
+                ok=False,
+            )
+        service_id, location_id, starts_at = (
+            target.service_id,
+            target.location_id,
+            target.starts_at,
+        )
         if service_id is None or location_id is None or starts_at is None:
             return ToolResult(
                 observation=(
-                    "create_slot_hold needs service_id, location_id and an exact "
-                    "starts_at from find_available_slots."
+                    "create_slot_hold needs to know which time the customer "
+                    "picked. Pass option=<the number they replied with> from a "
+                    "list you offered, or an exact starts_at from "
+                    "find_available_slots."
                 ),
                 ok=False,
             )
@@ -680,10 +830,20 @@ class CreateSlotHoldTool:
             tenant_id=str(ctx.tenant_id),
             starts_at=hold.starts_at.isoformat(),
         )
+        # The choice and the token outlive this run. Without that, the next
+        # message — the one carrying their name — arrives at an agent that has
+        # forgotten which slot is being held for whom.
+        slate = _slate(ctx)
+        if slate is not None:
+            if target.option is not None:
+                slate.choose(target.option)
+            slate.hold(token=hold.token, expires_at=hold.expires_at)
+
         return ToolResult(
             observation=(
                 f"Held {hold.starts_at.isoformat()} until "
                 f"{hold.expires_at.isoformat()}. Hold token: {hold.token}. "
+                "This is remembered for you — do not pass it back. "
                 "Confirm the customer's name and contact details next."
             ),
             data={
@@ -710,15 +870,24 @@ class BookAppointmentTool:
     spec = ToolSpec(
         name="book_appointment",
         description=(
-            "Actually book the appointment. Call this ONLY after you have the "
-            "customer's full name and a phone number or email, and after "
-            "find_available_slots gave you the exact starts_at. Pass the "
-            "hold_token from create_slot_hold if you have one. "
+            "Actually book the appointment. Call this as soon as you have the "
+            "customer's name and a phone number or email — everything else "
+            "(which service, which branch, which time they picked, the hold you "
+            "took) is remembered from earlier in the conversation, so pass only "
+            "what is new. Give option=<what the customer replied> if they have "
+            "just picked a time. "
             "Never tell the customer their appointment is booked unless this "
             "tool returns success — if it fails, the slot was taken and you "
             "must offer them a different time."
         ),
         parameters={
+            "option": {
+                "type": "string",
+                "description": (
+                    "What the customer replied to your numbered list, if they "
+                    "have just picked — \"2\", \"10am\", or the time as written."
+                ),
+            },
             "service_id": {"type": "string", "description": "Service to book."},
             "location_id": {"type": "string", "description": "Branch to book at."},
             "starts_at": {
@@ -747,14 +916,29 @@ class BookAppointmentTool:
         self._uow_factory = uow_factory
 
     async def run(self, ctx: ToolContext, **kwargs: Any) -> ToolResult:
-        service_id = _parse_uuid(kwargs.get("service_id"))
-        location_id = _parse_uuid(kwargs.get("location_id"))
-        starts_at = _parse_dt(kwargs.get("starts_at"))
+        now = datetime.now(UTC)
+        slate = _slate(ctx)
+        target = _resolve_target(ctx, kwargs, now)
+        if target.unreadable_option:
+            return ToolResult(
+                observation=UNREADABLE_OPTION.format(value=target.unreadable_option),
+                ok=False,
+            )
+        service_id, location_id, starts_at = (
+            target.service_id,
+            target.location_id,
+            target.starts_at,
+        )
+
+        # Anything the customer has already given counts as given. Each of these
+        # falls back through the same chain — this call, then what the
+        # conversation already knows, then what the channel knows — because the
+        # failure being fixed is an assistant that had a name three messages ago
+        # and asked for it again.
         name = str(kwargs.get("customer_name") or "").strip()
-        # Falls back to the identity the channel already knows. On WhatsApp or a
-        # phone call the number is not a question worth asking — the customer is
-        # literally messaging from it, and asking makes the assistant look like
-        # it is not paying attention.
+        # On WhatsApp or a phone call the number is not a question worth asking:
+        # the customer is literally messaging from it, and asking makes the
+        # assistant look like it is not paying attention.
         phone = (
             str(kwargs.get("customer_phone") or "").strip()
             or str(ctx.extras.get("customer_phone") or "").strip()
@@ -767,11 +951,25 @@ class BookAppointmentTool:
         # not worth failing a booking the customer has already agreed to.
         reason = str(kwargs.get("reason_for_visit") or "").strip()[:MAX_NOTES]
 
+        if slate is not None:
+            slate.remember(name=name, phone=phone, email=email, reason=reason)
+            if target.option is not None:
+                slate.choose(target.option)
+            name = name or slate.customer_name
+            phone = phone or slate.customer_phone
+            email = email or slate.customer_email
+            reason = reason or slate.reason_for_visit
+            # The hold this conversation took, and only while it is still live —
+            # an expired token would fail the conversion for a slot that is
+            # genuinely still free.
+            hold_token = hold_token or slate.live_hold(now)
+
         if service_id is None or location_id is None or starts_at is None:
             return ToolResult(
                 observation=(
-                    "book_appointment needs service_id, location_id and an exact "
-                    "starts_at from find_available_slots."
+                    "book_appointment does not know which appointment to make. "
+                    "Pass option=<the number the customer picked> from a list you "
+                    "offered, or call find_available_slots first."
                 ),
                 ok=False,
             )
@@ -831,11 +1029,18 @@ class BookAppointmentTool:
             )
 
         local = _in_zone(appointment.starts_at, appointment.timezone)
+        reference = _reference(appointment.id)
+        # The booking exists, so everything about *making* it is now stale. The
+        # customer's identity survives, so a second booking in the same thread
+        # does not start by re-asking for a name we were just given.
+        if slate is not None:
+            slate.booked(reference)
+
         return ToolResult(
             observation=(
                 f"{'Booked' if created else 'Already booked'}: "
                 f"{appointment.customer_name} on {local:%A %d %B at %H:%M} "
-                f"({appointment.timezone}). Reference {_reference(appointment.id)}. "
+                f"({appointment.timezone}). Reference {reference}. "
                 "You may now confirm this to the customer."
             ),
             data={
@@ -1013,13 +1218,21 @@ class RescheduleAppointmentTool:
             "appointment's service to get real new times — never guess one. "
             "This is the ONLY call a reschedule needs: do NOT hold the slot "
             "first, and do NOT ask for a name, phone or email — the appointment "
-            "already has them. As soon as the customer picks a time, call this. "
+            "already has them. As soon as the customer picks a time, call this "
+            "with option=<what they replied> from the list you offered. "
             "Never say an appointment has moved unless this returns success."
         ),
         parameters={
             "reference": {
                 "type": "string",
                 "description": "Reference from find_customer_appointments.",
+            },
+            "option": {
+                "type": "string",
+                "description": (
+                    "What the customer replied to your numbered list of new "
+                    "times — \"2\", \"10am\", or the time as written."
+                ),
             },
             "starts_at": {
                 "type": "string",
@@ -1036,7 +1249,16 @@ class RescheduleAppointmentTool:
         appointment_id = await _resolve_reference(
             self._uow_factory, ctx, str(kwargs.get("reference") or "")
         )
-        starts_at = _parse_dt(kwargs.get("starts_at"))
+        # Same option-number resolution a new booking gets: a customer moving an
+        # appointment replies "2" to a list exactly like everyone else, and being
+        # able to read that is not a privilege of first-time bookings.
+        target = _resolve_target(ctx, kwargs, datetime.now(UTC))
+        if target.unreadable_option:
+            return ToolResult(
+                observation=UNREADABLE_OPTION.format(value=target.unreadable_option),
+                ok=False,
+            )
+        starts_at = target.starts_at
         if appointment_id is None:
             return ToolResult(
                 observation=(
@@ -1048,8 +1270,9 @@ class RescheduleAppointmentTool:
         if starts_at is None:
             return ToolResult(
                 observation=(
-                    "reschedule_appointment needs an exact starts_at from "
-                    "find_available_slots."
+                    "reschedule_appointment needs to know the new time. Pass "
+                    "option=<the number the customer picked> from the list you "
+                    "offered, or an exact starts_at from find_available_slots."
                 ),
                 ok=False,
             )
@@ -1074,6 +1297,13 @@ class RescheduleAppointmentTool:
             )
 
         local = _in_zone(appointment.starts_at, appointment.timezone)
+        # The move is done, so the offered list and the choice behind it are
+        # spent. Leaving them would have the next turn believe a booking is still
+        # half-made and try to finish it.
+        slate = _slate(ctx)
+        if slate is not None:
+            slate.booked(_reference(appointment.id))
+
         return ToolResult(
             observation=(
                 f"Moved {_reference(appointment.id)} to {local:%A %d %B at %H:%M} "

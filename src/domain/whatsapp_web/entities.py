@@ -188,3 +188,60 @@ class WhatsAppWebSession:
         if self.status == "failed":
             return self.last_error or "Could not start the session"
         return "Starting up"
+
+
+def answering_session(
+    sessions: list[WhatsAppWebSession],
+    *,
+    assume_live: uuid.UUID | None = None,
+) -> WhatsAppWebSession | None:
+    """Of several live links to one handset, the one that speaks for it.
+
+    WhatsApp's multi-device protocol lets a phone keep several companion
+    devices connected at once, and it makes no promise that they belong to the
+    same person — let alone the same workspace. Every one of them receives
+    every inbound message. Our product has no concept of a shared number, so
+    each connected session independently believed it was the one talking to
+    that contact, generated its own answer, and sent it. The contact got two
+    replies to one message, sometimes in two different languages from two
+    different businesses' assistants, and later two of every automated nudge.
+
+    Deduplicating at the *point of effect* is what makes this stop for links
+    that already exist, rather than only for ones created after the fix — the
+    reconciliation that runs when a QR is scanned cannot reach backwards, and
+    nothing else re-runs it. Both the reply path and the follow-up sweep ask
+    this question immediately before sending, so a collision goes quiet on the
+    very next message instead of waiting for someone to re-scan.
+
+    The most recently linked session wins. Scanning a QR needs physical access
+    to the handset's WhatsApp app, so the person who did it last is the one who
+    most recently decided where this number should be answered. Ties break on
+    the id purely so every process in a deployment reaches the same answer.
+
+    `assume_live` names a session to count as linked whatever its row last
+    recorded. The reply path passes the session a message just arrived on:
+    traffic can only happen over a live socket, and a row left at
+    "disconnected" because the drop was reported and the reconnect was not
+    would otherwise lose its own number to a stale twin — which is how a
+    working number goes permanently mute rather than merely stopping
+    duplicates.
+
+    Returns None only when nothing here is linked at all, which is the caller's
+    cue that there is no collision to resolve rather than that everyone loses.
+    """
+    live = [
+        ws for ws in sessions if ws.status == "linked" or ws.id == assume_live
+    ]
+    if not live:
+        return None
+    return max(live, key=_link_rank)
+
+
+def _link_rank(ws: WhatsAppWebSession) -> tuple[datetime, str]:
+    """Sort key for "most recently linked". A session with no `linked_at` — a
+    row from before that column was populated — sorts by when it was created,
+    which is the closest honest answer available."""
+    moment = ws.linked_at or ws.created_at
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return (moment, str(ws.id))
