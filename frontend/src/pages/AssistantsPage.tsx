@@ -88,6 +88,7 @@ function CreateAssistantCard({ onCreated }: { onCreated: (bot: Chatbot) => void 
   return (
     <form
       onSubmit={submit}
+      data-tour="assistant-create-box"
       className="rounded-2xl border border-brand-500/30 bg-surface overflow-hidden"
     >
       <div className="px-6 pt-5 pb-4 border-b border-brand-500/15 bg-brand-500/[0.04]">

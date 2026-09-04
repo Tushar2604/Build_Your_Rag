@@ -461,7 +461,7 @@ export default function ServicesPage() {
 
   return (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header" data-tour="appointments-setup">
         <div>
           <h1 className="page-title">Services</h1>
           <p className="page-subtitle">

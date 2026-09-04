@@ -161,7 +161,7 @@ export default function IntegrationsPage() {
         />
       )}
 
-      <header className="page-header">
+      <header className="page-header" data-tour="integrations-grid">
         <div>
           <h1 className="page-title">Integrations</h1>
           <p className="page-subtitle">

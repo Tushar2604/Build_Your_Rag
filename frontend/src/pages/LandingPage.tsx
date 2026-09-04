@@ -102,7 +102,7 @@ function LanguagePicker() {
         aria-expanded={open}
         aria-label={t.nav.language}
         className="flex items-center gap-1.5 rounded-[6px] px-2.5 py-2 text-[13px] font-semibold
-                   text-[rgb(var(--m-ink-2))] transition-colors hover:text-[rgb(var(--m-ink))]"
+                   text-gray-400 transition-colors hover:text-white"
       >
         <Globe className="h-4 w-4" strokeWidth={2} />
         <span className="hidden sm:inline">{current.label}</span>
@@ -167,15 +167,17 @@ function Nav() {
   return (
     <header
       className={`sticky top-0 z-50 border-b transition-colors duration-200 ${
-        scrolled ? "mk-rule bg-white/90 backdrop-blur-md" : "border-transparent bg-white"
+        scrolled ? "border-white/10 bg-ink-950/90 backdrop-blur-md" : "border-white/0 bg-ink-950"
       }`}
     >
       <div className="mx-auto flex h-[72px] w-full max-w-[1340px] items-center gap-8 px-6">
         <Link to="/" className="flex flex-shrink-0 items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[rgb(var(--m-ink))]">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg
+                           bg-gradient-to-br from-cta-400 via-brand-500 to-brand-700
+                           shadow-[0_6px_18px_-6px_rgba(139,92,246,0.7)]">
             <Bot className="h-[18px] w-[18px] text-white" strokeWidth={2} />
           </span>
-          <span className="font-display text-[17px] font-bold tracking-tight">Evara AI</span>
+          <span className="font-display text-[17px] font-bold tracking-tight text-white">Evara AI</span>
         </Link>
 
         <nav className="hidden items-center gap-7 lg:flex">
@@ -183,7 +185,7 @@ function Nav() {
             <a
               key={href}
               href={href}
-              className="text-[14px] font-medium text-[rgb(var(--m-ink-2))] transition-colors hover:text-[rgb(var(--m-ink))]"
+              className="text-[14px] font-medium text-gray-400 transition-colors hover:text-white"
             >
               {label}
             </a>
@@ -194,11 +196,15 @@ function Nav() {
           <LanguagePicker />
           <Link
             to={isAuthenticated ? "/dashboard" : "/login"}
-            className="hidden px-2 text-[13px] font-semibold text-[rgb(var(--m-ink))] hover:underline sm:block"
+            className="hidden px-2 text-[13px] font-semibold text-gray-400 hover:text-white hover:underline sm:block"
           >
             {isAuthenticated ? t.nav.dashboard : t.nav.login}
           </Link>
-          <Link to="/register" className="mk-btn mk-btn-primary !px-5 !py-2.5">
+          <Link
+            to="/register"
+            className="rounded-[6px] bg-white px-5 py-2.5 text-[13px] font-bold uppercase tracking-[0.06em]
+                       text-ink-950 transition-colors hover:bg-gray-100"
+          >
             {t.nav.startBuilding}
           </Link>
         </div>
@@ -434,32 +440,46 @@ export default function LandingPage() {
     // Scoping the palette to this wrapper is what keeps a visitor in dark mode
     // from getting a half-inverted landing page.
     <div className="marketing min-h-screen">
-      <Nav />
+      {/* The thin multicolour rail at the very top edge of the page — the
+          same aurora that bleeds around the hero panel below, sampled as a
+          hairline strip so the dark band reads as "the light source" rather
+          than an arbitrary dark rectangle. */}
+      <div className="h-[3px] w-full bg-gradient-to-r from-orange-400 via-fuchsia-500 to-brand-500" />
 
-      {/* ── Hero ── */}
-      <section className="mx-auto grid w-full max-w-[1340px] items-center gap-12 px-6 py-16 lg:grid-cols-[1.06fr_1fr] lg:items-start lg:gap-16 lg:py-20">
-        <div>
-          <span className="mk-pill">
-            <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
-            {t.hero.badge}
-          </span>
-          <h1 className="mk-display mt-5">{t.hero.headline}</h1>
-          <p className="mk-lead mt-6 max-w-[54ch]">{t.hero.sub}</p>
-          <div className="mt-9 flex flex-wrap gap-3">
-            <Link to="/register" className="mk-btn mk-btn-primary">
-              {t.hero.ctaPrimary}
-              <Forward className="h-4 w-4" strokeWidth={2.5} />
-            </Link>
-            <a href="#runtime" className="mk-btn mk-btn-secondary">
-              {t.hero.ctaSecondary}
-            </a>
+      {/* ── Nav + hero live inside one dark aurora panel — `aurora-shell`
+          pins the console's dark tokens for this subtree regardless of the
+          light `.marketing` scope around it, which is what lets the badge,
+          headline and buttons below reuse the console's own dark-mode
+          classes instead of new one-off styles. */}
+      <div className="aurora-shell rounded-b-[2.5rem]">
+        <Nav />
+
+        <section className="relative mx-auto grid w-full max-w-[1340px] items-center gap-12 px-6 py-16 lg:grid-cols-[1.06fr_1fr] lg:items-start lg:gap-16 lg:py-24">
+          <div>
+            <span className="pill-glow">
+              <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />
+              {t.hero.badge}
+            </span>
+            <h1 className="hero-title mt-5 !text-4xl md:!text-6xl">{t.hero.headline}</h1>
+            <p className="hero-subtitle !max-w-[54ch]">{t.hero.sub}</p>
+            <div className="mt-9 flex flex-wrap gap-3">
+              <div className="glow-ring">
+                <Link to="/register" className="btn-primary btn-lg">
+                  {t.hero.ctaPrimary}
+                  <Forward className="h-4 w-4" strokeWidth={2.5} />
+                </Link>
+              </div>
+              <a href="#runtime" className="btn-secondary btn-lg">
+                {t.hero.ctaSecondary}
+              </a>
+            </div>
+            <p className="mt-4 text-[13px] text-gray-400">{t.hero.note}</p>
           </div>
-          <p className="mt-4 text-[13px] text-[rgb(var(--m-ink-3))]">{t.hero.note}</p>
-        </div>
-        <div className="lg:pt-1">
-          <HeroPanel />
-        </div>
-      </section>
+          <div className="lg:pt-1">
+            <HeroPanel />
+          </div>
+        </section>
+      </div>
 
       {/* ── Proof metrics ── */}
       <section className="border-y mk-rule mk-band">

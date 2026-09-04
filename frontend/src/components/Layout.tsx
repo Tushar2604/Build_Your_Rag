@@ -17,6 +17,7 @@ import {
 import { useAuth } from "../store/auth";
 import { useTheme } from "../store/theme";
 import { NotificationsProvider, useNotifications } from "../store/notifications";
+import TourOverlay from "./onboarding/TourOverlay";
 
 interface NavItem {
   to: string;
@@ -385,6 +386,7 @@ function AppShell() {
                           end={item.exact}
                           title={collapsed ? item.label : undefined}
                           className={navClass}
+                          data-tour={item.to === "/assistants" ? "nav-assistants" : undefined}
                         >
                           {({ isActive }) => (
                             <>
@@ -528,6 +530,8 @@ function AppShell() {
           <Outlet />
         </main>
       </div>
+
+      <TourOverlay />
     </div>
   );
 }

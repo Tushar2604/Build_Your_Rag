@@ -184,6 +184,7 @@ export default function KnowledgePage() {
 
       {/* Drop zone */}
       <div
+        data-tour="knowledge-upload"
         onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
         onDragLeave={() => setDragActive(false)}
         onDrop={(e) => { e.preventDefault(); setDragActive(false); handleFiles(e.dataTransfer.files); }}

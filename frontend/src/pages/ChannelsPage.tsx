@@ -584,7 +584,7 @@ export default function ChannelsPage() {
         />
       )}
 
-      <div className="page-header">
+      <div className="page-header" data-tour="channels-grid">
         <div>
           <h1 className="page-title">WhatsApp</h1>
           <p className="text-sm text-gray-500 mt-1">Connect and manage your WhatsApp numbers.</p>

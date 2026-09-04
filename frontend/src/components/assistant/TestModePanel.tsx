@@ -12,6 +12,7 @@ import { Chatbot } from "../../api/chatbots";
 import { askStream, createSession, greetStream } from "../../api/chat";
 import VoiceCallModal from "../VoiceCallModal";
 import { voiceTagFor } from "../../hooks/useVoice";
+import { useOnboarding } from "../../store/onboarding";
 
 export type TestMode = "chat" | "web-call";
 
@@ -185,6 +186,15 @@ function ChatTest({ bot }: { bot: Chatbot }) {
 /** Chat docks, a call pops. One entry point so callers keep passing a mode
  * rather than having to know which shape each test takes. */
 export default function TestModePanel({ bot, mode, onClose }: Props) {
+  const { markAssistantTested } = useOnboarding();
+  // Fires once whenever a user opens Test — chat or voice — for any
+  // assistant. There's no backend signal for "was this actually tested", so
+  // the setup checklist's "Test your assistant" step is satisfied client-side
+  // the first time this panel opens. Empty deps deliberately: this must fire
+  // once on mount, not whenever the (freshly-identitied) callback changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { markAssistantTested(); }, []);
+
   if (mode === "web-call") {
     return (
       <VoiceCallModal
