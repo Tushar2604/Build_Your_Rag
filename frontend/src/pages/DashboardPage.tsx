@@ -23,9 +23,6 @@ import { listChatbots, Chatbot } from "../api/chatbots";
 import { listDocuments } from "../api/documents";
 import { getChatbotAnalytics } from "../api/analytics";
 import { listCandidates } from "../api/candidates";
-import { getIntegrationCatalogue } from "../api/integrationsCatalogue";
-import { listWhatsAppChannels } from "../api/whatsapp";
-import { appointmentsApi } from "../api/appointments";
 import { useAuth } from "../store/auth";
 import { useOnboarding } from "../store/onboarding";
 import WelcomeScreen from "../components/onboarding/WelcomeScreen";
@@ -64,9 +61,6 @@ interface Stats {
   docsReady: number;
   docsTotal: number;
   candidates: number;
-  integrationsConnected: boolean;
-  whatsappConnected: boolean;
-  appointmentsReady: boolean;
 }
 
 function StatTile({
@@ -102,20 +96,15 @@ export default function DashboardPage() {
       // Every read is independent and every one of them is allowed to fail:
       // a workspace with no WhatsApp number 403s on candidates, and that must
       // not blank the whole dashboard.
-      const [botList, docs, candidatePage, integrations, whatsapp, readiness] = await Promise.all([
+      // Three reads, not six. Integrations, WhatsApp channels and booking
+      // readiness used to be fetched here purely to decide which setup steps
+      // were done — that question is now answered once, server-side, by
+      // `/onboarding/state`, and these three are only what the stat tiles show.
+      const [botList, docs, candidatePage] = await Promise.all([
         listChatbots().catch(() => [] as Chatbot[]),
         listDocuments().catch(() => []),
         isAdmin
           ? listCandidates({ pageSize: 1 }).catch(() => null)
-          : Promise.resolve(null),
-        isAdmin
-          ? getIntegrationCatalogue().catch(() => null)
-          : Promise.resolve(null),
-        isAdmin
-          ? listWhatsAppChannels().catch(() => [])
-          : Promise.resolve([]),
-        isAdmin
-          ? appointmentsApi.readiness().catch(() => null)
           : Promise.resolve(null),
       ]);
 
@@ -139,9 +128,6 @@ export default function DashboardPage() {
         docsReady: docs.filter((d) => d.status === "ready").length,
         docsTotal: docs.length,
         candidates: candidatePage?.total ?? 0,
-        integrationsConnected: (integrations?.connected_count ?? 0) > 0,
-        whatsappConnected: whatsapp.length > 0,
-        appointmentsReady: readiness?.ready ?? false,
       });
       setLoading(false);
     }
@@ -155,28 +141,32 @@ export default function DashboardPage() {
   const firstName = (email || "").split("@")[0];
   const shortcuts = SHORTCUTS.filter((s) => !s.adminOnly || isAdmin);
 
-  const { welcomeSeen, testedAssistant, checklistDismissed } = useOnboarding();
-  const setupSteps = stats
-    ? getSetupSteps({
-        bots,
-        hasReadyDocument: stats.docsReady > 0,
-        appointmentsReady: stats.appointmentsReady,
-        integrationsConnected: stats.integrationsConnected,
-        whatsappConnected: stats.whatsappConnected,
-        testedAssistant,
-        isAdmin,
-      })
-    : [];
+  const {
+    stage,
+    milestones,
+    isDismissed,
+    loaded: onboardingLoaded,
+    refresh: refreshOnboarding,
+  } = useOnboarding();
+
+  // The dashboard is where someone lands after doing the thing the last screen
+  // asked them to do, so it is the natural place to re-ask how far they've got.
+  useEffect(() => {
+    void refreshOnboarding();
+  }, [refreshOnboarding]);
+
+  const setupSteps = getSetupSteps(milestones, isAdmin, bots[0]?.id);
   const setupDone = setupSteps.filter((s) => s.done).length;
-  // Every tenant is auto-provisioned with a draft "Default Assistant" at
-  // signup, so `bots.length > 0` is true from the very first load — it can't
-  // be used to detect "brand new" the way a true zero-assistants state could.
-  // The welcome screen is gated on the localStorage flag alone, same as
-  // theme/sidebarMode elsewhere in the app (see store/onboarding.tsx) — the
-  // accepted trade-off being a new browser/device sees it again.
-  const showWelcome = !loading && !welcomeSeen;
+
+  // Both gates are now facts about the workspace's data rather than flags in
+  // this browser's localStorage. `stage === "build"` means nothing has been
+  // configured at all — which is true for a genuinely new tenant and false for
+  // an established one signing in from a new machine, the exact case the old
+  // localStorage gate got backwards.
+  const ready = !loading && onboardingLoaded;
+  const showWelcome = ready && stage === "build" && !isDismissed("welcome");
   const showChecklist =
-    !loading && !showWelcome && !checklistDismissed && setupDone < setupSteps.length;
+    ready && !showWelcome && !isDismissed("checklist") && setupDone < setupSteps.length;
 
   return (
     <div className="page">

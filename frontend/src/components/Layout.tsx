@@ -1,10 +1,26 @@
-// App shell: grouped sidebar + top bar.
+// App shell: a sidebar that reveals itself in step with the workspace.
 //
-// The sidebar is grouped rather than one flat list because the nav has grown
-// past the point where scanning it works — "Voice AI Setup" (build the thing),
-// "Operations & Monitoring" (watch it run), "Campaigns" (run it at volume),
-// "Account & Billing" (everything else) is the order someone actually moves
-// through the product.
+// The rail used to render all twenty-odd destinations from the first second of
+// the first session, with Appointments as its first group. Someone who signed
+// up to build a voice assistant landed on a menu whose top entry described a
+// feature of an assistant they had not created yet, and no way to tell which
+// row to touch first. The answer was "none of them" — most of that menu
+// describes an assistant that does not exist.
+//
+// So each item now carries `unlockedAt`, and the rail shows what the workspace
+// has actually earned. Three rules keep that from becoming its own problem:
+//
+//   * Voice AI Setup is always first. It is the product's point of entry and
+//     the one group that is never gated.
+//   * Nothing is ever *hidden*. Locked rows collapse into one disclosure at the
+//     foot of the rail, so the shape of the product stays visible and "where
+//     did X go" never happens.
+//   * The stage is derived from the tenant's own data (see
+//     store/onboarding.tsx), so an established workspace computes to `operate`
+//     on first load and sees exactly what it saw yesterday.
+//
+// Groups run in the order someone actually moves through the product: build the
+// thing, then let it take bookings, then watch it run, then run it at volume.
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
@@ -13,11 +29,17 @@ import {
   ListChecks, LayoutDashboard, PhoneOutgoing, MessageCircle, UserSearch,
   CalendarDays, CalendarCheck, Briefcase, MapPin, Clock,
   PanelLeftDashed, PanelLeftClose, PanelLeftOpen,
+  ChevronDown, Lock, Eye,
 } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { useTheme } from "../store/theme";
 import { NotificationsProvider, useNotifications } from "../store/notifications";
+import { OnboardingProvider, useOnboarding } from "../store/onboarding";
+import { atLeast, NavMode, Stage } from "../api/onboarding";
+import { lockedRowLabel } from "../onboarding/stages";
 import TourOverlay from "./onboarding/TourOverlay";
+import NextStepCard from "./onboarding/NextStepCard";
+import UnlockToast from "./onboarding/UnlockToast";
 
 interface NavItem {
   to: string;
@@ -32,6 +54,10 @@ interface NavItem {
    * `badge` because the two behave differently: a word is decoration, a number
    * is something the user is expected to go and clear. */
   counter?: "newAppointments";
+  /** The stage at which this row appears in the rail. Omitted = always. Below
+   * it the row is not gone — it moves into the collapsed "more features" list,
+   * and the page behind it stays reachable by URL and by ⌘K. */
+  unlockedAt?: Stage;
 }
 
 interface NavGroup {
@@ -49,63 +75,126 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    // Its own group rather than a row inside "Operations": appointments are a
-    // daily workflow with their own configuration underneath, and burying the
-    // calendar in a list of monitoring pages is how it stops being found.
+    // First, permanently. This is what the product is for, and burying it
+    // under the configuration of a feature of it — which is where it used to
+    // sit — is how a new workspace ends up not knowing where to start.
+    title: "Voice AI Setup",
+    items: [
+      { to: "/assistants", label: "Voice AI Assistants", icon: Bot },
+      { to: "/clone-voice", label: "Clone Voice", icon: Mic },
+      { to: "/knowledge", label: "Files", icon: BookOpen, unlockedAt: "teach" },
+      {
+        to: "/integrations",
+        label: "Integrations",
+        icon: Plug,
+        adminOnly: true,
+        unlockedAt: "teach",
+      },
+    ],
+  },
+  {
+    // A daily workflow with its own configuration underneath, so it keeps its
+    // own group rather than being a row inside Operations. Gated as a whole:
+    // an assistant that isn't live has nothing to book.
     title: "Appointments",
     items: [
-      { to: "/appointments/calendar", label: "Calendar", icon: CalendarDays },
+      { to: "/appointments/calendar", label: "Calendar", icon: CalendarDays, unlockedAt: "operate" },
       {
         to: "/appointments",
         label: "Appointments",
         icon: CalendarCheck,
         exact: true,
         counter: "newAppointments",
+        unlockedAt: "operate",
       },
-      { to: "/appointments/services", label: "Services", icon: Briefcase, adminOnly: true },
-      { to: "/appointments/resources", label: "Staff & Resources", icon: Users2, adminOnly: true },
-      { to: "/appointments/locations", label: "Locations", icon: MapPin, adminOnly: true },
-      { to: "/appointments/availability", label: "Availability", icon: Clock, adminOnly: true },
-    ],
-  },
-  {
-    title: "Voice AI Setup",
-    items: [
-      { to: "/assistants", label: "Voice AI Assistants", icon: Bot },
-      { to: "/clone-voice", label: "Clone Voice", icon: Mic },
-      { to: "/knowledge", label: "Files", icon: BookOpen },
-      { to: "/integrations", label: "Integrations", icon: Plug, adminOnly: true },
+      {
+        to: "/appointments/services",
+        label: "Services",
+        icon: Briefcase,
+        adminOnly: true,
+        unlockedAt: "operate",
+      },
+      {
+        to: "/appointments/resources",
+        label: "Staff & Resources",
+        icon: Users2,
+        adminOnly: true,
+        unlockedAt: "operate",
+      },
+      {
+        to: "/appointments/locations",
+        label: "Locations",
+        icon: MapPin,
+        adminOnly: true,
+        unlockedAt: "operate",
+      },
+      {
+        to: "/appointments/availability",
+        label: "Availability",
+        icon: Clock,
+        adminOnly: true,
+        unlockedAt: "operate",
+      },
     ],
   },
   {
     title: "Operations & Monitoring",
     items: [
-      { to: "/channels", label: "Phone Numbers", icon: PhoneCall, adminOnly: true },
-      { to: "/channels?tab=whatsapp", label: "WhatsApp Numbers", icon: MessageCircle, adminOnly: true },
-      { to: "/candidates", label: "Candidates", icon: UserSearch, adminOnly: true },
-      { to: "/interviews", label: "Call Logs", icon: PhoneOutgoing, adminOnly: true },
-      { to: "/analytics", label: "Analytics", icon: LineChart },
+      // Channels arrive at `launch` — that IS the launch step, so it has to be
+      // in the rail at the moment the next-step card starts pointing at it.
+      { to: "/channels", label: "Phone Numbers", icon: PhoneCall, adminOnly: true, unlockedAt: "launch" },
+      {
+        to: "/channels?tab=whatsapp",
+        label: "WhatsApp Numbers",
+        icon: MessageCircle,
+        adminOnly: true,
+        unlockedAt: "launch",
+      },
+      { to: "/candidates", label: "Candidates", icon: UserSearch, adminOnly: true, unlockedAt: "operate" },
+      { to: "/interviews", label: "Call Logs", icon: PhoneOutgoing, adminOnly: true, unlockedAt: "operate" },
+      { to: "/analytics", label: "Analytics", icon: LineChart, unlockedAt: "operate" },
     ],
   },
   {
+    // Running it at volume — meaningless before it works at all.
     title: "Campaigns",
     items: [
-      { to: "/interviews/bulk", label: "Bulk Call", icon: ListChecks, adminOnly: true },
-      { to: "/broadcasts", label: "Broadcast", icon: Megaphone, adminOnly: true, badge: "New" },
+      { to: "/interviews/bulk", label: "Bulk Call", icon: ListChecks, adminOnly: true, unlockedAt: "operate" },
+      {
+        to: "/broadcasts",
+        label: "Broadcast",
+        icon: Megaphone,
+        adminOnly: true,
+        badge: "New",
+        unlockedAt: "operate",
+      },
     ],
   },
   {
+    // Never gated: account and support have to be reachable at every stage,
+    // including — especially — by someone stuck on the first one.
     title: "Account & Billing",
     items: [
       { to: "/home", label: "Overview", icon: ListChecks, exact: true },
-      { to: "/hiring-agent", label: "Hiring Agent", icon: Radio, adminOnly: true },
+      { to: "/hiring-agent", label: "Hiring Agent", icon: Radio, adminOnly: true, unlockedAt: "operate" },
       { to: "/team", label: "Team", icon: Users2, adminOnly: true },
       { to: "/report-issue", label: "Report Issue", icon: LifeBuoy },
     ],
   },
 ];
 
-/** Everything the ⌘K palette can jump to, flattened out of the groups. */
+/** Is this row in the rail yet? `full` is the permanent escape hatch behind
+ * the rail's "Show all features" — once chosen it is never taken back. */
+function isUnlocked(item: NavItem, stage: Stage, navMode: NavMode): boolean {
+  return navMode === "full" || !item.unlockedAt || atLeast(stage, item.unlockedAt);
+}
+
+/** Everything the ⌘K palette can jump to, flattened out of the groups.
+ *
+ * Deliberately ignores `unlockedAt`: search is how someone who knows what they
+ * want gets there, and a staged rail must never become a locked door. A page
+ * reached this way renders normally — it just tends to be empty, which is its
+ * own honest answer. */
 function searchTargets(isAdmin: boolean): NavItem[] {
   return NAV_GROUPS.flatMap((g) => g.items).filter((i) => !i.adminOnly || isAdmin);
 }
@@ -253,7 +342,12 @@ function readRailMode(): RailMode {
 export default function Layout() {
   return (
     <NotificationsProvider>
-      <AppShell />
+      {/* Mounted here rather than at the root: onboarding state is an
+          authenticated read, and the root tree also renders the public
+          landing page, the embed widget and the candidate interview screen. */}
+      <OnboardingProvider>
+        <AppShell />
+      </OnboardingProvider>
     </NotificationsProvider>
   );
 }
@@ -261,9 +355,14 @@ export default function Layout() {
 function AppShell() {
   const { logout, tenantId, isAdmin, email } = useAuth();
   const { newAppointments } = useNotifications();
+  const { stage, navMode, setNavMode, loaded: stageKnown } = useOnboarding();
   const counters = { newAppointments };
   const navigate = useNavigate();
   const [mode, setMode] = useState<RailMode>(readRailMode);
+  // The collapsed "N more features" list. Local, not persisted: peeking at
+  // what's coming is a glance, not a preference — flipping "Show all features"
+  // is how someone makes it permanent.
+  const [lockedOpen, setLockedOpen] = useState(false);
   // Only meaningful in "auto". Held separately from `mode` so leaving the rail
   // never rewrites the stored preference.
   const [railHovered, setRailHovered] = useState(false);
@@ -291,6 +390,20 @@ function AppShell() {
   }
 
   const collapsed = mode === "closed" || (mode === "auto" && !railHovered);
+
+  // Until the first response lands (and there is no cached one to paint from),
+  // the rail shows everything. Erring toward "too much" for a few hundred
+  // milliseconds is recoverable; erring toward "too little" means an
+  // established user watches their navigation appear out of nowhere, which
+  // reads as the app having lost their workspace.
+  const gate: NavMode = stageKnown ? navMode : "full";
+
+  // What the current stage hasn't reached yet, flattened across every group and
+  // in the groups' own order — so the disclosure reads as "the rest of the
+  // product, in the order you'll meet it" rather than an arbitrary pile.
+  const lockedItems = NAV_GROUPS.flatMap((g) => g.items).filter(
+    (i) => (!i.adminOnly || isAdmin) && !isUnlocked(i, stage, gate),
+  );
 
   function cycleMode() {
     setMode((m) => RAIL_MODES[(RAIL_MODES.indexOf(m) + 1) % RAIL_MODES.length]);
@@ -359,10 +472,20 @@ function AppShell() {
           )}
         </div>
 
+        {/* The one thing to do next. Above the groups on purpose: it is the
+            instruction for how to read them. */}
+        <div className="relative px-3">
+          <NextStepCard collapsed={collapsed} />
+        </div>
+
         {/* Groups */}
         <div className="relative flex-1 px-3 pb-2 overflow-y-auto">
           {NAV_GROUPS.map((group) => {
-            const items = group.items.filter((i) => !i.adminOnly || isAdmin);
+            const visible = group.items.filter((i) => !i.adminOnly || isAdmin);
+            // A group whose every row is still locked disappears entirely —
+            // an empty heading is worse than no heading. Its rows are not
+            // lost; they are in the disclosure below.
+            const items = visible.filter((i) => isUnlocked(i, stage, gate));
             if (items.length === 0) return null;
             return (
               <div key={group.title} className="mb-4">
@@ -446,6 +569,64 @@ function AppShell() {
               </div>
             );
           })}
+
+          {/* Everything not unlocked yet — one row, not twenty.
+              The whole reason this is a disclosure rather than a deletion: a
+              staged rail that simply removed rows would leave people asking
+              where a feature went, and would hide the fact that the product
+              does more than the four things currently on screen. */}
+          {!collapsed && lockedItems.length > 0 && (
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={() => setLockedOpen((o) => !o)}
+                aria-expanded={lockedOpen}
+                className="chrome-item flex w-full items-center gap-3 rounded-full px-3 py-2
+                           text-[13px] font-semibold"
+              >
+                <Lock className="w-[18px] h-[18px] flex-shrink-0 text-gray-500" strokeWidth={1.75} />
+                <span className="truncate">{lockedRowLabel(lockedItems.length)}</span>
+                <ChevronDown
+                  className={`ml-auto w-4 h-4 flex-shrink-0 text-gray-500 transition-transform
+                              ${lockedOpen ? "rotate-180" : ""}`}
+                  strokeWidth={2}
+                />
+              </button>
+
+              {lockedOpen && (
+                <>
+                  <ul className="mt-1 space-y-0.5" role="list">
+                    {lockedItems.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <li key={item.to}>
+                          {/* A real link, not a disabled row. Locked means
+                              "not on your path yet", never "you may not". */}
+                          <NavLink
+                            to={item.to}
+                            end={item.exact}
+                            className="chrome-item flex items-center gap-3 rounded-full px-3 py-2
+                                       text-[13px] font-semibold opacity-45 hover:opacity-100"
+                          >
+                            <Icon className="w-[18px] h-[18px] flex-shrink-0 text-gray-500" strokeWidth={1.75} />
+                            <span className="truncate">{item.label}</span>
+                          </NavLink>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => setNavMode("full")}
+                    className="mt-1.5 w-full rounded-full px-3 py-1.5 text-left text-[11.5px]
+                               font-semibold text-brand-400 transition-colors hover:text-brand-300"
+                  >
+                    Show all features permanently
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -463,6 +644,21 @@ function AppShell() {
             })()}
             {!collapsed && RAIL_LABEL[mode]}
           </button>
+
+          {navMode === "full" && (
+            // Only offered once "Show all features" has been used. The way
+            // back matters as much as the way out: someone who opened the full
+            // menu to find one page shouldn't be stuck with twenty forever.
+            <button
+              onClick={() => setNavMode("guided")}
+              title={collapsed ? "Show only what I've set up" : undefined}
+              className="chrome-item flex w-full items-center gap-3 rounded-full px-3 py-2
+                         text-[13px] font-semibold"
+            >
+              <Eye className="w-[18px] h-[18px] flex-shrink-0" strokeWidth={1.75} />
+              {!collapsed && "Simplify my menu"}
+            </button>
+          )}
 
           {isAdmin && (
             <NavLink to="/settings" title={collapsed ? "Settings" : undefined} className={navClass}>
@@ -532,6 +728,7 @@ function AppShell() {
       </div>
 
       <TourOverlay />
+      <UnlockToast />
     </div>
   );
 }

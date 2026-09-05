@@ -1,7 +1,20 @@
-// The guided product tour. Mounted once in Layout.tsx so it survives route
-// changes while running — each step names the route its target lives on (or
-// none, for a step that spotlights something always-mounted like a sidebar
-// item, or an informational step with no live target at all).
+// The guided tour, cut into per-area walkthroughs.
+//
+// It used to be one seven-step run of the entire product, played once, with a
+// single "done" flag. Two things were wrong with that. It arrived at the worst
+// possible moment — before the person had created anything, so five of its
+// seven steps described pages that were still empty — and once finished or
+// skipped it could never come back, which is why a workspace that later wanted
+// to set up booking got no help with it at all.
+//
+// Now each area owns a short tour, `startTour(area)` runs it, and it is offered
+// from the next-step card at the point the person is actually being asked to do
+// that thing. Skipping does not mark it seen; only finishing does. Replaying is
+// always allowed.
+//
+// Mounted once in Layout.tsx so it survives the route changes it makes itself —
+// each step names the route its target lives on (or none, for a step that
+// spotlights something always-mounted like a sidebar item).
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
@@ -20,65 +33,78 @@ interface TourStep {
   body: string;
 }
 
-const STEPS: TourStep[] = [
-  {
-    key: "nav-assistants",
-    title: "Create and manage your AI employees",
-    body: "Voice AI Assistants is where you build, edit and publish every assistant your workspace runs.",
-  },
-  {
-    key: "assistant-create-box",
-    route: "/assistants",
-    title: "Describe your assistant in plain English",
-    body: '"Create an AI receptionist for my eye clinic that answers patient questions and books appointments." EvaraAI writes the conversation flow for you — or press the mic and just say it.',
-  },
-  {
-    key: "knowledge-upload",
-    route: "/knowledge",
-    title: "Add your knowledge",
-    body: "Upload documents, FAQs, policies and other information your assistant can answer from.",
-  },
-  {
-    key: "appointments-setup",
-    route: "/appointments/services",
-    adminOnly: true,
-    title: "Let it manage your own calendar",
-    body: "No external calendar needed — set your locations, services and hours here and your assistant checks availability and books directly.",
-  },
-  {
-    key: "integrations-grid",
-    route: "/integrations",
-    adminOnly: true,
-    title: "Connect your tools",
-    body: "Link a CRM, WhatsApp, Sheets and other tools so your assistant can act, not just answer.",
-  },
-  {
-    key: null,
-    title: "Test before anyone else does",
-    body: "Once an assistant exists, open it and hit Test to talk to it — by chat or voice — before it's live.",
-  },
-  {
-    key: "channels-grid",
-    route: "/channels",
-    adminOnly: true,
-    title: "Choose where it works",
-    body: "Phone, WhatsApp, or the web widget — pick the channels your assistant should answer on, then publish it from its own page.",
-  },
-];
+/** Keyed by area — the same keys the backend puts on `next_step.tour` and
+ * stores in `tours_completed`. Adding an area here without adding it there
+ * simply means nothing ever offers it. */
+const TOURS: Record<string, TourStep[]> = {
+  assistants: [
+    {
+      key: "nav-assistants",
+      title: "This is where your assistant lives",
+      body: "Build, edit and publish every assistant your workspace runs from here.",
+    },
+    {
+      key: "assistant-create-box",
+      route: "/assistants",
+      title: "Describe it in plain English",
+      body: '"Create an AI receptionist for my eye clinic that answers patient questions and books appointments." Evara AI writes the conversation flow for you — or press the mic and just say it.',
+    },
+    {
+      key: null,
+      title: "Then talk to it",
+      body: "Once it exists, open it and hit Test to try it by chat or by voice — before anyone else does.",
+    },
+  ],
+  knowledge: [
+    {
+      key: "knowledge-upload",
+      route: "/knowledge",
+      title: "Give it something to answer from",
+      body: "Upload documents, FAQs, price lists, policies. Your assistant answers from these instead of guessing.",
+    },
+  ],
+  channels: [
+    {
+      key: "channels-grid",
+      route: "/channels",
+      adminOnly: true,
+      title: "Choose where it works",
+      body: "Phone, WhatsApp, or the web widget — pick the channels it should answer on, then publish it from its own page. Publishing is what takes it live.",
+    },
+  ],
+  appointments: [
+    {
+      key: "appointments-setup",
+      route: "/appointments/services",
+      adminOnly: true,
+      title: "It can manage your calendar",
+      body: "No external calendar needed. Set your locations, services and opening hours here, and your assistant checks availability and books directly.",
+    },
+  ],
+  integrations: [
+    {
+      key: "integrations-grid",
+      route: "/integrations",
+      adminOnly: true,
+      title: "Connect your tools",
+      body: "Link a CRM, WhatsApp, Sheets and more, so your assistant can act on a conversation rather than just have one.",
+    },
+  ],
+};
 
 const CARD_WIDTH = 320;
 const PAD = 10;
 const MAX_WAIT_FRAMES = 60;
 
 export default function TourOverlay() {
-  const { tourStatus, tourStepIndex, advanceTour, endTour } = useOnboarding();
+  const { tourStatus, tourArea, tourStepIndex, advanceTour, endTour } = useOnboarding();
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [ready, setReady] = useState(false);
 
-  const steps = STEPS.filter((s) => !s.adminOnly || isAdmin);
+  const steps = (tourArea ? TOURS[tourArea] ?? [] : []).filter((s) => !s.adminOnly || isAdmin);
   const step = steps[tourStepIndex];
   const running = tourStatus === "running" && !!step;
 
@@ -139,8 +165,10 @@ export default function TourOverlay() {
 
   function next() {
     if (isLast) {
+      // Deliberately stays put. The old tour ended by navigating to the
+      // dashboard, which threw away the page it had just walked someone to and
+      // left them to find it again.
       endTour("done");
-      navigate("/dashboard");
     } else {
       advanceTour();
     }
@@ -213,7 +241,7 @@ export default function TourOverlay() {
             Skip tour
           </button>
           <button type="button" onClick={next} className="btn-primary btn-sm">
-            {isLast ? "Finish setup" : "Next"}
+            {isLast ? "Got it" : "Next"}
           </button>
         </div>
       </div>

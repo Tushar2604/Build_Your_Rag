@@ -31,6 +31,7 @@ from src.infrastructure.persistence.repositories import (
     InterviewRepositoryImpl,
     IssueReportRepositoryImpl,
     OAuthConnectionRepositoryImpl,
+    OnboardingRepositoryImpl,
     PostCallConfigRepositoryImpl,
     PostCallDeliveryRepositoryImpl,
     RequestLogRepositoryImpl,
@@ -109,6 +110,7 @@ class SqlAlchemyUnitOfWork:
         self.broadcast_recipients = BroadcastRecipientRepositoryImpl(s)
         self.tenant_integrations = TenantIntegrationRepositoryImpl(s)
         self.issue_reports = IssueReportRepositoryImpl(s)
+        self.onboarding = OnboardingRepositoryImpl(s)
         self.voice_profiles = VoiceProfileRepositoryImpl(s)
         self.whatsapp_web_sessions = WhatsAppWebSessionRepositoryImpl(s)
         # Scheduling. `reservations` is the one that carries the

@@ -1,7 +1,8 @@
-// First-run welcome panel. Shown at the top of DashboardPage in place of the
-// hero when a tenant has zero assistants and hasn't dismissed it yet — see
-// the gating logic in DashboardPage.tsx (real zero-assistants state, not just
-// the localStorage flag, so an established tenant never sees this again).
+// First-run welcome panel, shown in place of the hero at the very first stage.
+//
+// Its gate is now `stage === "build"` — a fact about the tenant's data rather
+// than a localStorage flag, which is what used to make this reappear for
+// someone who had been live for months and simply opened a different browser.
 import { Link } from "react-router-dom";
 import { Compass, PlayCircle, Sparkles } from "lucide-react";
 import { useOnboarding } from "../../store/onboarding";
@@ -13,7 +14,7 @@ export default function WelcomeScreen({
   doneCount: number;
   totalCount: number;
 }) {
-  const { markWelcomeSeen, startTour } = useOnboarding();
+  const { dismiss, startTour } = useOnboarding();
 
   return (
     <div className="card relative overflow-hidden p-8 sm:p-10 text-center">
@@ -32,7 +33,7 @@ export default function WelcomeScreen({
       <div className="mt-8 grid gap-3 sm:grid-cols-3 max-w-2xl mx-auto text-left">
         <Link
           to="/assistants"
-          onClick={markWelcomeSeen}
+          onClick={() => dismiss("welcome")}
           className="card card-hover flex flex-col gap-2 p-4"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-xl
@@ -46,8 +47,10 @@ export default function WelcomeScreen({
         <button
           type="button"
           onClick={() => {
-            markWelcomeSeen();
-            startTour();
+            dismiss("welcome");
+            // Only the first area — the old version ran a seven-step tour of
+            // the whole product at someone who had not created anything yet.
+            startTour("assistants");
           }}
           className="card card-hover flex flex-col gap-2 p-4 text-left"
         >
@@ -55,13 +58,13 @@ export default function WelcomeScreen({
                            border border-brand-400/25 bg-brand-500/15 text-brand-600">
             <PlayCircle className="h-[18px] w-[18px]" strokeWidth={1.75} />
           </span>
-          <span className="text-[13.5px] font-semibold text-gray-900">Watch how Evara AI works</span>
-          <span className="text-xs text-gray-500">2 min product tour</span>
+          <span className="text-[13.5px] font-semibold text-gray-900">See how it works</span>
+          <span className="text-xs text-gray-500">60-second walkthrough</span>
         </button>
 
         <button
           type="button"
-          onClick={markWelcomeSeen}
+          onClick={() => dismiss("welcome")}
           className="card card-hover flex flex-col gap-2 p-4 text-left"
         >
           <span className="flex h-9 w-9 items-center justify-center rounded-xl

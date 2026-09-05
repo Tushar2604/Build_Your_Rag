@@ -1031,3 +1031,28 @@ class ResourceReservationModel(Base):
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class OnboardingPrefsModel(Base):
+    """What one person has already been shown (migration 0033).
+
+    Preferences only. Setup milestones are derived from the tables that own
+    them on every read, never mirrored here — see `OnboardingReadModel`.
+    """
+
+    __tablename__ = "onboarding_prefs"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    # "guided" | "full" — only ever changed by the person clicking "Show all
+    # features", never by the app reacting to progress.
+    nav_mode: Mapped[str] = mapped_column(String(16), default="guided")
+    tours_completed: Mapped[list] = mapped_column(JSONB, default=list)
+    dismissed: Mapped[list] = mapped_column(JSONB, default=list)
+    celebrated_stages: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

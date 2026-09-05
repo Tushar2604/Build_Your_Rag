@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../store/auth";
+import { useOnboarding } from "../store/onboarding";
 import { listChatbots, Chatbot } from "../api/chatbots";
 import { getChatbotRequests, RequestLog } from "../api/analytics";
 import { getGoogleStatus, connectGoogle, disconnectGoogle, GoogleStatus } from "../api/integrations";
@@ -18,6 +19,8 @@ const TABS: { id: Tab; label: string }[] = [
 /* ── General tab ── */
 function GeneralTab() {
   const { tenantId } = useAuth();
+  const { navMode, setNavMode, stage, resetGuidance } = useOnboarding();
+  const [guidanceReset, setGuidanceReset] = useState(false);
 
   return (
     <div className="space-y-6 max-w-xl">
@@ -50,6 +53,64 @@ function GeneralTab() {
             <span className="font-medium font-mono text-xs">v1</span>
           </div>
         </div>
+      </div>
+
+      {/* The two ways out of the staged shell, in one place. Both are the
+          user's call and neither is reachable from progress — nothing the app
+          does on its own ever changes these. */}
+      <div className="card p-5 space-y-4">
+        <h3 className="section-title">Guidance</h3>
+
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Show every feature in the sidebar</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {navMode === "full"
+                ? "Your sidebar shows everything, including features you haven't set up yet."
+                : "Your sidebar reveals features as you set them up. Turn this on to see all of them now."}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={navMode === "full"}
+            onClick={() => setNavMode(navMode === "full" ? "guided" : "full")}
+            className={`relative h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
+              navMode === "full" ? "bg-brand-500" : "bg-gray-200"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                navMode === "full" ? "translate-x-[22px]" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="flex items-start justify-between gap-4 border-t border-gray-50 pt-4">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Restart the walkthrough</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Brings back the setup checklist and every tour you've dismissed. Leaves the
+              sidebar setting above alone.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              await resetGuidance();
+              setGuidanceReset(true);
+            }}
+            className="btn-secondary btn-sm flex-shrink-0"
+          >
+            {guidanceReset ? "Restarted" : "Restart"}
+          </button>
+        </div>
+
+        <p className="text-xs text-gray-400 border-t border-gray-50 pt-3">
+          Setup stage: <span className="font-medium text-gray-500">{stage}</span> — computed
+          from your workspace, not stored in this browser.
+        </p>
       </div>
 
       <div className="card p-5">

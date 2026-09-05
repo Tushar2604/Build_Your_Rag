@@ -1720,3 +1720,56 @@ class AppointmentSummaryResponse(BaseModel):
     window_end: datetime
     total: int
     by_status: dict[str, int]
+
+
+# --- Onboarding / staged navigation -----------------------------------------
+
+
+class MilestonesSchema(BaseModel):
+    assistant_configured: bool
+    knowledge_ready: bool
+    assistant_tested: bool
+    channel_connected: bool
+    assistant_live: bool
+    appointments_ready: bool
+    integrations_connected: bool
+
+
+class NextStepSchema(BaseModel):
+    key: str
+    title: str
+    body: str
+    href: str
+    cta: str
+    tour: str | None = None
+
+
+class OnboardingStateResponse(BaseModel):
+    """Everything the shell needs to decide what to reveal, in one request.
+
+    Replaces six list calls the dashboard used to make purely to count rows.
+    `stage` is derived from `milestones` server-side so the frontend can never
+    hold a different opinion about it than the backend does.
+    """
+
+    stage: str
+    milestones: MilestonesSchema
+    next_step: NextStepSchema | None = None
+    nav_mode: str = "guided"
+    tours_completed: list[str] = Field(default_factory=list)
+    dismissed: list[str] = Field(default_factory=list)
+    celebrated_stages: list[str] = Field(default_factory=list)
+
+
+class OnboardingPrefsUpdate(BaseModel):
+    """A partial update. Every field is optional and every list field appends
+    rather than replaces — two tabs open on the same account must not be able
+    to undo each other's dismissals by racing."""
+
+    nav_mode: Literal["guided", "full"] | None = None
+    complete_tour: str | None = None
+    dismiss: str | None = None
+    celebrate_stage: str | None = None
+    # The one destructive option, and the only way back from "I dismissed
+    # everything": clears dismissals and tour history so the guidance returns.
+    reset: bool = False

@@ -21,6 +21,7 @@ from src.domain.document.entities import Chunk, Document
 from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
+from src.domain.onboarding.entities import Milestones, OnboardingPrefs
 from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
 from src.domain.scheduling.availability import Interval
 from src.domain.scheduling.entities import (
@@ -1068,6 +1069,23 @@ class ReservationRepository(Protocol):
     async def sweep_expired(self, now: datetime, limit: int = 500) -> int: ...
 
 
+class OnboardingRepository(Protocol):
+    """Reads the staged shell's two halves.
+
+    `milestones` is a read model over other aggregates' tables — the one place
+    allowed to ask "does this tenant have any X at all" across six of them,
+    because the alternative is six list calls in the browser. `appointments_ready`
+    it leaves to the caller: booking readiness is a computation over hours and
+    eligibility, not a row check.
+    """
+
+    async def milestones(self, tenant_id: TenantId) -> Milestones: ...
+    async def get_prefs(
+        self, tenant_id: TenantId, user_id: UserId
+    ) -> OnboardingPrefs | None: ...
+    async def save_prefs(self, prefs: OnboardingPrefs) -> None: ...
+
+
 @runtime_checkable
 class UnitOfWork(Protocol):
     """Transaction boundary. A use case opens one UoW, does its work through the
@@ -1099,6 +1117,7 @@ class UnitOfWork(Protocol):
     broadcast_recipients: BroadcastRecipientRepository
     tenant_integrations: TenantIntegrationRepository
     issue_reports: IssueReportRepository
+    onboarding: OnboardingRepository
     voice_profiles: VoiceProfileRepository
     whatsapp_web_sessions: WhatsAppWebSessionRepository
     # Scheduling (migration 0025).

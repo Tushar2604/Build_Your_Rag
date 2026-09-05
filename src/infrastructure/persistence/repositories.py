@@ -33,6 +33,7 @@ from src.domain.document.entities import Chunk, Document, IngestionStatus
 from src.domain.integration.entities import TenantIntegration
 from src.domain.interview.batch_entities import BatchCandidate, InterviewBatch
 from src.domain.interview.entities import Interview
+from src.domain.onboarding.entities import Milestones, OnboardingPrefs
 from src.domain.postcall.entities import PostCallConfig, PostCallDelivery
 from src.domain.shared.identifiers import (
     BatchCandidateId,
@@ -2854,3 +2855,144 @@ class WhatsAppWebSessionRepositoryImpl:
                 m.WhatsAppWebSessionModel.tenant_id == tenant_id,
             )
         )
+
+
+class OnboardingRepositoryImpl:
+    """Milestones (derived) and preferences (stored) for the staged shell.
+
+    The milestone half is a read model: seven EXISTS probes across tables owned
+    by other aggregates, answered in one round trip rather than by loading six
+    collections into the browser and counting them there — which is what the
+    dashboard used to do, on every single visit.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._s = session
+
+    async def milestones(self, tenant_id: TenantId) -> Milestones:
+        # `EXISTS (...)` per question, all in one statement. Every one of these
+        # is answerable from an index, and none of them needs a count — "is
+        # there at least one" is the entire question.
+        def exists(stmt) -> object:
+            return select(stmt.exists()).scalar_subquery()
+
+        bots = m.ChatbotModel
+        # "Configured" deliberately excludes the pristine Default Assistant
+        # that `provisioning.py` creates at signup: renamed, given a voice, or
+        # published all count, and so does simply having a second one.
+        configured = exists(
+            select(bots.id).where(
+                bots.tenant_id == tenant_id,
+                or_(
+                    bots.name != "Default Assistant",
+                    bots.is_public.is_(True),
+                    bots.voice_profile_id.isnot(None),
+                ),
+            )
+        )
+        second_bot = select(func.count(bots.id)).where(bots.tenant_id == tenant_id)
+
+        knowledge = exists(
+            select(m.DocumentModel.id).where(
+                m.DocumentModel.tenant_id == tenant_id,
+                m.DocumentModel.status == "ready",
+            )
+        )
+        # Test mode opens a real chat session (see TestModePanel), so a session
+        # existing at all is the signal — no separate client-side flag needed,
+        # which is what made "tested" reset on every new browser before.
+        tested = exists(
+            select(m.ChatSessionModel.id).where(m.ChatSessionModel.tenant_id == tenant_id)
+        )
+        whatsapp = exists(
+            select(m.WhatsAppChannelModel.id).where(
+                m.WhatsAppChannelModel.tenant_id == tenant_id
+            )
+        )
+        live = exists(
+            select(bots.id).where(bots.tenant_id == tenant_id, bots.is_public.is_(True))
+        )
+        integrations = exists(
+            select(m.TenantIntegrationModel.id).where(
+                m.TenantIntegrationModel.tenant_id == tenant_id,
+                m.TenantIntegrationModel.enabled.is_(True),
+            )
+        )
+
+        row = (
+            await self._s.execute(
+                select(
+                    configured.label("configured"),
+                    second_bot.label("bot_count"),
+                    knowledge.label("knowledge"),
+                    tested.label("tested"),
+                    whatsapp.label("whatsapp"),
+                    live.label("live"),
+                    integrations.label("integrations"),
+                )
+            )
+        ).one()
+
+        return Milestones(
+            assistant_configured=bool(row.configured) or (row.bot_count or 0) > 1,
+            knowledge_ready=bool(row.knowledge),
+            assistant_tested=bool(row.tested),
+            channel_connected=bool(row.whatsapp),
+            assistant_live=bool(row.live),
+            # Filled in by the caller: booking readiness is a domain
+            # computation over hours and eligibility, not a row check, and it
+            # already has an owner in the scheduling repositories.
+            appointments_ready=False,
+            integrations_connected=bool(row.integrations),
+        )
+
+    async def get_prefs(self, tenant_id: TenantId, user_id: UserId) -> OnboardingPrefs | None:
+        row = (
+            await self._s.execute(
+                select(m.OnboardingPrefsModel).where(
+                    m.OnboardingPrefsModel.user_id == user_id,
+                    m.OnboardingPrefsModel.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return OnboardingPrefs(
+            user_id=UserId(row.user_id),
+            tenant_id=TenantId(row.tenant_id),
+            nav_mode=row.nav_mode,  # type: ignore[arg-type]
+            tours_completed=list(row.tours_completed or []),
+            dismissed=list(row.dismissed or []),
+            celebrated_stages=list(row.celebrated_stages or []),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    async def save_prefs(self, prefs: OnboardingPrefs) -> None:
+        """Upsert. The first write for a user is also the row's creation —
+        there is no separate "start onboarding" moment to hang an INSERT on."""
+        now = datetime.now(UTC)
+        stmt = (
+            pg_insert(m.OnboardingPrefsModel)
+            .values(
+                user_id=prefs.user_id,
+                tenant_id=prefs.tenant_id,
+                nav_mode=prefs.nav_mode,
+                tours_completed=list(prefs.tours_completed),
+                dismissed=list(prefs.dismissed),
+                celebrated_stages=list(prefs.celebrated_stages),
+                created_at=now,
+                updated_at=now,
+            )
+            .on_conflict_do_update(
+                index_elements=[m.OnboardingPrefsModel.user_id],
+                set_={
+                    "nav_mode": prefs.nav_mode,
+                    "tours_completed": list(prefs.tours_completed),
+                    "dismissed": list(prefs.dismissed),
+                    "celebrated_stages": list(prefs.celebrated_stages),
+                    "updated_at": now,
+                },
+            )
+        )
+        await self._s.execute(stmt)

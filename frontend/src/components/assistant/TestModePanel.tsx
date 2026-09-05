@@ -186,14 +186,14 @@ function ChatTest({ bot }: { bot: Chatbot }) {
 /** Chat docks, a call pops. One entry point so callers keep passing a mode
  * rather than having to know which shape each test takes. */
 export default function TestModePanel({ bot, mode, onClose }: Props) {
-  const { markAssistantTested } = useOnboarding();
-  // Fires once whenever a user opens Test — chat or voice — for any
-  // assistant. There's no backend signal for "was this actually tested", so
-  // the setup checklist's "Test your assistant" step is satisfied client-side
-  // the first time this panel opens. Empty deps deliberately: this must fire
-  // once on mount, not whenever the (freshly-identitied) callback changes.
+  const { refresh } = useOnboarding();
+  // "Tested" is no longer a client-side flag — opening this panel creates a
+  // real chat session, and that session existing IS the signal the onboarding
+  // read model looks for. (The old flag lived in localStorage, so testing on
+  // one machine left the step unticked on every other.) All that's needed here
+  // is to re-ask once the panel closes, by which point the session is written.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { markAssistantTested(); }, []);
+  useEffect(() => () => { void refresh(); }, []);
 
   if (mode === "web-call") {
     return (

@@ -50,6 +50,7 @@ from src.interfaces.api.routers import (
     interviews,
     locations,
     oauth,
+    onboarding,
     post_call,
     public,
     resources,
@@ -400,6 +401,7 @@ def create_app() -> FastAPI:
     app.include_router(integrations_catalogue.router, prefix=api_prefix)
     app.include_router(oauth.router, prefix=api_prefix)
     app.include_router(support.router, prefix=api_prefix)
+    app.include_router(onboarding.router, prefix=api_prefix)
     app.include_router(voices.router, prefix=api_prefix)
     app.include_router(whatsapp_web.router, prefix=api_prefix)
     # Meta WhatsApp Cloud API. Registered after `whatsapp` so the more
